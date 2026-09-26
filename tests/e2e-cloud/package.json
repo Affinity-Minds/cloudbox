@@ -1,0 +1,16 @@
+{
+  "name": "@cloudbox/e2e-cloud",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2"
+  }
+}
