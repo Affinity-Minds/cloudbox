@@ -25,3 +25,14 @@ Foundation: done. Fan-out worktrees (WT-1 … WT-7) branch from this commit.
 
 # Blockers
 None for the fan-out.
+
+# Completed phases
+
+## Phase 0 — Repository, engineering contract, deployable skeleton — DONE 2026-09-27 00:25 IST
+- Merged to `main` via PR #1 (fix commit `584aa9e`) and deploy hotfix PR #3 (`89fc59c`); production SHA `8f16cde9a904bc8c21328d0e6fbef1fc7e351f2e`.
+- Deploy run: GitHub Actions "Deploy CloudBox" succeeded; D1 `cloudbox-db` recreated in APAC while empty; R2 binding deferred with a workflow warning until R2 is enabled on the account.
+- Live verification (curl, 00:24 IST): `GET /api/health` 200 `{"status":"ok"}`; `GET /api/version` gitSha equals `main`; `GET /api/v1` carries `X-API-Version: v1`; `GET /api/v1/foundation` returns `release.status=deployed`, `release.sha` = main SHA, and the audited `foundation.release.changed` row by `github-actions` with before/after; `GET /` serves the SPA shell (200, text/html).
+- Rendered evidence: `docs/evidence/phase-0/live-shell.png` (Playwright Chromium against https://box.affinityminds.in, shows Release deployed, Build and Audited SHA `8f16cde9a904`, 2 audit records).
+- Exit criteria per spec: staging/production deployable ✓, versioned ✓, testable (`pnpm run verify`, 5 tests at the time) ✓, every later slice has a home ✓, audited administrative state change proven live ✓.
+- Deferred: R2 bucket (account-level enablement), Windows physical checks (none required by Phase 0).
+
