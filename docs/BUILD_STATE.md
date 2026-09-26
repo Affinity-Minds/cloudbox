@@ -1,32 +1,36 @@
 # Current phase
-Phase 1 — Identity, tenancy and devices (integration branch `phase-1/identity`)
+Phase 2 — Physical device enrollment and Windows acceptance (integration branch `phase-2/devices`); Phase 3 cloud side is already live.
 
 # Current slice
-Foundation commit (WT-0) — shared files for the Phase 1–3 fan-out. Contract: `docs/handoffs/foundation.md`.
+2.3 physical acceptance: the owner runs the `CloudBox.Agent-win-x64` artifact on the lab PC against production (enroll → Online → entitlement → uninstall → verify-clean).
 
 # Status
-All Phase 1 slices integrated on `phase-1/identity` (13186f4): 469 worker tests, 16 crypto tests, 5 UI tests green; WT-8 fifth pass verdict: merge approved (no Critical/High; Lows W-1, W-2 as follow-ups); merge to `main` next, then live verification and the owner's first sign-in at `/ops/login`.
+in_progress — cloud side complete and live; waiting on the lab run. Follow-ups queued on this branch: W-1/W-2 (review Lows), move `email_providers` and the two-factor tables into `db/schema.ts` verbatim, Staff management screen, real SMTP relay send verification, pin actions by SHA.
 
 # Demo path
-1. Fresh clone, checkout `phase-1/identity`.
-2. `corepack pnpm install && pnpm run verify` (Biome check, typecheck, Workers-pool tests with real D1, admin-web build, wrangler dry-run).
-3. Local console: `pnpm --filter @cloudbox/worker-api db:migrate:local`, `pnpm --filter @cloudbox/admin-web build`, `pnpm --filter @cloudbox/worker-api dev`, open http://localhost:8787/ (overview) and /audit.
+1. Staff: https://box.affinityminds.in/ops/login → email + initial password → forced password change → authenticator QR → console.
+2. Tenants → New tenant → Enrollment → New enrollment code (shown once).
+3. Lab PC (elevated PowerShell, artifact extracted): `CloudBox.Agent.exe install --base-url https://box.affinityminds.in --enroll-token <code>` → Fleet shows the device Online.
+4. Subscriptions → New subscription (cloudbox-6) → device → Issue → Agent `status` shows generation 1.
+5. `CloudBox.Agent.exe uninstall` → `verify-clean` exits 0 → Fleet shows revoked, Audit shows DEVICE_UNINSTALLED.
 
 # Evidence
-- `pnpm run verify` green on the foundation commit (see the commit series on `phase-1/identity`).
-- Migration `0003_identity_tenancy_devices.sql` applies on top of a populated 0001/0002 database (test `migrations.test.ts`); audit_log stays append-only; role grants seeded as rows (super_admin 21, admin 18, support 8, read_only 7).
-- Overview loader: one D1 round trip (`countingD1` ceiling test ≤3). Audit screen: one round trip per page, keyset on rowid.
-- Rendered UI: `docs/evidence/foundation/overview.png`, `docs/evidence/foundation/audit.png` (wrangler dev + local D1, Playwright Chromium).
-
-# Open items
-- Screens `/api/v1/screens/overview` and `/api/v1/screens/audit` are not yet behind a session: WT-1 gates them with `requireStaff()` / `requirePermission("audit.view")` before Phase 1 merges to `main`.
-- `ENTITLEMENT_SIGNING_JWK` secret provisioning waits for WT-5's generator.
-- Deploy workflow now stamps `ENVIRONMENT=production` and `BOOTSTRAP_SUPER_ADMIN_EMAIL` (repo variable) and creates `BETTER_AUTH_SECRET` once; first exercised on the Phase 1 merge to `main`.
+- See "Completed phases" for Phase 0 and Phase 1 live evidence. Lab evidence is recorded here when the owner reports it.
 
 # Blockers
-None for the fan-out.
+None on the cloud side.
 
 # Completed phases
+## Phase 1 — Identity, tenancy, devices, entitlements — DONE 2026-09-27 03:15 IST
+- Merged to `main` via PR #12 at `6c522a3cf7613d2569b2d4142ea56fd2ad405cfb` after WT-8's fifth-pass verdict (no Critical/High). Integration branch `phase-1/identity` (final `91ef989`).
+- Verification at merge: `pnpm run verify` green — 469 worker tests (real D1 in the Workers pool, incl. 54+8+4+5 adversarial review tests), 16 entitlement-format tests, 5 UI tests; CI web + Windows + build jobs green on the PR.
+- Deploy: "Deploy CloudBox" run 36273684998 deployed the Worker, applied migrations 0003–0008, synced secrets (STAFF_AUTH_SECRET, CUSTOMER_AUTH_SECRET, BOOTSTRAP_SUPER_ADMIN_PASSWORD, ENTITLEMENT_SIGNING_JWK, PROVIDER_SECRETS_KEY, TURNSTILE_SECRET_KEY) and proved the audited release row; the run then failed on a wrong `wrangler secret delete --force` flag in the retire step (fixed in PR #18), so the workflow's own verify step did not run and was performed by hand below.
+- Live verification (curl, 03:12 IST): `/api/health` ok; `/api/version` gitSha == `main`; `/api/v1/foundation` release.sha == main with the audited row; `/login` 200 (customer, no robots header); `/ops/login` and `/ops` 200 with `X-Robots-Tag: noindex, nofollow`; `/ops/zzz` and a random path return byte-identical documents; `/api/ops/auth/get-session` and `/api/auth/get-session` answer, while `/api/auth/sign-in/email` and `/api/ops/auth/email-otp/*` are 404 (disjoint mounts); `/api/v1/screens/overview` and `/api/v1/me/tenants` are 401 anonymously; a wrong staff password returns 401 with the same body as an unknown email.
+- Rendered evidence: `docs/evidence/phase-1/live-ops-login.png`, `docs/evidence/phase-1/live-customer-login.png` (production), plus per-slice screenshots under `docs/evidence/wt-*`.
+- Exit criteria per spec (humans authenticate and operate inside an enforced tenant boundary): staff sign-in with password + authenticator ✓, customer email OTP ✓, roles/permissions as rows ✓, tenant CRUD ✓, memberships with standing ✓, cross-tenant negative tests ✓ (review U-3), audit on every consequential write ✓.
+- Also live from this merge (Phase 2/3 cloud halves, individually gated): enrollment tokens, agent API, device registry, fleet screens (WT-3); plans, subscriptions, entitlement issuance with a provisioned signing key (WT-5); email provider registry (WT-12); Windows Agent artifact built by CI (WT-4).
+- Security review: `docs/reviews/phase-1-security.md`, five passes; open Lows W-1, W-2 queued as follow-ups.
+
 
 ## Phase 0 — Repository, engineering contract, deployable skeleton — DONE 2026-09-27 00:25 IST
 - Merged to `main` via PR #1 (fix commit `584aa9e`) and deploy hotfix PR #3 (`89fc59c`); production SHA `8f16cde9a904bc8c21328d0e6fbef1fc7e351f2e`.
