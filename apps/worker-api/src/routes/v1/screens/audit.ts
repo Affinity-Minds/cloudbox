@@ -4,6 +4,7 @@ import { type AuditEntry, type AuditScreen, PageQuery } from "@cloudbox/contract
 import { zValidator } from "@hono/zod-validator";
 import { desc, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { requirePermission } from "../../../authz/permissions";
 import { createDb, type Db } from "../../../db/client";
 import { auditLog } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
@@ -57,11 +58,11 @@ export async function loadAuditPage(db: Db, page: PageQuery): Promise<AuditScree
   };
 }
 
-// WT-1: gate with requirePermission("audit.view") once sessions exist.
 const audit = new Hono<AppEnv>();
 
 audit.get(
   "/",
+  requirePermission("audit.view"),
   zValidator("query", PageQuery, (result, c) => {
     if (!result.success) return c.json({ error: "invalid_request" }, 400);
   }),
