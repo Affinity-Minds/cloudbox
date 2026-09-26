@@ -10,7 +10,7 @@
 // `tenant_memberships` instead of the fixed per-tenant gate.
 import { desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { getPrincipal } from "../../../auth/middleware";
+import { getPrincipal, setupPending } from "../../../auth/middleware";
 import { createDb, type Db } from "../../../db/client";
 import { auditLog, devices, entitlements, tenantMemberships, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
@@ -227,9 +227,23 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
 
 const fleet = new Hono<AppEnv>();
 
-fleet.get("/", async (c) => {
+/** Not a `guard()`-based route (see the file's own doc comment for why), so it repeats guard()'s
+ * session + first-sign-in-setup checks by hand (review S-6: every /api/v1 route mid-setup 403s). */
+async function principalOrRefuse(c: Parameters<typeof getPrincipal>[0]) {
   const principal = await getPrincipal(c);
-  if (!principal) return c.json({ error: "unauthenticated" }, 401);
+  if (!principal) return { refusal: c.json({ error: "unauthenticated" }, 401) } as const;
+  if (setupPending(principal)) {
+    return {
+      refusal: c.json({ error: "setup_required", detail: principal.setup }, 403),
+    } as const;
+  }
+  return { principal } as const;
+}
+
+fleet.get("/", async (c) => {
+  const resolved = await principalOrRefuse(c);
+  if ("refusal" in resolved) return resolved.refusal;
+  const { principal } = resolved;
   c.set("user", principal.user);
 
   const db = createDb(c.env.DB);
@@ -252,8 +266,9 @@ fleet.get("/", async (c) => {
 });
 
 fleet.get("/:deviceId", async (c) => {
-  const principal = await getPrincipal(c);
-  if (!principal) return c.json({ error: "unauthenticated" }, 401);
+  const resolved = await principalOrRefuse(c);
+  if ("refusal" in resolved) return resolved.refusal;
+  const { principal } = resolved;
   c.set("user", principal.user);
 
   const db = createDb(c.env.DB);

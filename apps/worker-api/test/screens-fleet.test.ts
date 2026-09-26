@@ -59,6 +59,17 @@ describe("GET /api/v1/screens/fleet", () => {
     expect(denied.status).toBe(403);
   });
 
+  it("403s setup_required for staff mid first-sign-in setup (this route resolves the principal by hand, not via guard())", async () => {
+    const pending = await signInAs(env, {
+      email: "fleet-setup-pending@example.test",
+      staffRole: "super_admin",
+      setupComplete: false,
+    });
+    const response = await app.request("/api/v1/screens/fleet", { headers: pending.headers }, env);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "setup_required" });
+  });
+
   it("shows a device Offline until it heartbeats, then Online, with an honest empty state for a fresh tenant", async () => {
     const { tenantId } = await insertTenant(env, { displayName: "Fresh Co" });
     const empty = await app.request(
