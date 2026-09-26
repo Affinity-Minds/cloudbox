@@ -6,7 +6,7 @@ import { Email } from "@cloudbox/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { Building2, KeyRound, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { customerSessionQuery, describeAuthError } from "@/api/auth";
 import { describeError } from "@/api/client";
 import {
@@ -20,10 +20,11 @@ import {
 import { AuthFrame, CodeBoxes } from "@/auth/auth-ui";
 import { ErrorLine, Honeypot } from "@/auth/form-bits";
 import { TurnstileChallenge } from "@/auth/turnstile";
-import { NativeSelect } from "@/components/subscription-bits";
+import { TimezoneSelect } from "@/components/timezone-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { browserTimezone } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
 
 /** One Turnstile token per request; the widget re-issues after each use. */
@@ -224,24 +225,13 @@ function CodeStep({
   );
 }
 
-function timeZones(): string[] {
-  try {
-    return Intl.supportedValuesOf("timeZone");
-  } catch {
-    return ["UTC"];
-  }
-}
-
 function OrganisationStep({ email }: { email: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const zones = useMemo(timeZones, []);
   const [mode, setMode] = useState<"create" | "key">("create");
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
-  const [timezone, setTimezone] = useState(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  );
+  const [timezone, setTimezone] = useState(() => browserTimezone());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -325,13 +315,7 @@ function OrganisationStep({ email }: { email: string }) {
       </Field>
       <Field>
         <FieldLabel htmlFor="org-tz">Time zone</FieldLabel>
-        <NativeSelect id="org-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-          {zones.map((zone) => (
-            <option key={zone} value={zone}>
-              {zone}
-            </option>
-          ))}
-        </NativeSelect>
+        <TimezoneSelect id="org-tz" value={timezone} onChange={setTimezone} />
         <FieldDescription>Used for maintenance windows and reports.</FieldDescription>
       </Field>
       {error ? <ErrorLine>{error}</ErrorLine> : null}

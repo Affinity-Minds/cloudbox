@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { describeError } from "@/api/client";
 import { createSubscription, subscriptionsQuery } from "@/api/subscriptions";
 import { EmptyState, ErrorState, PageHeader } from "@/components/page";
+import { PlanSelect } from "@/components/plan-select";
 import {
   ExpiryPill,
   fromDateInput,
@@ -333,17 +334,7 @@ function NewSubscriptionDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor="sub-plan">Plan</FieldLabel>
-              <NativeSelect
-                id="sub-plan"
-                value={planCode}
-                onChange={(event) => setPlanCode(event.target.value)}
-              >
-                {screen.plans.map((p) => (
-                  <option key={p.code} value={p.code}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </NativeSelect>
+              <PlanSelect id="sub-plan" value={planCode} onChange={setPlanCode} />
               {plan ? (
                 <FieldDescription>
                   {plan.maxDevices} device · {plan.maxManagedUsers} users · grace{" "}

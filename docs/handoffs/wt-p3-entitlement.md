@@ -61,9 +61,15 @@ e6b7964 feat(subscriptions): plans, subscriptions CRUD, entitlement issue/renew/
 
 | Method | Path | Permission | Request | Response | Audit |
 |---|---|---|---|---|---|
-| GET | `/plans` | subscription.view | — | `{items: Plan[]}` | — |
+| GET | `/plans` | subscription.view | — | `{items: Plan[]}` (active only) | — |
+| GET | `/plans?include=retired` | subscription.manage | — | `{items: Plan[]}` (every plan) | — |
+| POST | `/plans` | subscription.manage | `CreatePlanRequest` | 201 `{plan}`; 409 duplicate code | `PLAN_CREATED` |
+| PATCH | `/plans/:code` | subscription.manage | `UpdatePlanRequest` (≥1 field; no `code`) | `{plan}`; 404 | `PLAN_UPDATED` |
+| POST | `/plans/:code/retire` | subscription.manage | — | `{plan, subscriptionCount}`; 404; 409 `already_retired` | `PLAN_RETIRED` |
+| POST | `/plans/:code/reactivate` | subscription.manage | — | `{plan, subscriptionCount}`; 404; 409 `already_active` | `PLAN_REACTIVATED` |
+| GET | `/screens/plans` | subscription.manage | — | `PlansScreen` (1 D1 round trip + auth) | — |
 | GET | `/tenants/:tenantId/subscriptions` | subscription.view | — | `{items: Subscription[]}` / 404 | — |
-| POST | `/tenants/:tenantId/subscriptions` | subscription.manage | `CreateSubscriptionRequest` | 201 `{subscription}`; 400 dates/plan; 404 tenant; 409 `subscription_exists` / `tenant_archived` | `SUBSCRIPTION_CHANGED` (created) |
+| POST | `/tenants/:tenantId/subscriptions` | subscription.manage | `CreateSubscriptionRequest` | 201 `{subscription}`; 400 dates/plan; 404 tenant; 409 `subscription_exists` / `tenant_archived` / `plan_retired` (WT-13) | `SUBSCRIPTION_CHANGED` (created) |
 | PATCH | `/subscriptions/:id` | subscription.manage | `UpdateSubscriptionRequest` (≥1 field) | `{subscription}`; 409 `subscription_cancelled` | `SUBSCRIPTION_CHANGED` (updated/cancelled, before/after) |
 | GET | `/devices/:deviceId/entitlements` | subscription.view | — | `{items: EntitlementRecord[]}` (never token) | — |
 | POST | `/devices/:deviceId/entitlements/issue` | license.issue | `{validUntil?}` | 201 `{entitlement, claims}`; 404; 409 `no_active_subscription` / `device_not_enrolled` / `device_limit_reached` / `generation_conflict`; 422 `device_key_unusable`; 503 `signing_key_unavailable` / `_retired` / `_mismatch` | `LICENSE_ISSUED` (record + claims) |

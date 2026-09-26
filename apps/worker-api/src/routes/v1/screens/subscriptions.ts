@@ -104,7 +104,8 @@ export async function loadSubscriptions(db: Db, now = new Date()): Promise<Subsc
       db,
       sql`${devices.tenantId} in (select ${subscriptions.tenantId} from ${subscriptions})`,
     ),
-    db.select().from(plans).orderBy(plans.code),
+    // The "New subscription" picker: retired plans (WT-13) cannot be chosen for a new one.
+    db.select().from(plans).where(eq(plans.status, "active")).orderBy(plans.code),
     db
       .select({ id: tenants.id, publicCode: tenants.publicCode, displayName: tenants.displayName })
       .from(tenants)

@@ -5,6 +5,7 @@ import type { AppEnv } from "../../../env";
 import audit from "./audit";
 import fleet from "./fleet";
 import overview from "./overview";
+import plans from "./plans";
 import subscriptions from "./subscriptions";
 import tenants from "./tenants";
 
@@ -15,5 +16,6 @@ screens.route("/audit", audit);
 screens.route("/fleet", fleet); // WT-3
 screens.route("/tenants", tenants); // WT-2
 screens.route("/subscriptions", subscriptions); // WT-5
+screens.route("/plans", plans); // WT-13
 
 export default screens;

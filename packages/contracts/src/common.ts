@@ -43,3 +43,27 @@ export const PageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 export type PageQuery = z.infer<typeof PageQuery>;
+
+/**
+ * One audit_log row. Lives here (not screens.ts, its main consumer) so it stays a leaf: devices.ts
+ * needs it too, and devices.ts <-> screens.ts would otherwise be a real import cycle — in Vite's
+ * native-ESM dev server (unlike bundled builds or CJS-interop test runners) that throws
+ * `ReferenceError: Cannot access 'Device' before initialization` the moment the barrel loads,
+ * before any page can render. Found capturing WT-13 evidence; unrelated to that slice otherwise.
+ */
+export const AuditEntry = z.object({
+  id: z.string(),
+  eventType: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  actorType: z.string(),
+  actorId: z.string(),
+  actorTenantId: z.string().nullable(),
+  action: z.string(),
+  before: z.unknown().nullable(),
+  after: z.unknown().nullable(),
+  correlationId: z.string().nullable(),
+  source: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AuditEntry = z.infer<typeof AuditEntry>;

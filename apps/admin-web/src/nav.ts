@@ -8,6 +8,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  Tag,
   Ticket,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ export type NavKey =
   | "fleet"
   | "enrollment"
   | "subscriptions"
+  | "plans"
   | "licences"
   | "audit"
   | "settings";
@@ -30,6 +32,7 @@ export type NavItem = {
     | "/fleet"
     | "/enrollment"
     | "/subscriptions"
+    | "/plans"
     | "/licences"
     | "/audit"
     | "/settings";
@@ -51,6 +54,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Govern",
     items: [
+      { key: "plans", title: "Plans", to: "/plans", icon: Tag },
       { key: "audit", title: "Audit log", to: "/audit", icon: ScrollText },
       { key: "settings", title: "Settings", to: "/settings", icon: Settings },
     ],

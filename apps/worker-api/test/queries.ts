@@ -83,6 +83,11 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT "id", "name", "kind", "from_address", "config_json", "secret_ciphertext", "secret_iv" FROM "email_providers" WHERE "email_providers"."enabled" = ? ORDER BY "email_providers"."priority" ASC`,
     params: [1],
   },
+  // ─── screens/plans.ts (loadPlansScreen): every plan, plus a grouped subscription count ────
+  {
+    name: "screens.plans: subscription count grouped by plan_code",
+    sql: `SELECT "subscriptions"."plan_code", count(*) FROM "subscriptions" GROUP BY "subscriptions"."plan_code"`,
+  },
   // ─── WT-14 onboarding/plan.ts, self-service.ts, auth-routes.ts, license-keys.ts ─────────────
   {
     name: "onboarding.plan: newest non-cancelled subscription per tenant (portal, Connect, Fleet, activation)",

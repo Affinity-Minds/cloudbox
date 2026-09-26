@@ -558,22 +558,19 @@ describe("plan redemption and licence generation at activation", () => {
     expect(third.licenseState).toBe("device_limit_reached");
   });
 
-  it("uses plans.term_days when the column exists (WT-13), else 365 days", async () => {
+  it("reads plans.term_days (WT-13's migration 0009: NOT NULL DEFAULT 365)", async () => {
     const db = createDb(env.DB);
     expect(DEFAULT_TERM_DAYS).toBe(365);
-    try {
-      await env.DB.prepare("ALTER TABLE plans ADD COLUMN term_days integer").run();
-    } catch {
-      // Already there (WT-13's migration).
-    }
+    // The column is NOT NULL with a default (landed as migration 0009), so `planTermDays`'s
+    // "absent or empty" fallback is only reachable against a pre-0009 database; that shape is
+    // covered by migrations.test.ts's upgrade test, not here.
     await env.DB.prepare(
       `INSERT OR IGNORE INTO plans (code, name, max_devices, max_managed_users, features_json, offline_grace_days, renewal_warning_days)
        VALUES ('test-30', 'Thirty days', 1, 6, '["remote_access"]', 7, 30)`,
     ).run();
+    expect(await planTermDays(db, "test-30")).toBe(365); // the column default
     await env.DB.prepare("UPDATE plans SET term_days = 30 WHERE code = 'test-30'").run();
     expect(await planTermDays(db, "test-30")).toBe(30);
-    await env.DB.prepare("UPDATE plans SET term_days = NULL WHERE code = 'test-30'").run();
-    expect(await planTermDays(db, "test-30")).toBe(365);
   });
 
   it("no plan: the device still enrolls, and enroll + heartbeat say no_active_plan", async () => {
