@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import app from "../src/index";
+import { signInAs } from "./auth-fixtures";
 
 describe("CloudBox API foundation", () => {
   it("serves health", async () => {
@@ -72,8 +73,13 @@ describe("CloudBox API foundation", () => {
       me: "/api/v1/me",
       audit: "/api/v1/audit",
     };
+    // Stubs answer only to staff (review M-1); the agent stub stays public for device auth (WT-3).
+    const { headers } = await signInAs(env, {
+      email: "stub-reader@example.test",
+      staffRole: "read_only",
+    });
     for (const [module, path] of Object.entries(paths)) {
-      const response = await app.request(path, {}, env);
+      const response = await app.request(path, { headers }, env);
       expect(response.status, path).toBe(200);
       await expect(response.json()).resolves.toEqual({ module, status: "stub" });
     }

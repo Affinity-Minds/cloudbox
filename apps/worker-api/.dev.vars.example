@@ -1,0 +1,7 @@
+# Local development only. Copy to .dev.vars (gitignored). Never put production values here.
+BETTER_AUTH_SECRET=dev-only-change-me-0123456789abcdef0123456789
+OTP_DEV_ECHO=1
+BOOTSTRAP_SUPER_ADMIN_EMAIL=admin@example.invalid
+BOOTSTRAP_SUPER_ADMIN_PASSWORD=dev-only-initial-password
+# ENTITLEMENT_SIGNING_JWK=   # generate with: node packages/licensing-contracts/scripts/generate-signing-key.ts 2>/dev/null
+# PROVIDER_SECRETS_KEY=      # base64 of 32 random bytes: openssl rand -base64 32

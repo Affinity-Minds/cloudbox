@@ -29,7 +29,16 @@ function testAuth(env: Bindings) {
  */
 export async function signInAs(
   env: Bindings,
-  input: { email: string; name?: string; staffRole?: StaffRole },
+  input: {
+    email: string;
+    name?: string;
+    staffRole?: StaffRole;
+    /**
+     * Staff only: whether the first-sign-in gates (password change + authenticator, ADR 0009) are
+     * done. Default true, so route tests exercise permissions; the gate itself has its own tests.
+     */
+    setupComplete?: boolean;
+  },
 ): Promise<SignedIn> {
   const ctx = await testAuth(env).$context;
   const email = input.email.toLowerCase();
@@ -47,6 +56,17 @@ export async function signInAs(
     )
       .bind(user.id, input.staffRole)
       .run();
+    const done = input.setupComplete ?? true;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE staff_members SET must_change_password = ?1 WHERE user_id = ?2").bind(
+        done ? 0 : 1,
+        user.id,
+      ),
+      env.DB.prepare('UPDATE "user" SET two_factor_enabled = ?1 WHERE id = ?2').bind(
+        done ? 1 : 0,
+        user.id,
+      ),
+    ]);
   }
 
   const { headers } = await ctx.test.login({ userId: user.id });

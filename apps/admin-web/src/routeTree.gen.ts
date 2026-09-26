@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as SetupAuthenticatorRouteImport } from './routes/setup-authenticator'
+import { Route as SetupPasswordRouteImport } from './routes/setup-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppEnrollmentRouteImport } from './routes/_app/enrollment'
@@ -29,6 +31,16 @@ const AppRoute = AppRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupAuthenticatorRoute = SetupAuthenticatorRouteImport.update({
+  id: '/setup-authenticator',
+  path: '/setup-authenticator',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupPasswordRoute = SetupPasswordRouteImport.update({
+  id: '/setup-password',
+  path: '/setup-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -85,6 +97,8 @@ const AppTenantsTenantIdRoute = AppTenantsTenantIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/setup-authenticator': typeof SetupAuthenticatorRoute
+  '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
@@ -97,6 +111,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/setup-authenticator': typeof SetupAuthenticatorRoute
+  '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
@@ -112,6 +128,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/setup-authenticator': typeof SetupAuthenticatorRoute
+  '/setup-password': typeof SetupPasswordRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/enrollment': typeof AppEnrollmentRoute
   '/_app/fleet': typeof AppFleetRouteWithChildren
@@ -128,6 +146,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/setup-authenticator'
+    | '/setup-password'
     | '/audit'
     | '/enrollment'
     | '/fleet'
@@ -140,6 +160,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/setup-authenticator'
+    | '/setup-password'
     | '/audit'
     | '/enrollment'
     | '/fleet'
@@ -154,6 +176,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/login'
+    | '/setup-authenticator'
+    | '/setup-password'
     | '/_app/audit'
     | '/_app/enrollment'
     | '/_app/fleet'
@@ -169,6 +193,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  SetupAuthenticatorRoute: typeof SetupAuthenticatorRoute
+  SetupPasswordRoute: typeof SetupPasswordRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -185,6 +211,20 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup-authenticator': {
+      id: '/setup-authenticator'
+      path: '/setup-authenticator'
+      fullPath: '/setup-authenticator'
+      preLoaderRoute: typeof SetupAuthenticatorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup-password': {
+      id: '/setup-password'
+      path: '/setup-password'
+      fullPath: '/setup-password'
+      preLoaderRoute: typeof SetupPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -320,6 +360,8 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  SetupAuthenticatorRoute: SetupAuthenticatorRoute,
+  SetupPasswordRoute: SetupPasswordRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
