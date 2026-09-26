@@ -248,3 +248,129 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
     expect(eventsAfter.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);
   });
 });
+
+// Review U-2 (Medium): tenant standing was unranked, so a tenant admin could promote itself to
+// owner and then revoke the real owner. Mirrors staff ranking (S-5): a tenant member may only
+// grant a standing at or below its own, and may only change or revoke a membership whose current
+// standing is strictly below its own (which also blocks touching its own membership). Staff with
+// `tenant.manage` bypass the ranking entirely but not the last-active-owner guard (L-8 pattern).
+describe("Standing ranking and the last-active-owner guard (review U-2)", () => {
+  it("a tenant admin cannot invite someone as owner (cannot grant above its own standing)", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Rank Invite Org" });
+    const tenantAdmin = await signInAs(env, { email: "rank-admin-invite@example.test" });
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: tenantAdmin.userId,
+      standing: "admin",
+    });
+
+    const response = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, tenantAdmin, {
+      method: "POST",
+      body: JSON.stringify({ email: "should-not-be-owner@example.test", standing: "owner" }),
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("a tenant owner can grant its own standing to someone else (at or below own is allowed)", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Rank Owner Invite Org" });
+    const tenantOwner = await signInAs(env, { email: "rank-owner-invite@example.test" });
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: tenantOwner.userId,
+      standing: "owner",
+    });
+
+    const response = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, tenantOwner, {
+      method: "POST",
+      body: JSON.stringify({ email: "co-owner@example.test", standing: "owner" }),
+    });
+    expect(response.status).toBe(201);
+  });
+
+  it("staff with tenant.manage bypasses ranking: can promote an admin straight to owner", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Staff Promote Org" });
+    const person = await signInAs(env, { email: "staff-promote-person@example.test" });
+    const membership = await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: person.userId,
+      standing: "admin",
+    });
+
+    const response = await call(
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${membership.membershipId}`,
+      staffAdmin,
+      { method: "PATCH", body: JSON.stringify({ standing: "owner" }) },
+    );
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as Membership).standing).toBe("owner");
+  });
+
+  it("staff with tenant.manage still cannot revoke the tenant's only owner (409 last_owner)", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Staff Last Owner Org" });
+    const owner = await signInAs(env, { email: "staff-last-owner-person@example.test" });
+    const membership = await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: owner.userId,
+      standing: "owner",
+    });
+
+    const response = await call(
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${membership.membershipId}`,
+      staffAdmin,
+      { method: "DELETE" },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "last_owner" });
+
+    const row = await env.DB.prepare("SELECT status FROM tenant_memberships WHERE id = ?")
+      .bind(membership.membershipId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
+  });
+
+  it("staff with tenant.manage still cannot demote the tenant's only owner via PATCH (409 last_owner)", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Staff Demote Owner Org" });
+    const owner = await signInAs(env, { email: "staff-demote-owner-person@example.test" });
+    const membership = await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: owner.userId,
+      standing: "owner",
+    });
+
+    const response = await call(
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${membership.membershipId}`,
+      staffAdmin,
+      { method: "PATCH", body: JSON.stringify({ standing: "admin" }) },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "last_owner" });
+
+    const row = await env.DB.prepare("SELECT standing FROM tenant_memberships WHERE id = ?")
+      .bind(membership.membershipId)
+      .first<{ standing: string }>();
+    expect(row?.standing).toBe("owner");
+  });
+
+  it("staff with tenant.manage can revoke an owner when another owner still exists", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Two Owners Staff Org" });
+    const ownerA = await signInAs(env, { email: "two-owners-staff-a@example.test" });
+    const ownerB = await signInAs(env, { email: "two-owners-staff-b@example.test" });
+    const membershipA = await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: ownerA.userId,
+      standing: "owner",
+    });
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: ownerB.userId,
+      standing: "owner",
+    });
+
+    const response = await call(
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${membershipA.membershipId}`,
+      staffAdmin,
+      { method: "DELETE" },
+    );
+    expect(response.status).toBe(200);
+  });
+});
