@@ -2,6 +2,28 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — A developer's `.dev.vars` changed worker test results
+**Symptom:** `a mail failure still answers 200 and records the error code` passed, then failed after `wrangler dev` was set up locally: the audit row read `{echoed:true}` instead of `{errorCode:…}`.
+
+**Cause:** `@cloudflare/vitest-pool-workers` reads `wrangler.jsonc` **and** `apps/worker-api/.dev.vars`, so a local `OTP_DEV_ECHO=1` leaked into the test environment. (The send outcome also overwrote the real error code when the echo fired.)
+
+**Fix:** `vitest.config.ts` pins `OTP_DEV_ECHO: "0"` (and a test-only `BETTER_AUTH_SECRET`) in miniflare `bindings`, which override `.dev.vars`; the audit outcome now keeps the send result and adds `echoed: true`.
+
+**Blast radius:** Any test that depends on a var a developer may set in `.dev.vars`. Pin such vars in `vitest.config.ts`.
+
+**Verification:** Worker tests 51/51 with and without `apps/worker-api/.dev.vars` present.
+
+## 2026-09-27 — `pnpm run verify` checks nothing inside `.claude/worktrees/*`
+**Symptom:** In a worktree under `.claude/worktrees/`, `pnpm check` (`biome check .`) fails with "No files were processed in the specified paths … These paths were provided but ignored: ." so `verify` stops at step one.
+
+**Cause:** `biome.json` excludes `!!**/.claude` (meant for sibling worktrees inside the main checkout); run from inside a worktree, the path of every file contains `/.claude/`.
+
+**Fix (workaround):** Run `biome check apps packages biome.json package.json tsconfig.base.json` then `pnpm typecheck && pnpm test && pnpm build`. A real fix belongs to WT-0 (`biome.json`), requested in `docs/handoffs/wt-p1-auth.md`.
+
+**Blast radius:** Every agent worktree under `.claude/worktrees/`; CI (a normal checkout) is unaffected.
+
+**Verification:** The explicit-path check processes 96 files and the remaining verify steps are green.
+
 ## 2026-09-27 — First production deploy failed twice on the Cloudflare account, not the code
 **Symptom:** `Deploy CloudBox` failed at "Ensure Cloudflare resources": first `Authentication error [code: 10000]` on `/d1/database`, then after a token fix `Please enable R2 through the Cloudflare Dashboard [code: 10042]`. The first D1 database that did get created landed in region WNAM.
 

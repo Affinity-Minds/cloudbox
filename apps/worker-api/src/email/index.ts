@@ -24,7 +24,7 @@ export function otpEmailBody(code: string): { text: string; html: string } {
   return { text, html };
 }
 
-type SendOutcome = { messageId: string } | { errorCode: string } | { echoed: true };
+type SendOutcome = { messageId?: string; errorCode?: string; echoed?: true };
 
 /** Sends the code; never throws, so a send failure cannot change the HTTP response. */
 export async function sendOtpEmail(
@@ -56,7 +56,7 @@ export async function sendOtpEmail(
   // Local development only: `wrangler dev` without remote bindings, and tests.
   if (env.OTP_DEV_ECHO === "1" && env.ENVIRONMENT !== "production") {
     console.log("[otp-dev-echo]", to, message.code);
-    if ("errorCode" in outcome) outcome = { echoed: true };
+    outcome = { ...outcome, echoed: true };
   }
 
   try {
