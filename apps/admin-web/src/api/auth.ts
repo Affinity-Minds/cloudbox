@@ -1,5 +1,6 @@
-// Owner: WT-1. Sign-in through Better Auth at /api/auth/* (customers: email code; staff: password +
-// authenticator, ADR 0009), session and logout (/api/v1/auth/*).
+// Owner: WT-1. Two identity systems, nothing shared (ADR 0002): customers sign in at /api/auth/*
+// (email code), staff at /api/ops/auth/* (password + authenticator, ADR 0009). Session and logout
+// (/api/v1/auth/*) are pinned to one system with `?as=`.
 import type { SessionResponse } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { ApiError, api } from "./client";
@@ -7,9 +8,18 @@ import { ApiError, api } from "./client";
 /** Must match HONEYPOT_HEADER in apps/worker-api/src/auth/index.ts. */
 const HONEYPOT_HEADER = "x-cloudbox-hp";
 
+/** The staff session (the ops console). */
 export const sessionQuery = queryOptions({
-  queryKey: ["auth", "session"],
-  queryFn: () => api<SessionResponse>("/api/v1/auth/session"),
+  queryKey: ["auth", "session", "staff"],
+  queryFn: () => api<SessionResponse>("/api/v1/auth/session?as=staff"),
+  staleTime: 60_000,
+  retry: false,
+});
+
+/** The customer session (/login, /portal). */
+export const customerSessionQuery = queryOptions({
+  queryKey: ["auth", "session", "customer"],
+  queryFn: () => api<SessionResponse>("/api/v1/auth/session?as=customer"),
   staleTime: 60_000,
   retry: false,
 });
@@ -78,20 +88,20 @@ export function challengeSiteKey(error: unknown): string | null {
 /** Staff step 1. `twoFactorRedirect` means the authenticator step follows; otherwise signed in. */
 export const signInWithPassword = (email: string, password: string, honeypot: string) =>
   authPost<{ twoFactorRedirect?: boolean }>(
-    "/api/auth/sign-in/email",
+    "/api/ops/auth/sign-in/email",
     { email, password, rememberMe: true },
     honeypot,
   );
 
 /** Staff step 2 at sign-in, and the confirmation step of authenticator setup. */
 export const verifyTotp = (code: string) =>
-  authPost("/api/auth/two-factor/verify-totp", { code, trustDevice: false });
+  authPost("/api/ops/auth/two-factor/verify-totp", { code, trustDevice: false });
 
 export const verifyBackupCode = (code: string) =>
-  authPost("/api/auth/two-factor/verify-backup-code", { code, trustDevice: false });
+  authPost("/api/ops/auth/two-factor/verify-backup-code", { code, trustDevice: false });
 
 export const changePassword = (currentPassword: string, newPassword: string) =>
-  authPost("/api/auth/change-password", {
+  authPost("/api/ops/auth/change-password", {
     currentPassword,
     newPassword,
     revokeOtherSessions: true,
@@ -99,11 +109,12 @@ export const changePassword = (currentPassword: string, newPassword: string) =>
 
 /** Starts authenticator setup: the otpauth URI for the QR and the backup codes (shown once). */
 export const enableAuthenticator = (password: string) =>
-  authPost<{ totpURI: string; backupCodes: string[] }>("/api/auth/two-factor/enable", {
+  authPost<{ totpURI: string; backupCodes: string[] }>("/api/ops/auth/two-factor/enable", {
     password,
   });
 
-export const logout = () => api<null>("/api/v1/auth/logout", { method: "POST" });
+export const logout = (as: "staff" | "customer" = "staff") =>
+  api<null>(`/api/v1/auth/logout?as=${as}`, { method: "POST" });
 
 /** Human text for a failed send/verify. Never says whether the address has an account. */
 export function describeAuthError(error: unknown): string {

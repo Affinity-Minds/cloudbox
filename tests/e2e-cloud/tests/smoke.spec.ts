@@ -9,6 +9,9 @@ import { expect, test } from "@playwright/test";
 
 const EVIDENCE_DIR = path.resolve(import.meta.dirname, "../../../docs/evidence/e2e");
 
+/** The staff console base (`OPS_BASE_PATH` var on the Worker; default `/ops`). */
+const OPS_BASE_PATH = process.env.OPS_BASE_PATH ?? "/ops";
+
 test.beforeAll(async () => {
   await mkdir(EVIDENCE_DIR, { recursive: true });
 });
@@ -38,27 +41,42 @@ test("GET /api/version reports gitSha (matches EXPECTED_SHA when set)", async ({
   expect(body.gitSha).toBe(expectedSha);
 });
 
-test("an anonymous visit to / is guarded: redirects to /login, chrome renders", async ({
+test("an anonymous visit to / lands on the customer sign-in (email step), chrome renders", async ({
   page,
 }) => {
-  // apps/admin-web/src/routes/_app.tsx now gates every app route behind a session
-  // (`requireSession` → redirect to /login) — this landed after this brief was written, when the
-  // check here was "the shell renders (sidebar with Overview/Tenants/Fleet)" for an anonymous
-  // visit. An anonymous visitor seeing that sidebar would be a regression, not a pass; this test
-  // asserts the guard instead, and the authenticated version below covers the actual sidebar.
+  // Two separate surfaces (WT-1, owner decision): the customer surface is /login and /portal; the
+  // staff console lives under OPS_BASE_PATH and nothing on the customer surface links to it.
   await page.goto("/");
   await page.waitForURL(/\/login/);
   // Confirms the SPA fallback served real markup (agent-notes cloudflare-workers #4/#15 — the
   // per-host document trap), not a blank or error document.
   await expect(page.getByText("CloudBox", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: /email/i })).toBeVisible();
+  await expect(page.getByLabel(/password/i)).toHaveCount(0);
   await page.screenshot({ path: path.join(EVIDENCE_DIR, "guard-redirect.png"), fullPage: true });
 });
 
-test("/login renders the email step", async ({ page }) => {
+test("/login renders the customer email step (no password field, no link to the console)", async ({
+  page,
+}) => {
   await page.goto("/login");
   await expect(page.getByRole("textbox", { name: /email/i })).toBeVisible();
+  await expect(page.getByLabel(/password/i)).toHaveCount(0);
+  const hrefs = await page
+    .locator("a[href]")
+    .evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  expect(hrefs.some((h) => h?.includes(OPS_BASE_PATH))).toBe(false);
   await page.screenshot({ path: path.join(EVIDENCE_DIR, "login.png"), fullPage: true });
+});
+
+test("${OPS_BASE_PATH}/login renders the staff form (email + password), noindex", async ({
+  page,
+}) => {
+  const response = await page.goto(`${OPS_BASE_PATH}/login`);
+  expect(response?.headers()["x-robots-tag"]).toContain("noindex");
+  await expect(page.getByRole("textbox", { name: /email/i })).toBeVisible();
+  await expect(page.getByLabel("Password")).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, "ops-login.png"), fullPage: true });
 });
 
 /**
@@ -79,30 +97,26 @@ async function readEchoedOtp(logPath: string, email: string): Promise<string> {
   throw new Error(`no [otp-dev-echo] line for ${email} in ${logPath} after 5s`);
 }
 
-// Full sign-in → authenticated shell, only when a local `wrangler dev` log is available (its
-// stdout is the only place the OTP appears — `OTP_DEV_ECHO` is refused in production, by design;
-// see auth/index.ts assertOtpEchoSafe). Set E2E_OTP_LOG_PATH to run this against your own
-// `wrangler dev > wrangler.log 2>&1`. Skipped otherwise, including in the CI `e2e-smoke` job,
-// which has no access to the deployed Worker's console.
+// Full customer sign-in → portal, only when a local `wrangler dev` log is available (its stdout is
+// the only place the OTP appears — `OTP_DEV_ECHO` is refused in production, by design) and an
+// existing customer identity is named (sign-in never creates one: E2E_CUSTOMER_EMAIL, e.g. a
+// member invited through the console). Skipped otherwise, including in the CI `e2e-smoke` job.
 const otpLogPath = process.env.E2E_OTP_LOG_PATH;
-test("signed-in shell renders: sidebar has Overview, Tenants, Fleet (needs E2E_OTP_LOG_PATH)", async ({
+const customerEmail = process.env.E2E_CUSTOMER_EMAIL;
+test("customer signs in with an emailed code and lands on the portal (needs E2E_OTP_LOG_PATH, E2E_CUSTOMER_EMAIL)", async ({
   page,
 }) => {
-  test.skip(!otpLogPath, "E2E_OTP_LOG_PATH not set — see comment above this test");
-  const email = `e2e-smoke+${Date.now()}@example.test`;
+  test.skip(!otpLogPath || !customerEmail, "E2E_OTP_LOG_PATH / E2E_CUSTOMER_EMAIL not set");
+  const email = customerEmail as string;
 
   await page.goto("/login");
   await page.getByRole("textbox", { name: /email/i }).fill(email);
-  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
 
   const code = await readEchoedOtp(otpLogPath as string, email);
   await page.locator("#otp").pressSequentially(code, { delay: 30 });
 
-  // Nav labels are fixed by apps/admin-web/src/nav.ts (owner WT-0); this test tracks that
-  // file's titles, not a hand-copied list, by asserting on the rendered text itself.
-  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Tenants" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Fleet" })).toBeVisible();
-
-  await page.screenshot({ path: path.join(EVIDENCE_DIR, "shell.png"), fullPage: true });
+  await page.waitForURL(/\/portal/);
+  await expect(page.getByText("Your tenants")).toBeVisible();
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, "portal.png"), fullPage: true });
 });

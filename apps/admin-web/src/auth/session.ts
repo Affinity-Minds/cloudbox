@@ -3,7 +3,7 @@
 import type { SessionResponse, StaffRole } from "@cloudbox/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
-import { sessionQuery } from "@/api/auth";
+import { customerSessionQuery, sessionQuery } from "@/api/auth";
 import { ApiError } from "@/api/client";
 
 export const ROLE_LABEL: Record<StaffRole, string> = {
@@ -32,7 +32,26 @@ export function safeRedirect(value: unknown, origin = globalThis.location?.origi
   }
 }
 
-/** For `beforeLoad`: the session, or a redirect to /login that comes back to `href` afterwards. */
+/** `path` (an app path) under the router's basepath, for `router.history` calls. */
+export function withBase(basepath: string | undefined, path: string): string {
+  const base = !basepath || basepath === "/" ? "" : basepath.replace(/\/$/, "");
+  return `${base}${path === "/" && base ? "" : path}` || "/";
+}
+
+/** Customer surface `beforeLoad`: the customer session, or a redirect to the customer /login. */
+export async function requireCustomerSession(queryClient: QueryClient) {
+  try {
+    return await queryClient.ensureQueryData(customerSessionQuery);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) throw redirect({ to: "/login" });
+    throw error;
+  }
+}
+
+/**
+ * Ops console `beforeLoad`: the staff session (staff identity system only), or a redirect to the
+ * staff login that comes back to `href` afterwards.
+ */
 export async function requireSession(queryClient: QueryClient, href: string) {
   try {
     return await queryClient.ensureQueryData(sessionQuery);

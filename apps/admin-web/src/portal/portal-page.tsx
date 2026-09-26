@@ -3,36 +3,25 @@
 // "Two audiences, two front doors"): different host/screen than the staff console, same API.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
-import { sessionQuery } from "@/api/auth";
+import { customerSessionQuery } from "@/api/auth";
 import { describeError } from "@/api/client";
 import { myTenantsQuery, setActiveTenant } from "@/api/tenants";
-import { requireSession } from "@/auth/session";
 import { EmptyState, ErrorState, PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export const Route = createFileRoute("/portal")({
-  beforeLoad: async ({ context, location }) => ({
-    session: await requireSession(context.queryClient, location.href),
-  }),
-  loader: ({ context }) => {
-    void context.queryClient.prefetchQuery(myTenantsQuery);
-  },
-  component: PortalPage,
-});
-
-function PortalPage() {
+// Route (guard, prefetch) lives in portal/router.tsx: the customer surface's own router (WT-1).
+export function PortalPage() {
   const queryClient = useQueryClient();
-  const session = useQuery(sessionQuery);
+  const session = useQuery(customerSessionQuery);
   const tenants = useQuery(myTenantsQuery);
 
   const mutation = useMutation({
     mutationFn: (tenantId: string) => setActiveTenant(tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth", "session"] });
+      queryClient.invalidateQueries({ queryKey: customerSessionQuery.queryKey });
       toast.success("Active tenant updated");
     },
     onError: (error) => {

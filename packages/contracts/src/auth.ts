@@ -10,11 +10,7 @@ export type StaffRole = z.infer<typeof StaffRole>;
  */
 export const normalizeEmail = (value: string) => value.normalize("NFKC").trim().toLowerCase();
 
-export const Email = z
-  .string()
-  .max(320)
-  .transform(normalizeEmail)
-  .pipe(z.email().max(254));
+export const Email = z.string().max(320).transform(normalizeEmail).pipe(z.email().max(254));
 
 /** `POST /api/auth/email-otp/send-verification-otp` (Better Auth emailOTP plugin). */
 export const OtpSendRequest = z.object({

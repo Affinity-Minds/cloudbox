@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { challengeSiteKey, describeAuthError } from "@/api/auth";
 import { ApiError } from "@/api/client";
-import { safeRedirect } from "./session";
+import { safeRedirect, withBase } from "./session";
 
 describe("safeRedirect", () => {
   it("keeps same-app paths and refuses everything else", () => {
@@ -34,5 +34,14 @@ describe("Turnstile step-up (review T-1)", () => {
     expect(challengeSiteKey(new ApiError(403, "challenge_required", { siteKey: null }))).toBeNull();
     expect(challengeSiteKey(new ApiError(400, "invalid_otp"))).toBeNull();
     expect(describeAuthError(new ApiError(429, "account_cooldown"))).toMatch(/15 minutes/);
+  });
+});
+
+describe("withBase (ops console under OPS_BASE_PATH)", () => {
+  it("prefixes app paths with the router basepath", () => {
+    expect(withBase("/ops", "/")).toBe("/ops");
+    expect(withBase("/ops", "/tenants?x=1")).toBe("/ops/tenants?x=1");
+    expect(withBase("/", "/portal")).toBe("/portal");
+    expect(withBase(undefined, "/")).toBe("/");
   });
 });
