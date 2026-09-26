@@ -193,18 +193,19 @@ blocked by ranking itself, not the guard, so that case wouldn't isolate anything
 ### Verification script (`pnpm run verify`)
 
 ```
-✓ pnpm check       — biome, 0 findings
-✓ pnpm typecheck   — all 4 typechecked workspaces clean
-~ pnpm test        — worker-api: all green except 2 pre-existing, out-of-scope failures in
-                      test/review/phase-1-fourth-pass.test.ts's U-1 (High) block (WT-1's
-                      src/auth/challenge.ts / counters.ts — see "Known failures"); admin-web and
-                      licensing-contracts green
+✓ pnpm check       — biome, 0 findings (171 files)
+✓ pnpm typecheck   — all 5 typechecked workspaces clean (contracts, licensing-contracts,
+                      e2e-cloud, admin-web, worker-api — e2e-cloud and the email-providers
+                      slice landed on phase-1/identity since the last update)
+~ pnpm test        — worker-api 476/478 (packages/licensing-contracts 16/16, admin-web 4/4).
+                      The only 2 red: test/review/phase-1-fourth-pass.test.ts's U-1 (High)
+                      block (Unicode case-variant email bypasses the OTP account budget) —
+                      pre-existing, owned by WT-1's src/auth/challenge.ts / counters.ts, not
+                      touched by me. See "Known failures".
 ✓ pnpm build       — vite build + wrangler deploy --dry-run, both worker-api and admin-web
+                      (run separately since `pnpm run verify`'s chain stops at the failing
+                      test step; build itself is clean)
 ```
-
-(exact pass/fail counts for this run are in the report delivered alongside this handoff — the
-figures above were accurate as of the last full run before the U-2 fix landed and the tail is
-re-captured at push time; look for the same 2 U-1 names as the only red.)
 
 ### My tests specifically
 
