@@ -8,6 +8,7 @@ import agent from "./agent";
 import audit from "./audit";
 import auth from "./auth";
 import devices from "./devices";
+import emailProviders from "./email-providers";
 import enrollment from "./enrollment";
 import entitlements from "./entitlements";
 import me from "./me";
@@ -42,6 +43,7 @@ v1.route("/plans", plans); // WT-5
 v1.route("/tenants/:tenantId/subscriptions", tenantSubscriptions); // WT-5
 v1.route("/subscriptions", subscriptions); // WT-5
 v1.route("/devices/:deviceId/entitlements", entitlements); // WT-5
+v1.route("/settings/email-providers", emailProviders); // WT-12
 v1.route("/screens", screens); // WT-0 (+ one line per screen owner in screens/index.ts)
 v1.route("/audit", audit); // WT-0
 

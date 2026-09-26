@@ -28,6 +28,8 @@ export type Bindings = {
   BOOTSTRAP_SUPER_ADMIN_PASSWORD?: string;
   ENTITLEMENT_SIGNING_JWK?: string;
   PHASE0_ADMIN_KEY?: string;
+  /** 32 raw bytes, base64. AES-256-GCM key for `email_providers.secret_ciphertext` (WT-12). */
+  PROVIDER_SECRETS_KEY?: string;
 };
 
 /** Signed-in principal, set by `requireUser()` (WT-1). */
