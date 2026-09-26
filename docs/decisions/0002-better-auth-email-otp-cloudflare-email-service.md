@@ -27,10 +27,11 @@ screen whether an address has an account. Staff sign in differently (ADR 0009).
 3. **Resend re-sends the still-valid code** (`resendStrategy: "reuse"`): a send request by anyone else
    cannot invalidate the code already in the owner's inbox.
 4. **Limits.** Better Auth per-IP limits in D1 (`rate_limit`, migration 0004): send 3 / 60 s, code
-   sign-in 3 / 60 s. On top, from the audit log: per (email, client IP or IPv6 /64) 5 sends / 15 min,
-   per email 30 / h. Over a cap the caller gets the same 200 with nothing sent or recorded — never a
-   429 that would let a third party lock an address out or reveal whether it exists (review H-1).
-   Failed code sign-ins for addresses without a user row are audited once per 15 min (review M-3).
+   sign-in 3 / 60 s. On top, per (email, client IP or IPv6 /64) only: 5 sends / 15 min and 10 failed
+   code sign-ins / h. There is deliberately **no per-email ceiling**: anything other clients can fill
+   locks the owner out (reviews H-1, S-2). Over a cap the caller gets the same answer as usual (200 on
+   send, `INVALID_OTP` on sign-in) with nothing sent, checked or recorded. Failed code sign-ins for
+   addresses without a user row are audited once per 15 min (review M-3).
 5. **Cloudflare Email Service** binding `EMAIL`, from `no-reply@em.affinity.ai.in`. The send result is
    recorded (`{outcome: "sent", messageId}` or `{outcome: "send_failed", errorCode}`); a failure never
    changes the HTTP response. WT-12 is adding a provider registry behind `sendOtpEmail`; the masking

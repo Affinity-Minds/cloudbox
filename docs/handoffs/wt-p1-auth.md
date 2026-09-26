@@ -18,8 +18,8 @@ from D1 rows per request; every auth state change is audited.
 - Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
   PR #6. This round: **draft PR #9** https://github.com/Affinity-Minds/cloudbox/pull/9 (never merge
   it myself).
-- `pnpm run verify`: green (check 130 files, admin-web 3/3, licensing-contracts 16/16, worker-api
-  206/206, build ok).
+- `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
+  314/314, build ok).
 
 ## Commits in PR #9
 
@@ -30,7 +30,10 @@ c573cc2 fix(auth): WT-8 review findings H-1, H-2, M-1, M-3, L-1, L-2, L-3, L-8, 
 7198105 Merge origin/phase-1/identity (WT-5, WT-6 permission matrix, Biome fix, ADR 0009)
 7ebffc8 feat(auth): staff sign in with password + authenticator (ADR 0009)
 337e1ed feat(admin-web): staff + customer sign-in entry points, forced password and authenticator setup
-(+ docs commit: ADR 0002, this handoff, review "Fixed in" notes)
+a3fc5f0 docs: ADR 0002, handoff, review "Fixed in" notes
+(merge) origin/review/phase-1-security (WT-8 second pass + tests)
+5178503 fix(auth): WT-8 second pass S-1..S-8, M-3
+(+ docs commit: second-pass "Fixed in" notes, ADR 0002 limits, this handoff)
 ```
 
 ---
@@ -39,8 +42,11 @@ c573cc2 fix(auth): WT-8 review findings H-1, H-2, M-1, M-3, L-1, L-2, L-3, L-8, 
 
 - **worker-api**
   - `src/auth/index.ts`: `authOptions(env, request, self)`, `createAuth(env, request?)`,
-    `authFor(c)`, `authContextFor(c)`, `assertAuthConfig`, `trustedOrigins(env)`, constants
-    `OTP_SEND_CAPS`, `PASSWORD_FAILURE_CAPS`, `MIN_PASSWORD_LENGTH`, `HONEYPOT_HEADER`. Better Auth
+    `authFor(c)`, `authContextFor(c)`, `assertAuthConfig`, `trustedOrigins(env)`,
+    `deleteTrustedDevices`, constants `OTP_SEND_CAP`, `OTP_FAILURE_CAP`, `PASSWORD_FAILURE_CAP`,
+    `MIN_PASSWORD_LENGTH`, `HONEYPOT_HEADER`.
+  - `src/auth/counters.ts` (new): per-(email, client) failure counters and used-code claims in
+    `rate_limit` under SHA-256 keys (`counterKey`, `readCounter`, `bumpCounter`, `claimOnce`). Better Auth
     with `emailAndPassword` (no sign-up), `twoFactor` (TOTP issuer CloudBox, 10 backup codes) and
     `emailOTP` (closed, reuse). All sign-in policy lives in its `hooks.before/after`.
   - `src/auth/users.ts` (new): `ensureUserByEmail(env, email) → userId` (**WT-2 uses this for
@@ -119,12 +125,24 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 - Per-IP limits (Better Auth, D1): code send 3 / 60 s, code sign-in 3 / 60 s, password sign-in 3 / 10 s,
   `/two-factor/*` 3 / 10 s, rest 60 / 60 s (L-11 corrected). Better Auth also limits a 2FA challenge
   to 5 attempts and locks an account for 15 min after 10 consecutive failed second factors.
+- Our limits are **only per (email, client /64)**, never per account (reviews S-1, S-2): code sends
+  5 / 15 min (same 200, nothing sent), failed code sign-ins 10 / h (fails like a wrong code), failed
+  passwords 5 / 15 min (429 with the wrong-password body). They are uniform for every address.
+- An accepted sign-in or disable authenticator code cannot be reused for 120 s (S-3). `trustDevice`
+  is forced off; admin reset and password change delete trusted-device rows (S-4). Password changes
+  always end other sessions (S-8).
+- Role ranking on `POST /api/v1/staff` (S-5): no role above your own; role changes and password
+  resets only for accounts strictly below the caller; nobody changes their own role.
 - Anti-enumeration: unknown, customer and staff addresses are indistinguishable on the code path;
   non-staff, unknown and wrong-password answers are identical on the password path (same hashing work).
 - Bootstrap: while no super admin exists, the first auth request creates the `BOOTSTRAP_SUPER_ADMIN_EMAIL`
   user and `super_admin` row (one audit row) and, from `BOOTSTRAP_SUPER_ADMIN_PASSWORD`, seeds its
-  password once ever (claimed by `settings.auth.bootstrap_password_seeded`; later changes of the
-  secret never overwrite the owner's password). `must_change_password = 1`, no authenticator yet.
+  password once ever and only onto an account without a password (claimed by
+  `settings.auth.bootstrap_password_seeded`); seeding sets `must_change_password = 1` (S-7).
+  **Operational:** sign in as the owner right after the first deploy, then
+  `wrangler secret delete BOOTSTRAP_SUPER_ADMIN_PASSWORD` (review S-8 bootstrap window).
+- Residual (review S-8): a staff member behind the same NAT/CGNAT as an attacker can be locked out
+  per client for 15 min; Turnstile/edge rate limiting is the recommended follow-up (ops).
 - No self-service password reset: an admin sets a new initial password (POST /staff), which forces
   change + re-enrolment. Lost authenticator: a backup code, or an admin reset.
 
@@ -141,7 +159,13 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 
 ---
 
-## Tests (worker-api 206/206, admin-web 3/3)
+## Tests (worker-api 314/314, admin-web 3/3, licensing-contracts 16/16)
+
+Second pass adds WT-8 `review/phase-1-second-pass` (all green, unmodified) and in WT-1's files:
+`auth-otp.test.ts` "S-2" (owner gets a code after 40 sends from other clients) and "S-6";
+`staff-auth.test.ts` non-staff failures audited once + uniform 429, forced session revocation on
+password change, disable-code replay refused; `staff.test.ts` self role change 403.
+
 
 - `staff-auth.test.ts` (8): staff get the customer answer but no code, and a code for a staff email
   fails like a wrong code; password sign-in for non-staff (incl. a former staff member with a
@@ -191,7 +215,16 @@ The QR, key and backup codes in the screenshots belong to a local database that 
   valid" would leave an owner who lost the mail waiting up to 5 minutes and contradicts the review's
   negative test (owner at another IP must receive a message).
 - **Password lockout body:** 429 status with the wrong-password JSON body (as asked); the status
-  itself tells a caller they are locked, never whether the account exists.
+  itself tells a caller they are locked, never whether the account exists (the per-client counter is
+  the same for staff, non-staff and unknown addresses).
+- **S-8 "do not hash non-staff attempts":** within the per-client limit the hash is kept, because
+  skipping it would let response time tell staff addresses from others; beyond the limit nothing is
+  hashed or recorded, and audit rows for non-staff/unknown addresses are once per 15 min.
+- **S-5:** revoking (DELETE) is not ranked (a super admin can still remove a rogue peer); the
+  last-super-admin guard still applies. Role changes of one's own account are refused.
+- **Counters location:** the failure counters and used-code claims live in `rate_limit` (Better
+  Auth's table from 0004) under hashed keys rather than a new column on `two_factor`; a dummy
+  rate-limit rule of 1 h keeps Better Auth's pruning from removing them early.
 - `db/schema.ts`, `env.ts`, `http.ts`, `routes/v1/index.ts`, `package.json`/lockfile and the workflow
   were edited under the owner's decisions / WT-0 leave as listed above.
 
