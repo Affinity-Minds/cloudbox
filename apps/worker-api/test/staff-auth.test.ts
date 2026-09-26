@@ -302,7 +302,7 @@ describe("signing in with password + authenticator", () => {
   it("asks for the authenticator; a wrong code is audited and refused; the right one signs in", async () => {
     const { totpURI } = await enrol("two-step@example.test");
     const [row] = (
-      await env.DB.prepare('SELECT id FROM "user" WHERE email = ?')
+      await env.DB.prepare("SELECT id FROM staff_users WHERE email = ?")
         .bind("two-step@example.test")
         .all<{ id: string }>()
     ).results;

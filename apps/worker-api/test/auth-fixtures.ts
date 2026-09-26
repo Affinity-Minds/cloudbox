@@ -67,7 +67,7 @@ export async function signInAs(
         done ? 0 : 1,
         user.id,
       ),
-      env.DB.prepare('UPDATE "user" SET two_factor_enabled = ?1 WHERE id = ?2').bind(
+      env.DB.prepare("UPDATE staff_users SET two_factor_enabled = ?1 WHERE id = ?2").bind(
         done ? 1 : 0,
         user.id,
       ),

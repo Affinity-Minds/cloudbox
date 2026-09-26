@@ -12,7 +12,7 @@
 import { CreateMembershipRequest, UpdateMembershipRequest } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, eq } from "drizzle-orm";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { audit } from "../../audit";
 import { guard } from "../../auth/middleware";
@@ -37,6 +37,21 @@ function requireTenantManageOrAdmin(): MiddlewareHandler<AppEnv> {
   });
 }
 
+const RANK = { user: 1, admin: 2, owner: 3 } as const;
+type Standing = keyof typeof RANK;
+
+/**
+ * Review U-2 (fixed by WT-1 with the identity split): a tenant member may only grant standings up
+ * to its own, and only change or revoke memberships strictly below its own (so an admin cannot make
+ * itself owner or remove the owner). Staff with `tenant.manage` are not ranked.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: any route context of this router.
+async function tenantActorRank(c: Context<AppEnv, any, any>, tenantId: string): Promise<number> {
+  if (c.var.user.surface === "staff") return Number.POSITIVE_INFINITY;
+  const standing = await getTenantStanding(c, tenantId);
+  return standing ? RANK[standing] : 0;
+}
+
 router.post(
   "/",
   requireTenantManageOrAdmin(),
@@ -50,6 +65,9 @@ router.post(
 
     const tenant = await db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
     if (!tenant) return c.json({ error: "not_found" }, 404);
+    if (RANK[input.standing as Standing] > (await tenantActorRank(c, tenantId))) {
+      return c.json({ error: "forbidden", detail: "standing_above_own" }, 403);
+    }
 
     // Server API, never a raw insert into `user` (agent-notes / brief, and per WT-1's ADR
     // 0002/0009: sign-in never creates a user row, so this invite is the only way one comes to
@@ -134,6 +152,10 @@ router.patch(
       .where(and(eq(tenantMemberships.id, membershipId), eq(tenantMemberships.tenantId, tenantId)))
       .get();
     if (!before) return c.json({ error: "not_found" }, 404);
+    const rank = await tenantActorRank(c, tenantId);
+    if (RANK[before.standing as Standing] >= rank || RANK[input.standing as Standing] > rank) {
+      return c.json({ error: "forbidden", detail: "standing_not_below_caller" }, 403);
+    }
 
     const [[updated]] = await db.batch([
       db
@@ -169,6 +191,9 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
     .get();
   if (!before) return c.json({ error: "not_found" }, 404);
   if (before.status === "revoked") return c.json(before);
+  if (RANK[before.standing as Standing] >= (await tenantActorRank(c, tenantId))) {
+    return c.json({ error: "forbidden", detail: "standing_not_below_caller" }, 403);
+  }
 
   const [[updated]] = await db.batch([
     db

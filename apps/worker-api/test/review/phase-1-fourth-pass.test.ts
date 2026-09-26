@@ -161,7 +161,8 @@ describe("U-3 (holds): tenant boundary for members", () => {
       { headers: u.headers },
       env,
     );
-    expect([403, 404]).toContain(screen.status);
+    // WT-1: a customer session is not read on this staff screen at all (two identity systems): 401.
+    expect([401, 403, 404]).toContain(screen.status);
     const active = await app.request(
       "/api/v1/me/active-tenant",
       {

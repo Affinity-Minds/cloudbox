@@ -33,14 +33,35 @@ describe("GET /api/v1/screens/overview", () => {
     expect(anonymous.status).toBe(401);
     await expect(anonymous.json()).resolves.toEqual({ error: "unauthenticated" });
 
+    // A customer session is never read on a staff route (ADR 0002): 401.
     const outsider = await signInAs(env, { email: "screens-outsider@example.test" });
     const denied = await app.request(
       "/api/v1/screens/overview",
       { headers: outsider.headers },
       env,
     );
-    expect(denied.status).toBe(403);
-    await expect(denied.json()).resolves.toEqual({ error: "forbidden" });
+    expect(denied.status).toBe(401);
+    // A staff member without the grant: 403.
+    await env.DB.prepare(
+      "DELETE FROM role_permissions WHERE role = 'support' AND permission_key = 'tenant.view'",
+    ).run();
+    try {
+      const support = await signInAs(env, {
+        email: "screens-support@example.test",
+        staffRole: "support",
+      });
+      const forbidden = await app.request(
+        "/api/v1/screens/overview",
+        { headers: support.headers },
+        env,
+      );
+      expect(forbidden.status).toBe(403);
+      await expect(forbidden.json()).resolves.toEqual({ error: "forbidden" });
+    } finally {
+      await env.DB.prepare(
+        "INSERT INTO role_permissions (role, permission_key) VALUES ('support', 'tenant.view')",
+      ).run();
+    }
   });
 
   it("returns real counts in at most three D1 round trips beyond auth", async () => {
@@ -69,7 +90,7 @@ describe("GET /api/v1/screens/audit", () => {
     expect(anonymous.status).toBe(401);
     const outsider = await signInAs(env, { email: "audit-outsider@example.test" });
     const denied = await app.request("/api/v1/screens/audit", { headers: outsider.headers }, env);
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBe(401);
   });
 
   it("pages newest first with a keyset cursor in one round trip per page", async () => {

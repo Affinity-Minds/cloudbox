@@ -144,10 +144,10 @@ describe("POST /api/v1/tenants", () => {
     expect(byPlanBody.items.every((i) => i.planCode === "cloudbox-6")).toBe(true);
   });
 
-  it("gates the screens loader by tenant.view (403 for a signed-in non-staff user)", async () => {
+  it("gates the screens loader by tenant.view (a customer session is not read: 401)", async () => {
     const customer = await signInAs(env, { email: "tenants-customer@example.test" });
     const response = await call("/api/v1/screens/tenants", customer);
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
   });
 });
 

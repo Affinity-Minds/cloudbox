@@ -65,10 +65,14 @@ describe("migration 0003 upgrades a Phase 0 database", () => {
       .all<{ name: string }>();
     expect(tables.results.map((t) => t.name)).toEqual(
       expect.arrayContaining([
-        "user",
-        "session",
-        "account",
-        "verification",
+        "staff_users",
+        "staff_sessions",
+        "staff_accounts",
+        "staff_verifications",
+        "customer_users",
+        "customer_sessions",
+        "customer_accounts",
+        "customer_verifications",
         "staff_members",
         "permissions",
         "role_permissions",
@@ -155,10 +159,14 @@ describe("every migration file applies from empty, in order", () => {
       expect.arrayContaining([
         "settings",
         "audit_log",
-        "user",
-        "session",
-        "account",
-        "verification",
+        "staff_users",
+        "staff_sessions",
+        "staff_accounts",
+        "staff_verifications",
+        "customer_users",
+        "customer_sessions",
+        "customer_accounts",
+        "customer_verifications",
         "staff_members",
         "permissions",
         "role_permissions",
@@ -171,7 +179,9 @@ describe("every migration file applies from empty, in order", () => {
         "subscriptions",
         "entitlements",
         "signing_keys",
-        "rate_limit",
+        "staff_rate_limit",
+        "customer_rate_limit",
+        "staff_two_factor",
       ]),
     );
 

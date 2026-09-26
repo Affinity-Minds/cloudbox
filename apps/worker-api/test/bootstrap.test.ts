@@ -61,25 +61,25 @@ describe("bootstrap super admin", () => {
     const box = mailbox();
     const [a, b] = await Promise.all([
       app.request(
-        "/api/auth/get-session",
+        "/api/ops/auth/get-session",
         { headers: { "cf-connecting-ip": "192.0.2.10" } },
         box.env,
       ),
       app.request(
-        "/api/auth/get-session",
+        "/api/ops/auth/get-session",
         { headers: { "cf-connecting-ip": "192.0.2.11" } },
         box.env,
       ),
     ]);
     expect([a.status, b.status]).toEqual([200, 200]);
 
-    expect(await count('SELECT count(*) AS n FROM "user" WHERE email = ?', EMAIL)).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM staff_users WHERE email = ?", EMAIL)).toBe(1);
     expect(await count("SELECT count(*) AS n FROM staff_members WHERE role = 'super_admin'")).toBe(
       1,
     );
     expect(
       await count(
-        `SELECT count(*) AS n FROM account a JOIN "user" u ON u.id = a.user_id
+        `SELECT count(*) AS n FROM staff_accounts a JOIN staff_users u ON u.id = a.user_id
          WHERE u.email = ? AND a.provider_id = 'credential'`,
         EMAIL,
       ),
@@ -140,9 +140,12 @@ describe("bootstrap super admin", () => {
     expect(withOriginal.status).toBe(200);
 
     const late = mailbox({ BOOTSTRAP_SUPER_ADMIN_EMAIL: "late-owner@example.test" });
-    await app.request("/api/auth/get-session", {}, late.env);
+    await app.request("/api/ops/auth/get-session", {}, late.env);
     expect(
-      await count('SELECT count(*) AS n FROM "user" WHERE email = ?', "late-owner@example.test"),
+      await count(
+        "SELECT count(*) AS n FROM staff_users WHERE email = ?",
+        "late-owner@example.test",
+      ),
     ).toBe(0);
     expect(await count("SELECT count(*) AS n FROM staff_members WHERE role = 'super_admin'")).toBe(
       1,

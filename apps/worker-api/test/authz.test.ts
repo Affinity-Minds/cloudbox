@@ -20,7 +20,7 @@ describe("requireUser / session", () => {
 
   it("answers 401 for a forged or unknown session cookie", async () => {
     const response = await get("/api/v1/auth/session", {
-      cookie: "better-auth.session_token=forged.signature",
+      cookie: "cbx_session=forged.signature; cbx_ops_session=forged.signature",
     });
     expect(response.status).toBe(401);
   });
@@ -54,7 +54,7 @@ describe("requireUser / session", () => {
       env,
     );
     expect(out.status).toBe(204);
-    expect(out.headers.get("set-cookie")).toMatch(/session_token=;/);
+    expect(out.headers.get("set-cookie")).toMatch(/cbx_(ops_)?session=;/);
     expect((await get("/api/v1/auth/session", signedIn.headers)).status).toBe(401);
 
     const row = await env.DB.prepare(
@@ -135,14 +135,15 @@ describe("requirePermission", () => {
   const call = (path: string, headers: Record<string, string> = {}) =>
     probe.request(path, { headers }, env);
 
-  it("401 without a session, 403 for a non-staff user, 200 with the grant", async () => {
+  it("two identity systems: each guard reads only its own session (ADR 0002)", async () => {
     expect((await call("/audit")).status).toBe(401);
     const customer = await signInAs(env, { email: "perm-customer@example.test" });
     expect((await call("/any-user", customer.headers)).status).toBe(200);
+    // A customer session is not read on a staff route: 401, not 403.
     const denied = await call("/staff-only", customer.headers);
-    expect(denied.status).toBe(403);
-    await expect(denied.json()).resolves.toEqual({ error: "forbidden" });
-    expect((await call("/audit", customer.headers)).status).toBe(403);
+    expect(denied.status).toBe(401);
+    await expect(denied.json()).resolves.toEqual({ error: "unauthenticated" });
+    expect((await call("/audit", customer.headers)).status).toBe(401);
 
     const reader = await signInAs(env, {
       email: "perm-reader@example.test",
@@ -151,6 +152,11 @@ describe("requirePermission", () => {
     expect((await call("/staff-only", reader.headers)).status).toBe(200);
     expect((await call("/audit", reader.headers)).status).toBe(200);
     expect((await call("/staff-manage", reader.headers)).status).toBe(403);
+    // …and a staff session is not read on a customer route.
+    expect((await call("/any-user", reader.headers)).status).toBe(401);
+    // With both cookies, each route still uses only its own.
+    const both = { ...reader.headers, cookie: `${reader.cookie}; ${customer.cookie}` };
+    expect(await (await call("/any-user", both)).json()).toEqual({ id: customer.userId });
   });
 
   it("admin is denied staff.manage by the seed; super admin holds it", async () => {

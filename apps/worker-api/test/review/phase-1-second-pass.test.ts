@@ -194,7 +194,7 @@ describe("S-2 (High): the per-email OTP ceiling silently drops the owner's code"
       }
     }
     // Let the code the attacker's sends kept alive expire, as it would 5 minutes later.
-    await env.DB.prepare("UPDATE verification SET expires_at = ? WHERE identifier = ?")
+    await env.DB.prepare("UPDATE customer_verifications SET expires_at = ? WHERE identifier = ?")
       .bind(Date.now() - 1000, `sign-in-otp-${email}`)
       .run();
     const before = sent.length;
@@ -251,7 +251,7 @@ describe("S-4 (Medium): trusted devices bypass the authenticator and survive an 
       { cookies },
     );
     const userId = (
-      await env.DB.prepare('SELECT id FROM "user" WHERE email = ?')
+      await env.DB.prepare("SELECT id FROM staff_users WHERE email = ?")
         .bind(email)
         .first<{ id: string }>()
     )?.id;
@@ -267,7 +267,7 @@ describe("S-4 (Medium): trusted devices bypass the authenticator and survive an 
       expect(s.status).toBe(401);
     }
     const trust = await env.DB.prepare(
-      "SELECT count(*) AS n FROM verification WHERE identifier LIKE 'trust-device-%' AND value = ?",
+      "SELECT count(*) AS n FROM staff_verifications WHERE identifier LIKE 'trust-device-%' AND value = ?",
     )
       .bind(userId)
       .first<{ n: number }>();
@@ -319,6 +319,9 @@ describe("S-5 (Medium): the reset path hands the resetter a working credential f
 
 describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-setup", () => {
   const OPEN_DURING_SETUP = new Set(["GET /api/v1/auth/session", "POST /api/v1/auth/logout"]);
+  // WT-1 (owner decision, two identity systems): customer-only routes never read a staff session,
+  // so a staff account mid-setup gets 401 there, not setup_required. Asserted in authz tests.
+  const CUSTOMER_ONLY = (path: string) => path.startsWith("/api/v1/me");
   const PUBLIC = new Set([
     "GET /api/v1",
     "GET /api/v1/foundation",
@@ -333,6 +336,7 @@ describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-s
           (r) =>
             !PUBLIC.has(`${r.method} ${r.path}`) &&
             !OPEN_DURING_SETUP.has(`${r.method} ${r.path}`) &&
+            !CUSTOMER_ONLY(r.path) &&
             !r.path.startsWith("/api/v1/agent"),
         )
         .map((r) => [`${r.method} ${r.path}`, r]),
@@ -430,7 +434,7 @@ describe("S-9 (Low): bootstrap seeding forces the change it records", () => {
       BOOTSTRAP_SUPER_ADMIN_EMAIL: email,
       BOOTSTRAP_SUPER_ADMIN_PASSWORD: "bootstrap-secret-password-1",
     } satisfies Bindings;
-    await app.request("/api/auth/get-session", {}, e);
+    await app.request("/api/ops/auth/get-session", {}, e);
     const row = await env.DB.prepare(
       "SELECT must_change_password AS m FROM staff_members WHERE user_id = ?",
     )

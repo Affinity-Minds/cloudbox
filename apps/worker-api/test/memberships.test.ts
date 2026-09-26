@@ -57,7 +57,7 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
       email: "new.invitee@example.test",
     });
 
-    const row = await env.DB.prepare("SELECT id, email FROM user WHERE email = ?")
+    const row = await env.DB.prepare("SELECT id, email FROM customer_users WHERE email = ?")
       .bind("new.invitee@example.test")
       .first<{ id: string; email: string }>();
     expect(row?.id).toBe(membership.userId);

@@ -81,13 +81,14 @@ describe("POST /api/v1/devices/:deviceId/revoke (staff gate)", () => {
     );
     expect(anonymous.status).toBe(401);
 
+    // A customer session is not read on a staff route (two identity systems, ADR 0002): 401.
     const outsider = await signInAs(env, { email: "devices-outsider@example.test" });
     const denied = await app.request(
       `/api/v1/devices/${deviceId}/revoke`,
       { method: "POST", headers: outsider.headers },
       env,
     );
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBe(401);
   });
 
   it("204s for staff holding device.manage and audits DEVICE_REVOKED", async () => {

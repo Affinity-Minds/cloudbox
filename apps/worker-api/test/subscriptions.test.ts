@@ -601,6 +601,10 @@ describe("authorization boundary (real WT-1 middleware, seed matrix of migration
       if (grants[role](key)) {
         // Past the gate: the handler answers (200/400/404/409), never 401/403.
         expect([401, 403]).not.toContain(response.status);
+      } else if (role === "none") {
+        // A customer session never reaches a staff route: it is not even read (ADR 0002).
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ error: "unauthenticated" });
       } else {
         expect(response.status).toBe(403);
         expect(await response.json()).toEqual({ error: "forbidden" });

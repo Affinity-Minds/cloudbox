@@ -89,7 +89,11 @@ async function auditRows(eventType: string, entityId: string) {
 /** Sign-in is closed: an address can sign in only once an admin action created its user row. */
 const known = (email: string) => ensureUserByEmail(env, email);
 
-async function countRows(table: "user" | "verification", where: string, value: string) {
+async function countRows(
+  table: "customer_users" | "customer_verifications",
+  where: string,
+  value: string,
+) {
   const row = await env.DB.prepare(`SELECT count(*) AS n FROM "${table}" WHERE ${where} = ?`)
     .bind(value)
     .first<{ n: number }>();
@@ -141,7 +145,7 @@ describe("email OTP sign-in", () => {
     );
     expect(verified.status).toBe(200);
     const cookie = cookieFrom(verified);
-    expect(cookie).toMatch(/session_token=/);
+    expect(cookie).toMatch(/^cbx_session=/);
     // Host-only: no Domain attribute on the session cookie.
     expect(verified.headers.get("set-cookie")).not.toMatch(/domain=/i);
 
@@ -165,7 +169,9 @@ describe("email OTP sign-in", () => {
   it("closed sign-in: an unknown email gets the identical 200, but no code, row or mail", async () => {
     await known("known@example.test");
     const box = withMailbox();
-    const users = await env.DB.prepare('SELECT count(*) AS n FROM "user"').first<{ n: number }>();
+    const users = await env.DB.prepare("SELECT count(*) AS n FROM customer_users").first<{
+      n: number;
+    }>();
 
     const ip = nextIp();
     const knownResponse = await sendCode("known@example.test", box.env, ip);
@@ -178,11 +184,17 @@ describe("email OTP sign-in", () => {
     expect(unknownResponse.headers.get("set-cookie")).toBe(knownResponse.headers.get("set-cookie"));
 
     expect(box.sent.map((m) => m.to)).toEqual(["known@example.test"]);
-    const after = await env.DB.prepare('SELECT count(*) AS n FROM "user"').first<{ n: number }>();
+    const after = await env.DB.prepare("SELECT count(*) AS n FROM customer_users").first<{
+      n: number;
+    }>();
     expect(after?.n).toBe(users?.n);
-    expect(await countRows("user", "email", "nobody-here@example.test")).toBe(0);
+    expect(await countRows("customer_users", "email", "nobody-here@example.test")).toBe(0);
     expect(
-      await countRows("verification", "identifier", "sign-in-otp-nobody-here@example.test"),
+      await countRows(
+        "customer_verifications",
+        "identifier",
+        "sign-in-otp-nobody-here@example.test",
+      ),
     ).toBe(0);
     expect(await auditRows("AUTH_OTP_SENT", "nobody-here@example.test")).toEqual([
       { outcome: "unknown_email", client: expect.any(String) },
@@ -203,7 +215,7 @@ describe("email OTP sign-in", () => {
     expect(ghost.status).toBe(400);
     expect(await ghost.text()).toBe(await wrong.text());
     expect(ghost.headers.get("set-cookie")).toBeNull();
-    expect(await countRows("user", "email", "ghost@example.test")).toBe(0);
+    expect(await countRows("customer_users", "email", "ghost@example.test")).toBe(0);
     expect(await auditRows("AUTH_LOGIN_FAILED", "ghost@example.test")).toEqual([
       { method: "email_otp", reason: "INVALID_OTP", client: expect.any(String) },
     ]);
@@ -268,7 +280,7 @@ describe("email OTP sign-in", () => {
     const ip = nextIp();
     await sendCode("expired@example.test", box.env, ip);
     const code = box.codeFor("expired@example.test");
-    await env.DB.prepare("UPDATE verification SET expires_at = ? WHERE identifier = ?")
+    await env.DB.prepare("UPDATE customer_verifications SET expires_at = ? WHERE identifier = ?")
       .bind(Date.now() - 1000, "sign-in-otp-expired@example.test")
       .run();
     const response = await verifyCode("expired@example.test", code, box.env, ip);
@@ -320,7 +332,7 @@ describe("email OTP sign-in", () => {
       statuses.push((await sendCode(`ip-limit-${i}@example.test`, box.env, ip)).status);
     }
     expect(statuses).toEqual([200, 200, 200, 429]);
-    const stored = await env.DB.prepare("SELECT count(*) AS n FROM rate_limit").first<{
+    const stored = await env.DB.prepare("SELECT count(*) AS n FROM customer_rate_limit").first<{
       n: number;
     }>();
     expect(stored?.n).toBeGreaterThan(0);

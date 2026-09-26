@@ -99,7 +99,7 @@ describe("clients are IPv6 /48s (T-1)", () => {
         box.env,
       );
     }
-    const row = await env.DB.prepare("SELECT count FROM rate_limit WHERE key = ?")
+    const row = await env.DB.prepare("SELECT count FROM customer_rate_limit WHERE key = ?")
       .bind(await accountBudgetKey("budget-count@example.test"))
       .first<{ count: number }>();
     expect(row?.count).toBe(3);
@@ -216,7 +216,7 @@ describe("without Turnstile configured: a 15-minute per-account cooldown (the on
 
     // After the cooldown the budget starts from zero.
     await env.DB.prepare(
-      "UPDATE rate_limit SET last_request = ? WHERE key LIKE 'cb:otp-cooldown:%'",
+      "UPDATE customer_rate_limit SET last_request = ? WHERE key LIKE 'cb:otp-cooldown:%'",
     )
       .bind(Date.now() - (ACCOUNT_COOLDOWN_SECONDS + 1) * 1000)
       .run();

@@ -77,7 +77,7 @@ describe("staff management API", () => {
       role: "support",
       createdBy: root.userId,
     });
-    const users = await env.DB.prepare('SELECT count(*) AS n FROM "user" WHERE email = ?')
+    const users = await env.DB.prepare("SELECT count(*) AS n FROM staff_users WHERE email = ?")
       .bind("new.support@example.test")
       .first<{ n: number }>();
     expect(users?.n).toBe(1);
