@@ -3,7 +3,7 @@
   "name": "cloudbox",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-26",
-  "workers_dev": true,
+  "workers_dev": false,
   "routes": [
     {
       "pattern": "box.affinityminds.in",
@@ -51,7 +51,7 @@
   "vars": {
     "BUILD_SHA": "development",
     "BUILD_TIME": "development",
-    "ENVIRONMENT": "development",
+    "ENVIRONMENT": "production",
     "EMAIL_FROM": "no-reply@em.affinity.ai.in",
     "BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"
   }
