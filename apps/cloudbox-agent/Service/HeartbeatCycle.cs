@@ -16,7 +16,8 @@ public sealed class HeartbeatCycle(
     Random rng,
     Func<long?>? freeBytes = null)
 {
-    private static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(10);
+    // Generous so an unsynchronised lab clock is not reported as tampering; Slice 4.1 tunes this.
+    private static readonly TimeSpan ClockTolerance = TimeSpan.FromHours(1);
     private readonly ILogger _log = Log.ForContext<HeartbeatCycle>();
     private readonly Func<long?> _freeBytes = freeBytes ?? HealthBuilder.SystemDriveFreeBytes;
     private bool _bindingReported;

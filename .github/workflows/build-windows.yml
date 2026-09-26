@@ -24,6 +24,8 @@ jobs:
       - run: dotnet test CloudBox.slnx --configuration Release --no-build --logger "console;verbosity=normal"
       - run: dotnet publish apps/cloudbox-agent -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
       - run: dotnet publish apps/cloudbox-status -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+      - name: List published files (must be the two exes only)
+        run: Get-ChildItem publish | Format-Table Name, Length -AutoSize
       - uses: actions/upload-artifact@v4
         with:
           name: CloudBox.Agent-win-x64

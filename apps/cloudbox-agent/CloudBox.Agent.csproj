@@ -11,8 +11,8 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- CLI verbs (install/uninstall/repair/verify-clean/status) need elevation; the service runs as LocalSystem. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- Used only by the single-file win-x64 publish in build-windows.yml. -->
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Single-file publish (build-windows.yml). Native libraries are NOT self-extracted: extraction would leave
+         an unrecorded %TEMP%\.net folder behind, breaking the uninstall contract. -->
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>

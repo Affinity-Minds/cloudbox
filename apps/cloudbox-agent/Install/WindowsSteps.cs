@@ -41,6 +41,23 @@ public static class WindowsSteps
     internal static string? Str(JsonNode? n) =>
         n is JsonValue v && v.TryGetValue<string>(out var s) ? s : n?.ToJsonString();
 
+    /// <summary>Retries briefly: a just-stopped service process can hold its files for a moment.</summary>
+    internal static void Retry(Action action)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                action();
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 5)
+            {
+                Thread.Sleep(1000);
+            }
+        }
+    }
+
     internal static string[] Args(JsonObject? spec, string name = "args") =>
         spec?[name] is JsonArray a ? a.Select(x => x!.GetValue<string>()).ToArray() : [];
 }
@@ -95,6 +112,17 @@ public sealed class ServiceStep : IInstallStep
         }
 
         ProcessRunner.RunChecked("sc.exe", "delete", e.Id);
+
+        // "Stopped" is reported before the process has fully exited; wait so its files can be deleted next.
+        var bin = e.Spec?["binPath"]?.GetValue<string>() ?? AgentPaths.InstalledExe;
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(bin)))
+        {
+            using (p)
+            {
+                if (p.Id != Environment.ProcessId) p.WaitForExit(15_000);
+            }
+        }
+
         return RevertOutcome.Removed;
     }
 
@@ -133,11 +161,11 @@ public sealed class DirectoryStep : IInstallStep
         if (WindowsSteps.IsUnder(context.ProcessPath, e.Id))
         {
             // Delete everything except the running exe; a detached cmd removes the rest after exit.
-            foreach (var f in Directory.EnumerateFiles(e.Id, "*", SearchOption.AllDirectories))
+            foreach (var f in Directory.EnumerateFiles(e.Id, "*", SearchOption.AllDirectories).ToList())
             {
                 if (!string.Equals(Path.GetFullPath(f), Path.GetFullPath(context.ProcessPath!), StringComparison.OrdinalIgnoreCase))
                 {
-                    File.Delete(f);
+                    WindowsSteps.Retry(() => File.Delete(f));
                 }
             }
 
@@ -145,7 +173,7 @@ public sealed class DirectoryStep : IInstallStep
             return RevertOutcome.Scheduled;
         }
 
-        Directory.Delete(e.Id, recursive: true);
+        WindowsSteps.Retry(() => Directory.Delete(e.Id, recursive: true));
         return RevertOutcome.Removed;
     }
 
@@ -179,7 +207,7 @@ public sealed class FileStep : IInstallStep
             return RevertOutcome.Scheduled;
         }
 
-        File.Delete(e.Id);
+        WindowsSteps.Retry(() => File.Delete(e.Id));
         return RevertOutcome.Removed;
     }
 

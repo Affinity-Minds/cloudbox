@@ -8,7 +8,7 @@ using Microsoft.Win32;
 namespace CloudBox.Agent.Tests;
 
 /// <summary>Real Windows APIs on the CI runner (windows-latest, elevated). No TPM assumptions.</summary>
-public sealed class WindowsIntegrationTests : IDisposable
+public sealed class WindowsIntegrationTests(ITestOutputHelper output) : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("cbx-win-").FullName;
     private readonly string _regKey = $@"HKCU\Software\CloudBoxTests\{Guid.NewGuid():N}";
@@ -48,6 +48,7 @@ public sealed class WindowsIntegrationTests : IDisposable
         try
         {
             var key = store.OpenOrCreate();
+            output.WriteLine($"CI runner device key protection: {key.KeyProtection}");
             Assert.Contains(key.KeyProtection, new[] { "tpm", "software" });
         }
         finally
