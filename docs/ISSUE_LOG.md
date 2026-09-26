@@ -134,6 +134,28 @@ Newest first. Record only non-obvious failures or fixes with meaningful blast ra
 
 **Verification:** `phase-0/bootstrap` branch creation succeeded after re-authentication.
 
+## 2026-09-27 — Drizzle `db.run(sql…)` inside `db.batch([...])` threw "Cannot read properties of undefined (reading 'bind')" (WT-14)
+**Symptom:** `POST /api/v1/license-keys/batches` answered 500; the log showed `TypeError: Cannot read properties of undefined (reading 'bind')`.
+
+**Cause:** ``db.run(sql`…`)`` executes immediately and returns a promise; it is not a batch item. `db.batch` expects query builders (`insert`, `update`, `select`, …).
+
+**Fix:** express the raw multi-row insert as ``db.insert(licenseKeys).select(sql`SELECT … FROM json_each(?)`)``, which is a batchable builder (every table column, in declaration order).
+
+**Blast radius:** licence-key generation only; caught by `test/license-keys.test.ts` before commit.
+
+**Verification:** 500-key batch test green (`license-keys.test.ts`).
+
+## 2026-09-27 — `/start` did not move on after a correct code (WT-14)
+**Symptom:** in the local demo the code step stayed on screen although `POST /api/auth/start/verify` answered 200 with a session cookie.
+
+**Cause:** the page called `queryClient.removeQueries(session)` then `fetchQuery(session)`. Removing the query detaches the `useQuery` observer the page renders from, so the new data never reached it. A second cause: a code typed before the Turnstile widget had produced a token was dropped silently.
+
+**Fix:** `resetQueries` (refetches the observed query in place); submit the typed code as soon as the widget yields a token; an in-flight ref so a code is never sent twice.
+
+**Blast radius:** `/start` UI only (the API was correct).
+
+**Verification:** Playwright run against wrangler dev + fresh local D1 (`docs/evidence/wt-p2-onboarding/01…06`).
+
 ## Template
 
 ### YYYY-MM-DD — Short symptom

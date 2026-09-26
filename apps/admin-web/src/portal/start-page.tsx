@@ -6,7 +6,7 @@ import { Email } from "@cloudbox/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { Building2, KeyRound, Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { customerSessionQuery, describeAuthError } from "@/api/auth";
 import { describeError } from "@/api/client";
 import {
@@ -150,21 +150,32 @@ function CodeStep({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const inFlight = useRef(false);
+
   async function verify(value: string) {
-    if (busy || !turnstile.ready) return;
+    if (inFlight.current || !turnstile.ready) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
       await startVerify(email, value, turnstile.take(), honeypot);
-      queryClient.removeQueries({ queryKey: customerSessionQuery.queryKey });
-      await queryClient.fetchQuery(customerSessionQuery);
+      inFlight.current = true; // signed in: never send this code again while the page moves on
+      // Refetch the (401) session the page is watching: it now answers, and the page moves on.
+      await queryClient.resetQueries({ queryKey: customerSessionQuery.queryKey });
     } catch (cause) {
       setError(describeAuthError(cause));
       setCode("");
+      inFlight.current = false;
     } finally {
       setBusy(false);
     }
   }
+
+  // A code typed before the challenge finished is sent as soon as the widget yields a token.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the token's arrival triggers this.
+  useEffect(() => {
+    if (turnstile.ready && code.length === 6 && !error) void verify(code);
+  }, [turnstile.ready]);
 
   return (
     <form
