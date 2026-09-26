@@ -583,3 +583,73 @@ export const signingKeys = sqliteTable(
   },
   (table) => [check("signing_keys_status_check", sql`${table.status} IN ('active', 'retired')`)],
 );
+
+// ─── License keys (migration 0010, WT-14) ────────────────────────────────────────────────────
+
+export const LICENSE_KEY_STATUSES = ["unredeemed", "redeemed", "revoked"] as const;
+
+export const licenseKeys = sqliteTable(
+  "license_keys",
+  {
+    id: text("id").primaryKey(),
+    /** Groups the keys of one generation call (a label may be reused across batches). */
+    batchId: text("batch_id").notNull(),
+    /** SHA-256 (hex) of the plaintext key. The plaintext exists only in the generation response. */
+    codeHash: text("code_hash").notNull(),
+    /** Last four symbols of the key, for support lookups. */
+    codeLast4: text("code_last4").notNull(),
+    planCode: text("plan_code").notNull(),
+    batchLabel: text("batch_label").notNull(),
+    status: text("status", { enum: LICENSE_KEY_STATUSES }).notNull().default("unredeemed"),
+    /** Staff user id. */
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(isoNow),
+    expiresAt: text("expires_at"),
+    redeemedAt: text("redeemed_at"),
+    redeemedTenantId: text("redeemed_tenant_id"),
+    redeemedByEmail: text("redeemed_by_email"),
+    revokedAt: text("revoked_at"),
+    revokeReason: text("revoke_reason"),
+  },
+  (table) => [
+    uniqueIndex("license_keys_code_hash_unique").on(table.codeHash),
+    index("license_keys_batch_idx").on(table.batchId, table.createdAt),
+    index("license_keys_status_idx").on(table.status, table.createdAt),
+    index("license_keys_last4_idx").on(table.codeLast4),
+    check(
+      "license_keys_status_check",
+      sql`${table.status} IN ('unredeemed', 'redeemed', 'revoked')`,
+    ),
+  ],
+);
+
+// ─── Email providers (migration 0008, WT-12) ─────────────────────────────────────────────────
+
+export const EMAIL_PROVIDER_KINDS = ["cloudflare_binding", "smtp", "log"] as const;
+
+export const emailProviders = sqliteTable(
+  "email_providers",
+  {
+    id: text("id").primaryKey().notNull(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: EMAIL_PROVIDER_KINDS }).notNull(),
+    priority: integer("priority").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    fromAddress: text("from_address").notNull(),
+    /** Non-secret fields only: `{host, port, secure, username}` for `smtp`, `{}` otherwise. */
+    configJson: text("config_json").notNull().default("{}"),
+    /** AES-256-GCM ciphertext/IV pair, base64. Null when the provider has no secret. */
+    secretCiphertext: text("secret_ciphertext"),
+    secretIv: text("secret_iv"),
+    updatedBy: text("updated_by"),
+    createdAt: text("created_at").notNull().default(isoNow),
+    updatedAt: text("updated_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("email_providers_enabled_priority_idx").on(table.enabled, table.priority),
+    check(
+      "email_providers_kind_check",
+      sql`${table.kind} IN ('cloudflare_binding', 'smtp', 'log')`,
+    ),
+  ],
+);
