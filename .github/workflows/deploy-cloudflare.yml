@@ -115,6 +115,16 @@ jobs:
             openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put BETTER_AUTH_SECRET
           fi
 
+      - name: Sync ENTITLEMENT_SIGNING_JWK (when set)
+        working-directory: apps/worker-api
+        env:
+          ENTITLEMENT_SIGNING_JWK: ${{ secrets.ENTITLEMENT_SIGNING_JWK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ENTITLEMENT_SIGNING_JWK}" ]; then echo "not set; issuance stays 503"; exit 0; fi
+          printf '%s' "$ENTITLEMENT_SIGNING_JWK" | pnpm wrangler secret put ENTITLEMENT_SIGNING_JWK
+
       - name: Deploy Worker
         working-directory: apps/worker-api
         run: pnpm wrangler deploy
