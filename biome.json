@@ -9,8 +9,8 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
-      "!!**/.claude",
-      "!!**/.worktrees",
+      "!!.claude",
+      "!!.worktrees",
       "!!**/dist",
       "!apps/admin-web/src/components/ui",
       "!apps/admin-web/src/routeTree.gen.ts",

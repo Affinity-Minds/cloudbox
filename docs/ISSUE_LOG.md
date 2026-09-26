@@ -24,16 +24,27 @@ Newest first. Record only non-obvious failures or fixes with meaningful blast ra
 
 **Verification:** `PATCH /subscriptions/:id` with `{}` answers 400; covered in `test/subscriptions.test.ts`.
 
-## 2026-09-27 — `pnpm check` finds no files inside `.claude/worktrees/*`
-**Symptom:** `biome check .` in a worktree under `.claude/worktrees/` reports "No files were processed" and fails `verify`.
+## 2026-09-27 — A developer's `.dev.vars` changed worker test results
+**Symptom:** `a mail failure still answers 200 and records the error code` passed, then failed after `wrangler dev` was set up locally: the audit row read `{echoed:true}` instead of `{errorCode:…}`.
 
-**Cause:** `biome.json` excludes `!!**/.claude`, which Biome matches against the absolute path, so the whole worktree is excluded.
+**Cause:** `@cloudflare/vitest-pool-workers` reads `wrangler.jsonc` **and** `apps/worker-api/.dev.vars`, so a local `OTP_DEV_ECHO=1` leaked into the test environment. (The send outcome also overwrote the real error code when the echo fired.)
 
-**Fix (local only):** run Biome with a copy of the config that drops that line and disables VCS integration (`--config-path <scratch dir>`); CI (checked out at the repo root) is unaffected. Not changed in the repo because `biome.json` is WT-0's.
+**Fix:** `vitest.config.ts` pins `OTP_DEV_ECHO: "0"` (and a test-only `BETTER_AUTH_SECRET`) in miniflare `bindings`, which override `.dev.vars`; the audit outcome now keeps the send result and adds `echoed: true`.
 
-**Blast radius:** Every worktree created under `.claude/worktrees/`; `verify` is red locally for a reason unrelated to the code.
+**Blast radius:** Any test that depends on a var a developer may set in `.dev.vars`. Pin such vars in `vitest.config.ts`.
 
-**Verification:** Biome checks 100+ files with the scratch config; CI runs the committed config.
+**Verification:** Worker tests 51/51 with and without `apps/worker-api/.dev.vars` present.
+
+## 2026-09-27 — `pnpm run verify` checks nothing inside `.claude/worktrees/*`
+**Symptom:** In a worktree under `.claude/worktrees/`, `pnpm check` (`biome check .`) fails with "No files were processed in the specified paths … These paths were provided but ignored: ." so `verify` stops at step one.
+
+**Cause:** `biome.json` excludes `!!**/.claude` (meant for sibling worktrees inside the main checkout); run from inside a worktree, the path of every file contains `/.claude/`.
+
+**Fix (workaround):** Run `biome check apps packages biome.json package.json tsconfig.base.json` then `pnpm typecheck && pnpm test && pnpm build`. A real fix belongs to WT-0 (`biome.json`), requested in `docs/handoffs/wt-p1-auth.md`.
+
+**Blast radius:** Every agent worktree under `.claude/worktrees/`; CI (a normal checkout) is unaffected.
+
+**Verification:** The explicit-path check processes 96 files and the remaining verify steps are green.
 
 ## 2026-09-27 — First production deploy failed twice on the Cloudflare account, not the code
 **Symptom:** `Deploy CloudBox` failed at "Ensure Cloudflare resources": first `Authentication error [code: 10000]` on `/d1/database`, then after a token fix `Please enable R2 through the Cloudflare Dashboard [code: 10042]`. The first D1 database that did get created landed in region WNAM.
