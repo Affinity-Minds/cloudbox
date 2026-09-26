@@ -3,10 +3,18 @@ import { z } from "zod";
 export const StaffRole = z.enum(["super_admin", "admin", "support", "read_only"]);
 export type StaffRole = z.infer<typeof StaffRole>;
 
+/**
+ * One spelling per mailbox (review U-1): NFKC-normalised, trimmed and lower-cased *before*
+ * validation, so compatibility and case variants (e.g. the Kelvin sign "K") map to the same address
+ * as its plain spelling, and every limit keyed by it is shared.
+ */
+export const normalizeEmail = (value: string) => value.normalize("NFKC").trim().toLowerCase();
+
 export const Email = z
-  .email()
-  .max(254)
-  .transform((value) => value.toLowerCase());
+  .string()
+  .max(320)
+  .transform(normalizeEmail)
+  .pipe(z.email().max(254));
 
 /** `POST /api/auth/email-otp/send-verification-otp` (Better Auth emailOTP plugin). */
 export const OtpSendRequest = z.object({
@@ -47,6 +55,8 @@ export const SessionResponse = z.object({
   activeTenantId: z.string().nullable(),
   /** Present for staff only. */
   setup: StaffSetup.nullable().optional(),
+  /** Which sign-in surface the session came from: `/login` (customer) or the ops login (staff). */
+  surface: z.enum(["customer", "staff"]).optional(),
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 

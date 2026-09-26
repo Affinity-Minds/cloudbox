@@ -9,19 +9,17 @@ import { countingD1 } from "./fixtures";
 
 /**
  * Session lookup (Better Auth) + one staff-grants query: the generic `guard()` overhead every
- * permission-gated route pays before its own query. Measured by hitting a guarded route with a
- * non-staff session, which is denied (403) before the route's own query ever runs — isolating
- * this from `GET /api/v1/auth/session`'s own extra active-tenant lookup (WT-2).
+ * permission-gated route pays for a staff session before its own query. Measured by hitting a route
+ * the read-only staff member is denied (403, `staff.manage`) before its own query runs.
  */
 let AUTH_ROUND_TRIPS = 0;
 let staff: SignedIn;
 beforeAll(async () => {
   staff = await signInAs(env, { email: "screens-reader@example.test", staffRole: "read_only" });
-  const nonStaff = await signInAs(env, { email: "screens-auth-baseline@example.test" });
   const counted = countingD1(env.DB);
   const denied = await app.request(
-    "/api/v1/screens/audit",
-    { headers: nonStaff.headers },
+    "/api/v1/staff",
+    { headers: staff.headers },
     { ...env, DB: counted },
   );
   expect(denied.status).toBe(403);

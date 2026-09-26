@@ -399,7 +399,8 @@ function surfaceOptions(
           }
           case SIGN_IN_OTP_PATH: {
             const email = Email.safeParse((ctx.body as { email?: unknown } | undefined)?.email);
-            if (!email.success) return;
+            // The gate in src/index.ts already refused unparseable addresses (U-1); never step aside.
+            if (!email.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
             // Too many failed codes from this client for this address (S-6): fail like a wrong
             // code, without checking it and without consuming an attempt.
             const failures = await counterKey("otp-fail", email.data, client);
@@ -441,7 +442,7 @@ function surfaceOptions(
           case SIGN_IN_PASSWORD_PATH: {
             const body = ctx.body as { email?: unknown; password?: unknown } | undefined;
             const email = Email.safeParse(body?.email);
-            if (!email.success) return; // Better Auth answers INVALID_EMAIL.
+            if (!email.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
             const failures = await counterKey("pw-fail", email.data, client);
             if (
               (await readCounter(db, failures, PASSWORD_FAILURE_CAP.windowSeconds)) >=

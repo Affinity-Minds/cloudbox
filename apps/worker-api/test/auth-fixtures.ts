@@ -1,11 +1,12 @@
 // Owner: WT-1. Signs a user in for route tests with a real Better Auth session.
 // The session is created by Better Auth's own test-utils plugin on a test-only instance that shares
-// the runtime options (same secret, adapter and cookie names), so the cookie is exactly what the
-// app issues after an OTP sign-in. Nothing here mints tokens or cookies by hand.
+// the runtime options of the right surface (same secret, adapter and cookie names): staff get a
+// staff-mount session (/api/ops/auth), everyone else a customer-mount session (/api/auth). Nothing
+// here mints tokens or cookies by hand.
 import type { StaffRole } from "@cloudbox/contracts";
 import { betterAuth } from "better-auth";
 import { testUtils } from "better-auth/plugins";
-import { authOptions } from "../src/auth";
+import { authOptions, customerAuthOptions } from "../src/auth";
 import type { Bindings } from "../src/env";
 
 export type SignedIn = {
@@ -18,8 +19,12 @@ export type SignedIn = {
 
 export const TEST_ORIGIN = "http://localhost";
 
-function testAuth(env: Bindings) {
-  const options = authOptions(env, { baseURL: TEST_ORIGIN });
+function testAuth(env: Bindings, staff: boolean) {
+  if (staff) {
+    const options = authOptions(env, { baseURL: TEST_ORIGIN });
+    return betterAuth({ ...options, plugins: [...options.plugins, testUtils()] });
+  }
+  const options = customerAuthOptions(env, { baseURL: TEST_ORIGIN });
   return betterAuth({ ...options, plugins: [...options.plugins, testUtils()] });
 }
 
@@ -40,7 +45,7 @@ export async function signInAs(
     setupComplete?: boolean;
   },
 ): Promise<SignedIn> {
-  const ctx = await testAuth(env).$context;
+  const ctx = await testAuth(env, Boolean(input.staffRole)).$context;
   const email = input.email.toLowerCase();
   const existing = await ctx.internalAdapter.findUserByEmail(email);
   const user =

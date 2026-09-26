@@ -105,18 +105,18 @@ async function enrol(email: string) {
   );
   const cookies = jar();
   expect(
-    (await authPost("/api/auth/sign-in/email", { email, password: INITIAL }, { cookies })).status,
+    (await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL }, { cookies })).status,
   ).toBe(200);
   expect(
     (
       await authPost(
-        "/api/auth/change-password",
+        "/api/ops/auth/change-password",
         { currentPassword: INITIAL, newPassword: CHOSEN, revokeOtherSessions: true },
         { cookies },
       )
     ).status,
   ).toBe(200);
-  const enabled = await authPost("/api/auth/two-factor/enable", { password: CHOSEN }, { cookies });
+  const enabled = await authPost("/api/ops/auth/two-factor/enable", { password: CHOSEN }, { cookies });
   const { totpURI, backupCodes } = (await enabled.json()) as {
     totpURI: string;
     backupCodes: string[];
@@ -124,7 +124,7 @@ async function enrol(email: string) {
   expect(
     (
       await authPost(
-        "/api/auth/two-factor/verify-totp",
+        "/api/ops/auth/two-factor/verify-totp",
         { code: await totpFor(totpURI) },
         { cookies },
       )
@@ -136,7 +136,7 @@ async function enrol(email: string) {
 /** Password step of a sign-in for an enrolled staff member: a jar holding the pending challenge. */
 async function challenge(email: string) {
   const cookies = jar();
-  const res = await authPost("/api/auth/sign-in/email", { email, password: CHOSEN }, { cookies });
+  const res = await authPost("/api/ops/auth/sign-in/email", { email, password: CHOSEN }, { cookies });
   expect(res.status).toBe(200);
   await expect(res.json()).resolves.toMatchObject({ twoFactorRedirect: true });
   return cookies;
@@ -151,11 +151,11 @@ describe("S-1 (High): the per-account password ceiling is a lockout anyone can t
     for (let batch = 0; batch < 10; batch += 1) {
       await Promise.all(
         Array.from({ length: 10 }, () =>
-          authPost("/api/auth/sign-in/email", { email, password: "attacker-guess-000000" }),
+          authPost("/api/ops/auth/sign-in/email", { email, password: "attacker-guess-000000" }),
         ),
       );
     }
-    const owner = await authPost("/api/auth/sign-in/email", { email, password: INITIAL });
+    const owner = await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL });
     expect(owner.status).toBe(200);
   }, 120_000);
 });
@@ -206,11 +206,11 @@ describe("S-3 (Medium): a TOTP code is accepted more than once", () => {
     const code = await totpFor(totpURI);
     const first = await challenge(email);
     expect(
-      (await authPost("/api/auth/two-factor/verify-totp", { code }, { cookies: first })).status,
+      (await authPost("/api/ops/auth/two-factor/verify-totp", { code }, { cookies: first })).status,
     ).toBe(200);
     const second = await challenge(email);
     const replay = await authPost(
-      "/api/auth/two-factor/verify-totp",
+      "/api/ops/auth/two-factor/verify-totp",
       { code },
       { cookies: second },
     );
@@ -224,7 +224,7 @@ describe("S-4 (Medium): trusted devices bypass the authenticator and survive an 
     const { totpURI } = await enrol(email);
     const cookies = await challenge(email);
     const res = await authPost(
-      "/api/auth/two-factor/verify-totp",
+      "/api/ops/auth/two-factor/verify-totp",
       { code: await totpFor(totpURI), trustDevice: true },
       { cookies },
     );
@@ -237,7 +237,7 @@ describe("S-4 (Medium): trusted devices bypass the authenticator and survive an 
     const { totpURI, cookies: setupCookies } = await enrol(email);
     const cookies = await challenge(email);
     await authPost(
-      "/api/auth/two-factor/verify-totp",
+      "/api/ops/auth/two-factor/verify-totp",
       { code: await totpFor(totpURI), trustDevice: true },
       { cookies },
     );
@@ -395,11 +395,11 @@ describe("S-8 (holds): no secret material in audit rows after a full staff lifec
     const { totpURI, backupCodes } = await enrol(email);
     const cookies = await challenge(email);
     await authPost(
-      "/api/auth/two-factor/verify-backup-code",
+      "/api/ops/auth/two-factor/verify-backup-code",
       { code: backupCodes[0] },
       { cookies },
     );
-    await authPost("/api/auth/sign-in/email", { email, password: "wrong-password-xyz-1" });
+    await authPost("/api/ops/auth/sign-in/email", { email, password: "wrong-password-xyz-1" });
     const { results } = await env.DB.prepare(
       "SELECT coalesce(before_json,'') || coalesce(after_json,'') AS j FROM audit_log",
     ).all<{ j: string }>();

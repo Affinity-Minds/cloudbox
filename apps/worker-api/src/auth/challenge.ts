@@ -9,7 +9,6 @@
 // Fallback while TURNSTILE_SECRET_KEY is not configured: a 15-minute per-account cooldown
 // (429 {error:'account_cooldown'}, audited AUTH_ACCOUNT_COOLDOWN). This is the only per-account
 // denial in the system, and it exists only until the owner configures Turnstile.
-import { Email } from "@cloudbox/contracts";
 import { sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { audit } from "../audit";
@@ -74,13 +73,11 @@ async function counters(db: Db, email: string) {
  * on, or the response that asks for the step-up. Uniform for every address (known, unknown, staff):
  * the budget only counts failures, which anyone can cause for any address.
  */
-export async function customerCodeStepUp(c: Context<AppEnv>): Promise<Response | null> {
-  const body = (await c.req.raw
-    .clone()
-    .json()
-    .catch(() => null)) as { email?: unknown } | null;
-  const email = Email.safeParse(body?.email);
-  if (!email.success) return null; // Better Auth answers the malformed request.
+export async function customerCodeStepUp(
+  c: Context<AppEnv>,
+  normalisedEmail: string,
+): Promise<Response | null> {
+  const email = { data: normalisedEmail };
   const db = createDb(c.env.DB);
   const state = await counters(db, email.data);
 

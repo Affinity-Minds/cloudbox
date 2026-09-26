@@ -23,6 +23,7 @@ export default defineConfig(async () => {
             BETTER_AUTH_SECRET: "test-only-better-auth-secret-0123456789abcdef",
             // Deterministic regardless of a developer's local .dev.vars (which the pool also reads).
             OTP_DEV_ECHO: "0",
+            TURNSTILE_SECRET_KEY: "",
           },
         },
       }),

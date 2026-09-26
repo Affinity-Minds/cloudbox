@@ -83,7 +83,7 @@ describe("staff management API", () => {
     expect(users?.n).toBe(1);
 
     const signIn = await app.request(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       {
         method: "POST",
         headers: {

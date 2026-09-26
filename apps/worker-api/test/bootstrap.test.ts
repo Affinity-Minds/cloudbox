@@ -99,7 +99,7 @@ describe("bootstrap super admin", () => {
 
     // The owner signs in with the seeded password and lands in the forced setup.
     const signIn = await post(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: EMAIL, password: PASSWORD },
       box.env,
       "192.0.2.12",
@@ -125,14 +125,14 @@ describe("bootstrap super admin", () => {
   it("never re-seeds: a changed secret does not overwrite the password, and nothing else is created", async () => {
     const box = mailbox({ BOOTSTRAP_SUPER_ADMIN_PASSWORD: "a-different-password-2" });
     const withNew = await post(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: EMAIL, password: "a-different-password-2" },
       box.env,
       "192.0.2.20",
     );
     expect(withNew.status).toBe(401);
     const withOriginal = await post(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: EMAIL, password: PASSWORD },
       box.env,
       "192.0.2.21",

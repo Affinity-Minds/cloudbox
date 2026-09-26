@@ -106,22 +106,22 @@ const wrongCode = (code: string) => (code === "000000" ? "111111" : "000000");
 async function enrol(email: string) {
   await createStaff(email);
   const cookies = jar();
-  const first = await authPost("/api/auth/sign-in/email", { email, password: INITIAL }, cookies);
+  const first = await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL }, cookies);
   expect(first.status).toBe(200);
   const changed = await authPost(
-    "/api/auth/change-password",
+    "/api/ops/auth/change-password",
     { currentPassword: INITIAL, newPassword: CHOSEN, revokeOtherSessions: true },
     cookies,
   );
   expect(changed.status).toBe(200);
-  const enabled = await authPost("/api/auth/two-factor/enable", { password: CHOSEN }, cookies);
+  const enabled = await authPost("/api/ops/auth/two-factor/enable", { password: CHOSEN }, cookies);
   expect(enabled.status).toBe(200);
   const { totpURI, backupCodes } = (await enabled.json()) as {
     totpURI: string;
     backupCodes: string[];
   };
   const confirmed = await authPost(
-    "/api/auth/two-factor/verify-totp",
+    "/api/ops/auth/two-factor/verify-totp",
     { code: await totpFor(totpURI) },
     cookies,
   );
@@ -184,7 +184,7 @@ describe("staff never use email codes; nobody else uses passwords", () => {
 
   it("password sign-in: a non-staff user (even one with a password) and an unknown email fail like a wrong password", async () => {
     const staffId = await createStaff("pw-owner@example.test");
-    const wrong = await authPost("/api/auth/sign-in/email", {
+    const wrong = await authPost("/api/ops/auth/sign-in/email", {
       email: "pw-owner@example.test",
       password: "not-the-password-1",
     });
@@ -194,16 +194,16 @@ describe("staff never use email codes; nobody else uses passwords", () => {
     // A former staff member keeps a credential row, but is no longer staff.
     const formerId = await createStaff("former-staff@example.test");
     await env.DB.prepare("DELETE FROM staff_members WHERE user_id = ?").bind(formerId).run();
-    const former = await authPost("/api/auth/sign-in/email", {
+    const former = await authPost("/api/ops/auth/sign-in/email", {
       email: "former-staff@example.test",
       password: INITIAL,
     });
     await ensureUserByEmail(env, "customer-b@example.test");
-    const customer = await authPost("/api/auth/sign-in/email", {
+    const customer = await authPost("/api/ops/auth/sign-in/email", {
       email: "customer-b@example.test",
       password: INITIAL,
     });
-    const unknown = await authPost("/api/auth/sign-in/email", {
+    const unknown = await authPost("/api/ops/auth/sign-in/email", {
       email: "nobody-at-all@example.test",
       password: INITIAL,
     });
@@ -224,7 +224,7 @@ describe("forced first sign-in: password change, then authenticator", () => {
     const userId = await createStaff("first-login@example.test");
     const cookies = jar();
     const signIn = await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "first-login@example.test", password: INITIAL },
       cookies,
     );
@@ -237,17 +237,17 @@ describe("forced first sign-in: password change, then authenticator", () => {
     await expect(blocked.json()).resolves.toMatchObject({ error: "setup_required" });
 
     // Authenticator before the password change is refused.
-    const early = await authPost("/api/auth/two-factor/enable", { password: INITIAL }, cookies);
+    const early = await authPost("/api/ops/auth/two-factor/enable", { password: INITIAL }, cookies);
     expect(early.status).toBe(403);
     // The new password must differ from the initial one.
     const same = await authPost(
-      "/api/auth/change-password",
+      "/api/ops/auth/change-password",
       { currentPassword: INITIAL, newPassword: INITIAL },
       cookies,
     );
     expect(same.status).toBe(400);
     const changed = await authPost(
-      "/api/auth/change-password",
+      "/api/ops/auth/change-password",
       { currentPassword: INITIAL, newPassword: CHOSEN, revokeOtherSessions: true },
       cookies,
     );
@@ -256,7 +256,7 @@ describe("forced first sign-in: password change, then authenticator", () => {
     expect(midway.setup).toEqual({ passwordChangeRequired: false, authenticatorRequired: true });
     expect((await get("/api/v1/screens/audit", cookies)).status).toBe(403);
 
-    const enabled = await authPost("/api/auth/two-factor/enable", { password: CHOSEN }, cookies);
+    const enabled = await authPost("/api/ops/auth/two-factor/enable", { password: CHOSEN }, cookies);
     expect(enabled.status).toBe(200);
     const { totpURI, backupCodes } = (await enabled.json()) as {
       totpURI: string;
@@ -268,7 +268,7 @@ describe("forced first sign-in: password change, then authenticator", () => {
     // Enrolment is not complete until a code from the app is verified.
     expect((await get("/api/v1/screens/audit", cookies)).status).toBe(403);
     const confirmed = await authPost(
-      "/api/auth/two-factor/verify-totp",
+      "/api/ops/auth/two-factor/verify-totp",
       { code: await totpFor(totpURI) },
       cookies,
     );
@@ -300,7 +300,7 @@ describe("signing in with password + authenticator", () => {
     ).results;
     const cookies = jar();
     const step1 = await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "two-step@example.test", password: CHOSEN },
       cookies,
     );
@@ -311,12 +311,12 @@ describe("signing in with password + authenticator", () => {
 
     const code = await totpFor(totpURI);
     const wrong = await authPost(
-      "/api/auth/two-factor/verify-totp",
+      "/api/ops/auth/two-factor/verify-totp",
       { code: wrongCode(code) },
       cookies,
     );
     expect(wrong.status).toBe(401);
-    const ok = await authPost("/api/auth/two-factor/verify-totp", { code }, cookies);
+    const ok = await authPost("/api/ops/auth/two-factor/verify-totp", { code }, cookies);
     expect(ok.status).toBe(200);
     expect((await get("/api/v1/screens/audit", cookies)).status).toBe(200);
 
@@ -337,20 +337,20 @@ describe("signing in with password + authenticator", () => {
     const { totpURI } = await enrol("totp-limit@example.test");
     const cookies = jar();
     await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "totp-limit@example.test", password: CHOSEN },
       cookies,
     );
     const code = await totpFor(totpURI);
     for (let i = 0; i < 5; i += 1) {
       const r = await authPost(
-        "/api/auth/two-factor/verify-totp",
+        "/api/ops/auth/two-factor/verify-totp",
         { code: wrongCode(code) },
         cookies,
       );
       expect(r.status).toBe(401);
     }
-    const burned = await authPost("/api/auth/two-factor/verify-totp", { code }, cookies);
+    const burned = await authPost("/api/ops/auth/two-factor/verify-totp", { code }, cookies);
     expect(burned.status).toBeGreaterThanOrEqual(400);
     expect((await get("/api/v1/auth/session", cookies)).status).toBe(401);
   });
@@ -360,37 +360,37 @@ describe("signing in with password + authenticator", () => {
     const code = backupCodes[0] ?? "";
     const first = jar();
     await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "backup@example.test", password: CHOSEN },
       first,
     );
-    const used = await authPost("/api/auth/two-factor/verify-backup-code", { code }, first);
+    const used = await authPost("/api/ops/auth/two-factor/verify-backup-code", { code }, first);
     expect(used.status).toBe(200);
     expect((await get("/api/v1/screens/audit", first)).status).toBe(200);
 
     const second = jar();
     await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "backup@example.test", password: CHOSEN },
       second,
     );
-    const again = await authPost("/api/auth/two-factor/verify-backup-code", { code }, second);
+    const again = await authPost("/api/ops/auth/two-factor/verify-backup-code", { code }, second);
     expect(again.status).toBe(401);
     expect((await get("/api/v1/auth/session", second)).status).toBe(401);
   });
 
   it("turning the authenticator off needs the password and a fresh code", async () => {
     const { cookies, totpURI } = await enrol("disable@example.test");
-    const noCode = await authPost("/api/auth/two-factor/disable", { password: CHOSEN }, cookies);
+    const noCode = await authPost("/api/ops/auth/two-factor/disable", { password: CHOSEN }, cookies);
     expect(noCode.status).toBe(401);
     const code = await totpFor(totpURI);
     const badCode = await authPost(
-      "/api/auth/two-factor/disable",
+      "/api/ops/auth/two-factor/disable",
       { password: CHOSEN, code: wrongCode(code) },
       cookies,
     );
     expect(badCode.status).toBe(401);
-    const ok = await authPost("/api/auth/two-factor/disable", { password: CHOSEN, code }, cookies);
+    const ok = await authPost("/api/ops/auth/two-factor/disable", { password: CHOSEN, code }, cookies);
     expect(ok.status).toBe(200);
     // Without an authenticator, staff are back in the forced setup.
     const session = (await (await get("/api/v1/auth/session", cookies)).json()) as SessionResponse;
@@ -405,14 +405,14 @@ describe("password lockout (H-1 applied to passwords)", () => {
     const db = createDb(env.DB);
     const key = await counterKey("pw-fail", "locked@example.test", attacker);
     for (let i = 0; i < 5; i += 1) await bumpCounter(db, key, PASSWORD_FAILURE_CAP.windowSeconds);
-    const wrong = await authPost("/api/auth/sign-in/email", {
+    const wrong = await authPost("/api/ops/auth/sign-in/email", {
       email: "locked@example.test",
       password: "wrong-password-000",
     });
     const wrongBody = await wrong.text();
 
     const locked = await app.request(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       {
         method: "POST",
         headers: {
@@ -428,7 +428,7 @@ describe("password lockout (H-1 applied to passwords)", () => {
     expect(await locked.text()).toBe(wrongBody);
 
     // The owner, elsewhere, still signs in.
-    const owner = await authPost("/api/auth/sign-in/email", {
+    const owner = await authPost("/api/ops/auth/sign-in/email", {
       email: "locked@example.test",
       password: CHOSEN,
     });
@@ -440,7 +440,7 @@ describe("password lockout (H-1 applied to passwords)", () => {
 describe("second-pass review (S-1, S-8, M-3)", () => {
   it("non-staff password failures: one audit row per window, and the same per-client lockout as staff", async () => {
     for (let i = 0; i < 3; i += 1) {
-      const r = await authPost("/api/auth/sign-in/email", {
+      const r = await authPost("/api/ops/auth/sign-in/email", {
         email: "not-staff-pw@example.test",
         password: `guess-number-${i}-xyz`,
       });
@@ -457,7 +457,7 @@ describe("second-pass review (S-1, S-8, M-3)", () => {
       const key = await counterKey("pw-fail", email, client);
       for (let i = 0; i < 5; i += 1) await bumpCounter(db, key, PASSWORD_FAILURE_CAP.windowSeconds);
       const r = await app.request(
-        "/api/auth/sign-in/email",
+        "/api/ops/auth/sign-in/email",
         {
           method: "POST",
           headers: {
@@ -481,14 +481,14 @@ describe("second-pass review (S-1, S-8, M-3)", () => {
     const b = jar();
     for (const cookies of [a, b]) {
       await authPost(
-        "/api/auth/sign-in/email",
+        "/api/ops/auth/sign-in/email",
         { email: "revoke-others@example.test", password: INITIAL },
         cookies,
       );
     }
     expect((await get("/api/v1/auth/session", b)).status).toBe(200);
     const changed = await authPost(
-      "/api/auth/change-password",
+      "/api/ops/auth/change-password",
       { currentPassword: INITIAL, newPassword: CHOSEN, revokeOtherSessions: false },
       a,
     );
@@ -503,14 +503,14 @@ describe("second-pass review (S-1, S-8, M-3)", () => {
     // First sign-in use of the current code…
     const other = jar();
     await authPost(
-      "/api/auth/sign-in/email",
+      "/api/ops/auth/sign-in/email",
       { email: "disable-replay@example.test", password: CHOSEN },
       other,
     );
-    expect((await authPost("/api/auth/two-factor/verify-totp", { code }, other)).status).toBe(200);
+    expect((await authPost("/api/ops/auth/two-factor/verify-totp", { code }, other)).status).toBe(200);
     // …then the same code to disable is refused.
     const replay = await authPost(
-      "/api/auth/two-factor/disable",
+      "/api/ops/auth/two-factor/disable",
       { password: CHOSEN, code },
       cookies,
     );

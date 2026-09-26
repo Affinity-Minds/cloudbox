@@ -7,9 +7,11 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createDb } from "../db/client";
 import { rolePermissions, staffMembers } from "../db/schema";
 import type { AppEnv, AppUser } from "../env";
-import { authFor, trustedOrigins } from "./index";
+import { authFor, COOKIE_PREFIX, customerAuthFor, type Surface, trustedOrigins } from "./index";
 
 export type Principal = {
+  /** Which sign-in surface minted the session (owner decision: separate customer and staff). */
+  surface: Surface;
   user: AppUser;
   sessionId: string;
   /** Staff permission keys from `role_permissions` for the user's staff role; empty for non-staff. */
@@ -24,7 +26,45 @@ export const setupPending = (p: Principal) =>
 
 const principals = new WeakMap<Request, Promise<Principal | null>>();
 
+/** True when the request carries the session cookie of that surface (either cookie spelling). */
+export function hasSessionCookie(c: Context<AppEnv>, surface: Surface): boolean {
+  const name = `${COOKIE_PREFIX[surface]}.session_token=`;
+  return (c.req.header("cookie") ?? "")
+    .split(";")
+    .some((part) => {
+      const cookie = part.trim();
+      return cookie.startsWith(name) || cookie.startsWith(`__Secure-${name}`);
+    });
+}
+
 async function loadPrincipal(c: Context<AppEnv>): Promise<Principal | null> {
+  // Staff session first (only the staff mount mints it: password + authenticator). A customer
+  // session (email code) never carries a staff role or a permission, whoever the user is.
+  if (hasSessionCookie(c, "staff")) {
+    const principal = await loadStaffPrincipal(c);
+    if (principal) return principal;
+  }
+  if (hasSessionCookie(c, "customer")) {
+    const session = await customerAuthFor(c).api.getSession({ headers: c.req.raw.headers });
+    if (session) {
+      return {
+        surface: "customer",
+        user: {
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          staffRole: null,
+        },
+        sessionId: session.session.id,
+        permissions: new Set(),
+        setup: null,
+      };
+    }
+  }
+  return null;
+}
+
+async function loadStaffPrincipal(c: Context<AppEnv>): Promise<Principal | null> {
   const session = await authFor(c).api.getSession({ headers: c.req.raw.headers });
   if (!session) return null;
 
@@ -44,6 +84,7 @@ async function loadPrincipal(c: Context<AppEnv>): Promise<Principal | null> {
   for (const row of rows) if (row.permission) permissions.add(row.permission);
 
   return {
+    surface: "staff",
     user: {
       id: session.user.id,
       email: session.user.email,

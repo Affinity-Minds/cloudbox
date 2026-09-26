@@ -2,6 +2,7 @@
 // sign-in never creates a `user` row (ADR 0002/0009). Staff grants, tenant memberships (WT-2) and
 // the bootstrap super admin all go through `ensureUserByEmail`. Staff passwords are hashed and
 // stored by Better Auth's own hasher and internal adapter; plaintext is never stored or logged.
+import { normalizeEmail } from "@cloudbox/contracts";
 import { eq, sql } from "drizzle-orm";
 import { audit } from "../audit";
 import { createDb } from "../db/client";
@@ -28,7 +29,7 @@ export async function ensureUserByEmail(
   email: string,
   request: AuthRequestContext = {},
 ): Promise<string> {
-  const normalized = email.trim().toLowerCase();
+  const normalized = normalizeEmail(email);
   const ctx = await authContext(env, request);
   const found = await ctx.internalAdapter.findUserByEmail(normalized);
   if (found) return found.user.id;
@@ -97,7 +98,9 @@ export async function ensureBootstrapSuperAdmin(
   env: Bindings,
   request: AuthRequestContext = {},
 ): Promise<void> {
-  const email = env.BOOTSTRAP_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
+  const email = env.BOOTSTRAP_SUPER_ADMIN_EMAIL
+    ? normalizeEmail(env.BOOTSTRAP_SUPER_ADMIN_EMAIL)
+    : undefined;
   if (!email) return;
   const password = env.BOOTSTRAP_SUPER_ADMIN_PASSWORD || null;
   const db = createDb(env.DB);
