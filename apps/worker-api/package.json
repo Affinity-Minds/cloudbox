@@ -8,7 +8,10 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply cloudbox-db --local",
+    "auth:generate": "pnpm dlx auth@1.7.6 generate --config src/auth/cli.ts --output .wrangler/auth-schema.ts -y"
   },
   "dependencies": {
     "@cloudbox/contracts": "workspace:*",

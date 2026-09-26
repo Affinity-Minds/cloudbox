@@ -13,7 +13,8 @@
       "!!**/.worktrees",
       "!!**/dist",
       "!apps/admin-web/src/components/ui",
-      "!apps/admin-web/src/routeTree.gen.ts"
+      "!apps/admin-web/src/routeTree.gen.ts",
+      "!infra/cloudflare/migrations/meta"
     ]
   },
   "formatter": {
