@@ -17,7 +17,7 @@ from D1 rows per request; every auth state change is audited.
 
 - Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
   PR #6, closed sign-in + staff 2FA + first review merged as PR #9 (`a3fc5f0`). Second-pass review
-  fixes: **draft PR #10** https://github.com/Affinity-Minds/cloudbox/pull/10 (never merged by me).
+  fixes merged as PR #10. Third pass (T-1/T-2): new draft PR (see below; never merged by me).
 - `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
   314/314, build ok).
 
@@ -125,9 +125,15 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 - Per-IP limits (Better Auth, D1): code send 3 / 60 s, code sign-in 3 / 60 s, password sign-in 3 / 10 s,
   `/two-factor/*` 3 / 10 s, rest 60 / 60 s (L-11 corrected). Better Auth also limits a 2FA challenge
   to 5 attempts and locks an account for 15 min after 10 consecutive failed second factors.
-- Our limits are **only per (email, client /64)**, never per account (reviews S-1, S-2): code sends
-  5 / 15 min (same 200, nothing sent), failed code sign-ins 10 / h (fails like a wrong code), failed
-  passwords 5 / 15 min (429 with the wrong-password body). They are uniform for every address.
+- A client is an IPv4 address or an **IPv6 /48** (`ipv6Subnet: 48`, review T-1). Per (email, client):
+  code sends 5 / 15 min (same 200, nothing sent), failed code sign-ins 10 / h (fails like a wrong code),
+  failed passwords 5 / 15 min (429 with the wrong-password body). Uniform for every address.
+- Customer codes: 5 attempts per code, spendable only by clients that requested it (T-2). Per address,
+  30 failed checks / h across all clients is a budget: above it send and sign-in need a Turnstile token
+  (403 `{error:"challenge_required", detail:{siteKey}}`, UI shows the widget only then). **Fallback
+  without `TURNSTILE_SECRET_KEY`: a 15-minute per-account cooldown (429 `account_cooldown`, audited
+  `AUTH_ACCOUNT_COOLDOWN`) — the only per-account denial in the system, until Turnstile is configured.**
+  No per-account limit exists for staff passwords (S-1).
 - An accepted sign-in or disable authenticator code cannot be reused for 120 s (S-3). `trustDevice`
   is forced off; admin reset and password change delete trusted-device rows (S-4). Password changes
   always end other sessions (S-8).
@@ -148,6 +154,13 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 
 ## Deploy needs
 
+- **Turnstile (review T-1):** create a widget for `box.affinityminds.in` only, managed mode,
+  **pre-clearance off** (agent-notes cloudflare-workers trap 1). Secret `TURNSTILE_SECRET_KEY`
+  (Wrangler secret via a workflow sync step like the others — WT-0) and var `TURNSTILE_SITE_KEY`
+  (`wrangler.jsonc` vars — WT-0). Until both are set, the account budget falls back to the cooldown.
+  Cloudflare's dummy keys return hostname `example.com`, so they fail our hostname check on
+  localhost; local dev simply shows the widget and the rejection (see `13-customer-turnstile-step-up.png`).
+
 - Secrets: `BETTER_AUTH_SECRET` (existing step), **`BOOTSTRAP_SUPER_ADMIN_PASSWORD`** (new GitHub
   environment secret, ≥ 12 characters; the new workflow step puts it into the Worker once).
 - Vars: `ENVIRONMENT=production`, `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `EMAIL_FROM`; `OTP_DEV_ECHO` absent.
@@ -159,7 +172,12 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 
 ---
 
-## Tests (worker-api 314/314, admin-web 3/3, licensing-contracts 16/16)
+## Tests (worker-api 373/373 after merging WT-3/WT-4, admin-web 4/4, licensing-contracts 16/16)
+
+Third pass (T-1/T-2): `auth-stepup.test.ts` (5: /48 shares limits and counters; every failed check
+counts toward the budget; challenge_required for known and unknown alike, valid token passes send and
+sign-in; foreign-host or failed tokens refused; cooldown fallback audited once and budget reset),
+`auth-otp.test.ts` requester-only attempt spending, WT-8 `phase-1-third-pass` (T-2) green.
 
 Second pass adds WT-8 `review/phase-1-second-pass` (all green, unmodified) and in WT-1's files:
 `auth-otp.test.ts` "S-2" (owner gets a code after 40 sends from other clients) and "S-6";
@@ -237,7 +255,12 @@ The QR, key and backup codes in the screenshots belong to a local database that 
 - [ ] WT-2: create membership users with `ensureUserByEmail`; fill `activeTenantId` in the session.
 - [ ] WT-12: `sendOtpEmail(env, {to, code}, {correlationId, client})` must keep writing the
   `AUTH_OTP_SENT` audit row with `client`; the per-(email, client) cap counts it.
-- [ ] Ops: Cloudflare zone rate limiting / Turnstile on `/api/auth/*` (review M-3; edge, not the Worker).
+- [ ] Ops (reviews M-3, T-1): Cloudflare WAF rate-limiting rule on `box.affinityminds.in`
+  `/api/auth/sign-in/*` (and `/api/auth/email-otp/*`), counting characteristic **IP with IPv6 /48
+  prefix** (`ip.src` grouped by /48; Enterprise "IPv6 prefix" or the closest available), e.g. 30
+  requests / 10 min → block 10 min. Defence in depth for CPU (password hashing) and code guessing; the
+  Worker's own limits stay authoritative.
+- [ ] WT-0: `TURNSTILE_SITE_KEY` var and a `TURNSTILE_SECRET_KEY` secret sync step (see Deploy needs).
 
 ## Safe next action
 

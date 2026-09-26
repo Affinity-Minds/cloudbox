@@ -15,9 +15,18 @@ export const sessionQuery = queryOptions({
 });
 
 /** Better Auth answers errors as `{code, message}`; map them onto ApiError with the code. */
-async function authPost<T = unknown>(path: string, body: unknown, honeypot = ""): Promise<T> {
+/** Must match TURNSTILE_HEADER in apps/worker-api/src/auth/challenge.ts. */
+const TURNSTILE_HEADER = "x-cloudbox-turnstile";
+
+async function authPost<T = unknown>(
+  path: string,
+  body: unknown,
+  honeypot = "",
+  turnstileToken?: string | null,
+): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (honeypot) headers[HONEYPOT_HEADER] = honeypot;
+  if (turnstileToken) headers[TURNSTILE_HEADER] = turnstileToken;
   let response: Response;
   try {
     response = await fetch(path, {
@@ -30,20 +39,41 @@ async function authPost<T = unknown>(path: string, body: unknown, honeypot = "")
     throw new ApiError(0, "network_error", cause instanceof Error ? cause.message : undefined);
   }
   if (response.ok) return (await response.json().catch(() => null)) as T;
-  const error = (await response.json().catch(() => ({}))) as { code?: string; error?: string };
+  const error = (await response.json().catch(() => ({}))) as {
+    code?: string;
+    error?: string;
+    detail?: unknown;
+  };
   const retryAfter = Number(response.headers.get("x-retry-after"));
   throw new ApiError(
     response.status,
     (error.code ?? error.error ?? `http_${response.status}`).toLowerCase(),
-    Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfter } : undefined,
+    error.detail ?? (Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfter } : undefined),
   );
 }
 
-export const sendOtp = (email: string, honeypot: string) =>
-  authPost("/api/auth/email-otp/send-verification-otp", { email, type: "sign-in" }, honeypot);
+/** Customer codes. `turnstileToken` only after the API asked for it (`challenge_required`). */
+export const sendOtp = (email: string, honeypot: string, turnstileToken?: string | null) =>
+  authPost(
+    "/api/auth/email-otp/send-verification-otp",
+    { email, type: "sign-in" },
+    honeypot,
+    turnstileToken,
+  );
 
-export const verifyOtp = (email: string, otp: string, honeypot: string) =>
-  authPost("/api/auth/sign-in/email-otp", { email, otp }, honeypot);
+export const verifyOtp = (
+  email: string,
+  otp: string,
+  honeypot: string,
+  turnstileToken?: string | null,
+) => authPost("/api/auth/sign-in/email-otp", { email, otp }, honeypot, turnstileToken);
+
+/** The site key when the API asks for a Turnstile step-up (review T-1), else null. */
+export function challengeSiteKey(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.error !== "challenge_required") return null;
+  const siteKey = (error.detail as { siteKey?: unknown } | undefined)?.siteKey;
+  return typeof siteKey === "string" && siteKey ? siteKey : null;
+}
 
 /** Staff step 1. `twoFactorRedirect` means the authenticator step follows; otherwise signed in. */
 export const signInWithPassword = (email: string, password: string, honeypot: string) =>
@@ -78,6 +108,9 @@ export const logout = () => api<null>("/api/v1/auth/logout", { method: "POST" })
 /** Human text for a failed send/verify. Never says whether the address has an account. */
 export function describeAuthError(error: unknown): string {
   if (!(error instanceof ApiError)) return "Something went wrong. Try again.";
+  if (error.error === "account_cooldown")
+    return "Too many attempts for this address. Try again in 15 minutes.";
+  if (error.error === "challenge_required") return "Please confirm you are a person to continue.";
   if (error.status === 429) {
     const wait = (error.detail as { retryAfter?: number } | undefined)?.retryAfter;
     return wait

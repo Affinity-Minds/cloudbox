@@ -26,12 +26,18 @@ screen whether an address has an account. Staff sign in differently (ADR 0009).
    `apps/worker-api/src/auth/users.ts`.
 3. **Resend re-sends the still-valid code** (`resendStrategy: "reuse"`): a send request by anyone else
    cannot invalidate the code already in the owner's inbox.
-4. **Limits.** Better Auth per-IP limits in D1 (`rate_limit`, migration 0004): send 3 / 60 s, code
-   sign-in 3 / 60 s. On top, per (email, client IP or IPv6 /64) only: 5 sends / 15 min and 10 failed
-   code sign-ins / h. There is deliberately **no per-email ceiling**: anything other clients can fill
-   locks the owner out (reviews H-1, S-2). Over a cap the caller gets the same answer as usual (200 on
-   send, `INVALID_OTP` on sign-in) with nothing sent, checked or recorded. Failed code sign-ins for
-   addresses without a user row are audited once per 15 min (review M-3).
+4. **Limits.** A client is an IPv4 address or an IPv6 /48 (`ipv6Subnet: 48`). Better Auth per-IP
+   limits in D1 (`rate_limit`, migration 0004): send 3 / 60 s, code sign-in 3 / 60 s. On top, per
+   (email, client): 5 sends / 15 min and 10 failed code sign-ins / h. Codes allow 5 attempts, and only
+   clients that requested the code can spend them; anyone else's guess is checked without consuming
+   an attempt (review T-2). Per address, across all clients: 30 failed checks / h is a **budget, not a
+   lock** — above it sending and checking need a Cloudflare Turnstile token (403
+   `challenge_required` otherwise; the login page shows the widget only then). If
+   `TURNSTILE_SECRET_KEY` is not configured, the fallback is a 15-minute per-account cooldown
+   (`AUTH_ACCOUNT_COOLDOWN`), the only per-account denial in the system, kept only until Turnstile is
+   configured (reviews H-1, S-2, T-1). Over the per-client send cap the caller gets the same 200 with
+   nothing sent or recorded. Failed code sign-ins for addresses without a user row are audited once per
+   15 min (review M-3).
 5. **Cloudflare Email Service** binding `EMAIL`, from `no-reply@em.affinity.ai.in`. The send result is
    recorded (`{outcome: "sent", messageId}` or `{outcome: "send_failed", errorCode}`); a failure never
    changes the HTTP response. WT-12 is adding a provider registry behind `sendOtpEmail`; the masking

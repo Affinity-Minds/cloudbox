@@ -255,3 +255,59 @@ Recommended before merge, not blocking: S-3, S-4, S-5 (Medium), M-2's frozen loc
 - **TOTP clock-skew tolerance:** the exact width (±1 step) was read from `@better-auth/utils/otp` defaults, not measured.
 - **Deploy scope:** the real `production` environment protection rules and the Cloudflare token scope are not visible from the repo.
 - **WT-2 and WT-3:** tenant, membership and device routes are still stubs here. Tenant-boundary and enrollment checks wait for their branches.
+
+---
+
+# Third pass / verdict
+
+Reviewed commit: `origin/phase-1/identity` including WT-1's `5178503` (PR #10), merged into `review/phase-1-security`.
+New test file: `apps/worker-api/test/review/phase-1-third-pass.test.ts`.
+
+```
+pnpm --filter @cloudbox/worker-api test
+Test Files  1 failed | 13 passed (14)
+Tests       1 failed | 314 passed (315)
+```
+Every first- and second-pass review test passes unmodified. The one failure is the new T-2 test below.
+
+## Verification of the S-fixes
+| Finding | Verdict | How checked |
+|---|---|---|
+| S-1 password ceiling lockout | **Closed.** There is no per-account ceiling left anywhere in `src/auth/**`; the only password limit is the per-(email, client) `pw-fail` counter, which returns 429 only to the client over its own limit. The owner at a fresh client always reaches the password check. | grep of `src/auth`; S-1 test (100 real failures from 100 clients, then the owner's correct password gets 200) |
+| S-2 OTP ceiling lockout | **Closed.** The send cap is per (email, client) only (`src/auth/index.ts:53,100-116,328`). The owner at a fresh client always gets a code. | S-2 test passes |
+| S-3 TOTP replay | **Closed for sign-in and disable.** `before` refuses a code already claimed for the user. `after` claims `(user, code)` for 120 s in one conditional upsert (`counters.ts:53-61`), and the race loser's session is deleted before the refusal (`index.ts:587-601`). 120 s covers the ±1-step window. Enrolment confirmation is not claimed, which is harmless. | reading + S-3 test |
+| S-4 trusted devices | **Closed.** `trustDevice` is forced to `false` in `before` on both verify paths. Trusted-device rows are deleted on admin reset and on every password change. | both S-4 tests pass |
+| S-5 reset/role ranking | **Closed.** No grant above your own rank. Role change or reset is allowed only on targets strictly below you, so no self role change, no self reset through `/staff`, and no peer super-admin reset. Revoke is unranked but keeps the last-super-admin guard. That is acceptable while only `super_admin` holds `staff.manage`. If `staff.manage` is ever granted to a lower role, rank the revoke too. | S-5 tests (3) pass; reading `staff.ts:73-87` |
+| S-6 slow code guessing | **Only per client.** `OTP_FAILURE_CAP` is 10 / h per (email, client). Nothing bounds guessing per account. See T-1. | reading |
+| S-7 bootstrap seed | Closed. It never overwrites an existing password and sets `must_change_password`. | S-9 test passes |
+| S-8 residuals | Closed. Non-staff password failures are audited once per window. `revokeOtherSessions` is forced server-side. | reading |
+| M-2 / L-4 (first pass) | Closed. `--frozen-lockfile` in both workflows. The retire step is `if: always()` without `|| true`. The Phase 0 key comparison is constant-time. Actions are still pinned by tag rather than SHA; that is minor and not blocking. | workflow diff |
+
+**WT-1's deviation: non-staff password attempts still run a hash. This is the right call.** Skipping the hash would let a caller tell staff addresses from others by response time. A scrypt verify takes tens of milliseconds, which is easy to measure. The cost is Worker CPU per attempt. Better Auth's per-IP `/sign-in` limit (3 / 10 s, applied before any hook) and the per-(email, client) counter bound that cost per client. The distributed version is the ordinary login-endpoint cost problem, and it belongs at the edge: a Cloudflare WAF rate-limiting rule on `/api/auth/sign-in/*`, keyed per IPv6 /48.
+
+## New findings
+### T-1 (High, blocks the first customer-authorised route) Distributed guessing of customer codes has no per-account bound
+- **Where:** `src/auth/index.ts:53` (sends 5 / 15 min per client) and `:60-66, 356-364` (failed checks 10 / h per client). The client key is Better Auth's `getIP`, which masks IPv6 to /64 (`advanced.ipAddress` has no `ipv6Subnet`).
+- **Path:** every /64 gets its own 10 checked guesses per hour against a 10⁶ space. A routed /48 (free from tunnel brokers) is 65,536 /64s, which is about 655,000 guesses an hour, or roughly a 48 % chance of taking over a given customer account per hour. A /56 still gives about 6 % per day.
+  - Each burned code needs a new send, so the victim receives a flood of mail but cannot stop it.
+  - A failed mail send does not stop the code being stored, because `resolveOTP` stores it first.
+- **Why it does not block this tree:** today a customer session reaches nothing. Every `/api/v1` route except the session and logout endpoints is staff- or permission-gated (review tests F-4 and S-6 walk all of them).
+- **Why it blocks WT-2:** it must be fixed before any route authorises a customer (WT-2 `me`, memberships, tenant standing).
+- **Fix (cheap first, then complete):**
+  1. Set `advanced.ipAddress.ipv6Subnet: 48`. The per-IP limits and every `counters.ts` key then treat a /48 as one client, which cuts the attacker's multiplier from 65,536 to 1 per /48.
+  2. Add an account-level failed-check budget (for example 20 per 24 h per address, counted in `counters.ts`). Above it, a verify must carry a valid Turnstile token. A human owner passes, so this is not a lockout (the S-1/S-2 lesson). Requests without a token fail like a wrong code, without being checked.
+  3. Add a Cloudflare WAF rate-limiting rule on `/api/auth/*` as defence in depth.
+- **Test to add:** after 20 checked failures for one address from 20 clients, a 21st wrong guess from a new client does not increment the code's attempt count (it is not checked). With a valid Turnstile token (test secret), the owner's correct code gets 200. Not added in this pass, because the budget value and the Turnstile wiring are product decisions.
+- **Fixed in `229781c`** (WT-1): (1) `advanced.ipAddress.ipv6Subnet: 48`, so Better Auth's per-IP limits and every `counters.ts` key treat a /48 as one client. (2) Per-address budget of 30 failed code checks per hour across all clients (`src/auth/challenge.ts`); above it, sending and checking codes for that address need a valid Turnstile token (siteverify, hostname must equal the request host), otherwise 403 `{error:'challenge_required', detail:{siteKey}}`, identical for known and unknown addresses. A person passes, so it is not a lockout. Without `TURNSTILE_SECRET_KEY` the fallback is a 15-minute per-account cooldown (429 `account_cooldown`, audited `AUTH_ACCOUNT_COOLDOWN`): the only per-account denial in the system, until Turnstile is configured. (3) WAF rule recommended in the WT-1 handoff. Tests: `auth-stepup.test.ts` (5).
+
+### T-2 (Medium) Other clients can burn the owner's code before the owner uses it
+- **Where:** Better Auth `atomicVerifyOTP` allows 3 attempts per code no matter which client makes them (`allowedAttempts: 3`, `src/auth/index.ts`).
+- **Path:** three wrong guesses from any three clients burn the code sitting in the owner's inbox, and the owner's correct entry then gets 403 `TOO_MANY_ATTEMPTS`. To keep burning every new code takes about 3 attempts every ~30 s. With 10 failures / h per client, that is roughly 36 clients (/64) an hour to keep one customer out. That is costlier than S-1/S-2 were, but still cheap with IPv6.
+- **Evidence:** test `T-2 … three wrong guesses from three unrelated clients do not invalidate the owner's code` fails with `expected 403 to be 200`.
+- **Fix:** the T-1 fixes cover most of it: /48 keying multiplies the cost by 65,536, and an account budget with Turnstile above it stops token-less burning. Once the per-client and per-account budgets bound guessing, it is also safe to raise `allowedAttempts` (for example to 10).
+- **Fixed in `229781c`**: `allowedAttempts` 5, and a guess from a client that never requested a code for the address is checked with Better Auth's own decryption and constant-time compare without spending the code's attempts (it counts against the per-client cap and the account budget). The T-2 test passes; `auth-otp.test.ts` "five wrong codes from clients that requested it…" covers the requester side.
+
+## Verdict
+- **Phase 1 as merged at this SHA: no open High with present impact; OK to merge to main.** S-1 and S-2, the previous blockers, are closed and verified by the review tests.
+- **Condition:** T-1 is High and blocks the merge of any route that authorises a customer (WT-2). Fix it together with WT-2, or before.
+- **Should fix soon:** T-2 (Medium), and pinning actions by commit SHA (Low).
