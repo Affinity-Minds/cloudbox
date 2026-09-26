@@ -42,7 +42,7 @@ async function allocateNextTenantCode(db: Db, now: string): Promise<string> {
 }
 
 /** Non-cancelled subscription statuses: still a live commercial obligation on the tenant. */
-const OPEN_SUBSCRIPTION_STATUSES = ["trial", "active", "past_due", "suspended"] as const;
+const OPEN_SUBSCRIPTION_STATUSES = ["pending", "trial", "active", "past_due", "suspended"] as const;
 
 router.post(
   "/",
