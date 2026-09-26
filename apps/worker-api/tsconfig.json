@@ -3,10 +3,10 @@
   "compilerOptions": {
     "module": "ESNext",
     "noEmit": true,
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
     "paths": {
       "@cloudbox/contracts": ["../../packages/contracts/src/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }
