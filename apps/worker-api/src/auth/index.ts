@@ -806,6 +806,9 @@ export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
   return auth;
 }
 
+/** Alias: the staff identity system's instance (ADR 0002 names it so). */
+export const createStaffAuth = createAuth;
+
 /** The customer instance (/api/auth). */
 export function createCustomerAuth(env: Bindings, request: AuthRequestContext = {}) {
   assertAuthConfig(env, "customer");

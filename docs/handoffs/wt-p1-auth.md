@@ -1,268 +1,183 @@
-# Handoff — WT-1 `wt/p1-auth` (authentication + staff authorisation)
+# Handoff — WT-1 `wt/p1-auth` (identity: customers and staff, authorisation)
 
 ## Mission
 
-**Slices:** 1.1 authentication, 1.2 staff authorisation model, plus the owner's follow-ups of
-2026-09-27: closed sign-in (ADR 0002), staff password + authenticator (ADR 0009), and the WT-8
-security review (`docs/reviews/phase-1-security.md`).
+**Slices:** 1.1 authentication, 1.2 staff authorisation, plus the owner's decisions of 2026-09-27:
+- closed sign-in
+- staff password + authenticator (ADR 0009)
+- separate, discreet staff surface
+- **two identity systems with nothing shared** (ADR 0002)
+- WT-8 security reviews: passes 1–4 (`docs/reviews/phase-1-security.md`)
 
-**Success criterion:** customers sign in with an emailed six-digit code; staff sign in with email +
-password + authenticator app and are forced through a password change and authenticator enrolment
-at first sign-in; sign-in never creates accounts; every protected route is authorised server-side
-from D1 rows per request; every auth state change is audited.
-
----
+**Done means:**
+- Customers sign in at `/login` with an emailed code.
+- Staff sign in under the discreet `OPS_BASE_PATH` with password and authenticator, and are forced through setup at first sign-in.
+- The two systems share no table, secret, cookie or endpoint.
+- Every protected route is authorised server-side from its own system's rows, per request.
+- Every auth state change is audited.
 
 ## Current status
 
-- Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
-  PR #6, closed sign-in + staff 2FA + first review merged as PR #9 (`a3fc5f0`). Second-pass review
-  fixes merged as PR #10. Third pass (T-1/T-2): new draft PR (see below; never merged by me).
-- `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
-  314/314, build ok).
+- Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier rounds merged as PR #4, #6, #9, #10, #14.
+- This round: draft PR "WT-1: separate customer and discreet staff sign-in surfaces" (see report).
+- It includes `origin/wt/p1-tenants` (WT-2, U-2) and `origin/review/phase-1-security` (fourth pass).
+- `pnpm run verify`: green. `python3 scripts/check-workflows.py`: ok.
 
-## Commits in PR #9
+## URLs the owner uses
 
-```
-f62d5e8 feat(auth): closed sign-in — no user rows for unknown emails
-b1c3f51 Merge origin/review/phase-1-security (WT-8 review + negative tests)
-c573cc2 fix(auth): WT-8 review findings H-1, H-2, M-1, M-3, L-1, L-2, L-3, L-8, L-9, L-10
-7198105 Merge origin/phase-1/identity (WT-5, WT-6 permission matrix, Biome fix, ADR 0009)
-7ebffc8 feat(auth): staff sign in with password + authenticator (ADR 0009)
-337e1ed feat(admin-web): staff + customer sign-in entry points, forced password and authenticator setup
-a3fc5f0 docs: ADR 0002, handoff, review "Fixed in" notes
-(merge) origin/review/phase-1-security (WT-8 second pass + tests)
-5178503 fix(auth): WT-8 second pass S-1..S-8, M-3
-(+ docs commit: second-pass "Fixed in" notes, ADR 0002 limits, this handoff)
-```
+| Who | URL |
+|---|---|
+| Customers | `https://box.affinityminds.in/login` → `/portal` |
+| Staff | `https://box.affinityminds.in/ops/login` → console at `https://box.affinityminds.in/ops` |
 
----
+Staff: until `OPS_BASE_PATH` is changed to a random slug, the console stays at `/ops`. Nothing on the customer surface links to it.
 
-## Files and contracts changed
+## Two identity systems (ADR 0002)
 
-- **worker-api**
-  - `src/auth/index.ts`: `authOptions(env, request, self)`, `createAuth(env, request?)`,
-    `authFor(c)`, `authContextFor(c)`, `assertAuthConfig`, `trustedOrigins(env)`,
-    `deleteTrustedDevices`, constants `OTP_SEND_CAP`, `OTP_FAILURE_CAP`, `PASSWORD_FAILURE_CAP`,
-    `MIN_PASSWORD_LENGTH`, `HONEYPOT_HEADER`.
-  - `src/auth/counters.ts` (new): per-(email, client) failure counters and used-code claims in
-    `rate_limit` under SHA-256 keys (`counterKey`, `readCounter`, `bumpCounter`, `claimOnce`). Better Auth
-    with `emailAndPassword` (no sign-up), `twoFactor` (TOTP issuer CloudBox, 10 backup codes) and
-    `emailOTP` (closed, reuse). All sign-in policy lives in its `hooks.before/after`.
-  - `src/auth/users.ts` (new): `ensureUserByEmail(env, email) → userId` (**WT-2 uses this for
-    memberships**), `setInitialStaffPassword(env, userId, password)`, `ensureBootstrapSuperAdmin(env)`.
-  - `src/auth/middleware.ts`: `Principal.setup`, `setupPending`, `guard(check, {allowSetupPending})`,
-    `requireUser({allowSetupPending})`, `requireStaff()`, `isSameOriginWrite(c)`.
-  - `src/authz/permissions.ts`: unchanged signatures (`requirePermission`, `requireTenantStanding`,
-    `getTenantStanding`); they inherit the setup gate from `guard`.
-  - `src/index.ts`: `/api/auth/*` allowlist + origin check + honeypot, bootstrap on auth requests.
-  - `src/http.ts` (L-3): server-minted correlation id (`X-Request-Id`); client `X-Correlation-Id` only echoed.
-  - `src/routes/v1/index.ts` (M-1, one block with WT-0's leave): `requireStaff()` on remaining stubs.
-  - `src/routes/v1/staff.ts`: `initialPassword`, conditional last-super-admin writes (L-8).
-  - `src/routes/v1/auth.ts`: session returns `setup`.
-  - `src/db/schema.ts` (**WT-0's file, owner-directed**): `user.twoFactorEnabled`, `twoFactor` table +
-    relations (generated by `pnpm auth:generate` for the new plugin list), `staffMembers.mustChangePassword`.
-  - `src/env.ts`: `BOOTSTRAP_SUPER_ADMIN_PASSWORD`.
-  - `src/email/index.ts`: only the audit outcome shape (`outcome`, `client`); masking is in the auth layer (WT-12 note).
-- **contracts** (`packages/contracts/src/auth.ts`): `StaffSetup`, `SessionResponse.setup`, `StaffPassword`,
-  `CreateStaffRequest.initialPassword`.
-- **admin-web**: `routes/login.tsx` (two entry points), `routes/setup-password.tsx`,
-  `routes/setup-authenticator.tsx`, `auth/auth-ui.tsx`, `auth/setup-ui.tsx`, `auth/session.ts`
-  (`pendingSetupPath`, hardened `safeRedirect`), `api/auth.ts`, `routes/_app.tsx` (guard), and the
-  **`qrcode` 1.5.4 + `@types/qrcode` dependency** (owner decision; lockfile updated).
-- **workflow** (`.github/workflows/deploy-cloudflare.yml`, owner-authorised single step): sync
-  `BOOTSTRAP_SUPER_ADMIN_PASSWORD` from the environment secret once, like `BETTER_AUTH_SECRET`.
+| | Customers | Staff |
+|---|---|---|
+| Mount | `/api/auth/*`: `email-otp/send-verification-otp`, `sign-in/email-otp`, `get-session`, `sign-out` | `/api/ops/auth/*`: `sign-in/email`, `two-factor/{verify-totp,verify-backup-code,enable,generate-backup-codes,disable}`, `change-password`, `get-session`, `sign-out` |
+| Instance | `createCustomerAuth(env)`, plugin `emailOTP` only | `createStaffAuth(env)` (= `createAuth`), `emailAndPassword` + `twoFactor` only |
+| Tables | `customer_users`, `customer_sessions`, `customer_accounts`, `customer_verifications`, `customer_rate_limit` | `staff_users`, `staff_sessions`, `staff_accounts`, `staff_verifications`, `staff_two_factor`, `staff_rate_limit` |
+| Cookie | `cbx_session` | `cbx_ops_session` |
+| Secret | `CUSTOMER_AUTH_SECRET` | `STAFF_AUTH_SECRET` |
+| Referenced by | `tenant_memberships.user_id` | `staff_members.user_id` |
+| Create identities | `ensureCustomerByEmail(env, email)` (memberships) | `ensureStaffUserByEmail` (POST /staff, bootstrap) |
+
+**Guards** (`src/auth/middleware.ts`, `src/authz/permissions.ts`):
+- `requireStaff()` and `requirePermission(key)` read only the staff cookie and staff tables.
+- `requireUser()` and `requireTenantStanding(min)` read only the customer cookie and customer tables.
+- `requireSession()` and `guard(check)` (either system, each evaluated on its own) are for session, logout and routes open to staff *or* tenant members (WT-2 memberships, WT-3 enrollment and fleet).
+- A customer cookie on a staff route gets 401. A staff cookie on a customer route (e.g. `/api/v1/me`) gets 401. Both are asserted in `permission-matrix.test.ts`.
+- `GET /api/v1/auth/session?as=staff|customer` and `POST /api/v1/auth/logout?as=…` are pinned to one system.
+
+## Discreet staff surface
+
+**Configuration:** `OPS_BASE_PATH` is a Worker var, one segment. It defaults to `/ops`; the owner may set a long random slug (`wrangler.jsonc` var, no rebuild).
+
+**How the Worker serves the SPA** (`run_worker_first: true`, `src/ops-shell.ts`):
+- Only at known console routes under the base, the document gets:
+  - the marker `<meta name="cloudbox-ops-base">`
+  - `<meta name="robots" content="noindex">`
+  - `X-Robots-Tag: noindex, nofollow` and `no-store`
+- Every other path, including unknown ones under the base, gets the byte-identical ordinary SPA document.
+- There is no robots.txt entry. `/api/ops/*` responses carry `X-Robots-Tag`.
+
+**How the SPA picks a router:**
+- With the marker: the staff router (file routes, `basepath = OPS_BASE_PATH`) mounts: login, setup, and the console.
+- Without it: the customer router (`src/portal/router.tsx`: `/login`, `/portal`, `/` → `/portal`) mounts.
+- The `/api/version` build-stamp poll is unchanged.
+
+## Limits and step-up (unchanged in substance, now per system)
+
+A client is an IPv4 address or an IPv6 /48 (`ipv6Subnet: 48`).
+
+**Customers** (`/api/auth`):
+- **Per IP (Better Auth):** 3 sends / 60 s, 3 code sign-ins / 60 s.
+- **Per (email, client):** 5 sends / 15 min, and 10 failed checks / h.
+- **Code attempts:** 5 per code, spendable only by clients that requested it (T-2).
+- **Per-address budget:** 30 failed checks / h across all clients. Above it a Turnstile token is required (403 `challenge_required`). **Without `TURNSTILE_SECRET_KEY`, the fallback is a 15-minute per-account cooldown (`AUTH_ACCOUNT_COOLDOWN`). This is the only per-account denial in the system, until Turnstile is configured.**
+- Addresses are NFKC-normalised and lower-cased before validation. An unparseable one is refused with 400 at the gate (U-1).
+
+**Staff** (`/api/ops/auth`), no Turnstile:
+- **Per IP (Better Auth):** password sign-in 3 / 10 s, `/two-factor/*` 3 / 10 s.
+- **Password lockout:** 5 failures per (email, client) in 15 min → 429 with the wrong-password body. No per-account lock (S-1).
+- **Authenticator:** Better Auth's challenge limit (5) and account lockout (10 failures → 15 min). An accepted sign-in or disable code cannot be replayed for 120 s (S-3). Trusted devices are off (S-4).
+
+Counters live in each system's rate-limit table under SHA-256 keys (`src/auth/counters.ts`); the table is chosen from the counter kind.
 
 ## Migrations
 
-- `0004_auth_rate_limit.sql` (WT-1's number, altered in place because it has not been deployed):
-  `rate_limit`; `user.two_factor_enabled`; `two_factor` (+ indexes); `staff_members.must_change_password
-  INTEGER NOT NULL DEFAULT 1`. **Any local D1 that applied the earlier 0004 must be recreated**
-  (`rm -rf apps/worker-api/.wrangler/state` then `pnpm --filter @cloudbox/worker-api db:migrate:local`).
-- The Drizzle meta snapshot was not regenerated (hand-written migration, as before).
-
-## API
-
-| Method | Path | Who | Result | Audit |
-|---|---|---|---|---|
-| POST | `/api/auth/email-otp/send-verification-otp` | anyone | always `200 {success:true}`; a code only for an existing non-staff user under the caps | `AUTH_OTP_SENT {outcome: sent\|send_failed\|unknown_email\|staff_email, client}` (none when over a cap) |
-| POST | `/api/auth/sign-in/email-otp` | customers | session; 400 `INVALID_OTP`/`OTP_EXPIRED`, 403 `TOO_MANY_ATTEMPTS` | `AUTH_LOGIN_SUCCEEDED/FAILED {method: email_otp}` |
-| POST | `/api/auth/sign-in/email` | staff | `200 {twoFactorRedirect:true}` (+ challenge cookie), or a session if no authenticator yet; 401 `INVALID_EMAIL_OR_PASSWORD` for everyone else; 429 same body when locked | `AUTH_LOGIN_FAILED {method: password}`, `AUTH_LOGIN_SUCCEEDED {method: password, setupPending}` |
-| POST | `/api/auth/two-factor/verify-totp` | staff | session (sign-in) or enrolment confirmation | `AUTH_LOGIN_SUCCEEDED {method: password+totp}` / `AUTH_LOGIN_FAILED {method: totp}` / `AUTH_2FA_ENABLED` |
-| POST | `/api/auth/two-factor/verify-backup-code` | staff | session; each code once | `AUTH_LOGIN_SUCCEEDED/FAILED {method: …backup_code}` |
-| POST | `/api/auth/change-password` | staff session | clears `must_change_password`; must differ | `AUTH_PASSWORD_CHANGED` |
-| POST | `/api/auth/two-factor/enable` | staff session, after the password change | `{totpURI, backupCodes}` | `AUTH_2FA_ENROLLMENT_STARTED` |
-| POST | `/api/auth/two-factor/generate-backup-codes` | staff session (password) | new codes | `AUTH_2FA_BACKUP_CODES_REGENERATED` |
-| POST | `/api/auth/two-factor/disable` | staff session, password **and** fresh `code` | off (back into forced setup) | `AUTH_2FA_DISABLED` |
-| POST | `/api/auth/sign-out`, `/api/v1/auth/logout` | session | 204 | `AUTH_LOGOUT` |
-| GET | `/api/auth/get-session` | session | Better Auth session | — |
-| GET | `/api/v1/auth/session` | session (also with setup pending) | `SessionResponse` incl. `setup` for staff | — |
-| GET/POST/DELETE | `/api/v1/staff` | `staff.manage` | POST `{email, role, initialPassword?}`: required for new staff; for existing staff it resets the password, drops the authenticator and sessions | `STAFF_ROLE_GRANTED/REVOKED`, `STAFF_PASSWORD_SET` (never the password) |
-
-Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there needs a trusted
-`Origin` (403 otherwise), and a non-empty `x-cloudbox-hp` honeypot is 400.
-
-## How WT-2/3/5 use this
-
-- Guards as before (`requirePermission`, `requireTenantStanding`, `requireStaff`, `requireUser`), per
-  route. **New:** staff with setup pending get 403 `{error:"setup_required", detail:{passwordChangeRequired,
-  authenticatorRequired}}` from every guard except `requireUser({allowSetupPending:true})` (session, logout).
-- **Create users only with `ensureUserByEmail(env, email, authContextFor(c))`** (WT-2 memberships).
-  Never create users at sign-in.
-- Tests: `signInAs(env, {email, staffRole?, setupComplete?})` — staff default to setup done so
-  permission tests are unaffected; `setupComplete:false` for gate tests. `headers` carries cookie + Origin.
-- M-1: when a stub router is replaced by a guarded one, delete its line in the stub-guard loop in
-  `routes/v1/index.ts`. The review test F-4 keeps checking every route.
-- Round trips: auth adds 2 D1 round trips per request (session+user join; staff role + grants +
-  `must_change_password` in one query).
-
-## Security assumptions
-
-- Better Auth owns hashing (its scrypt), sessions, cookies, TOTP secrets (encrypted with
-  `BETTER_AUTH_SECRET`), backup codes (encrypted) and OTP storage. No custom crypto. Plaintext
-  passwords and codes are never stored, logged or audited (asserted in tests).
-- Host-only cookies (Better Auth defaults: HttpOnly, SameSite=Lax, `__Secure-` on https).
-- Per-IP limits (Better Auth, D1): code send 3 / 60 s, code sign-in 3 / 60 s, password sign-in 3 / 10 s,
-  `/two-factor/*` 3 / 10 s, rest 60 / 60 s (L-11 corrected). Better Auth also limits a 2FA challenge
-  to 5 attempts and locks an account for 15 min after 10 consecutive failed second factors.
-- A client is an IPv4 address or an **IPv6 /48** (`ipv6Subnet: 48`, review T-1). Per (email, client):
-  code sends 5 / 15 min (same 200, nothing sent), failed code sign-ins 10 / h (fails like a wrong code),
-  failed passwords 5 / 15 min (429 with the wrong-password body). Uniform for every address.
-- Customer codes: 5 attempts per code, spendable only by clients that requested it (T-2). Per address,
-  30 failed checks / h across all clients is a budget: above it send and sign-in need a Turnstile token
-  (403 `{error:"challenge_required", detail:{siteKey}}`, UI shows the widget only then). **Fallback
-  without `TURNSTILE_SECRET_KEY`: a 15-minute per-account cooldown (429 `account_cooldown`, audited
-  `AUTH_ACCOUNT_COOLDOWN`) — the only per-account denial in the system, until Turnstile is configured.**
-  No per-account limit exists for staff passwords (S-1).
-- An accepted sign-in or disable authenticator code cannot be reused for 120 s (S-3). `trustDevice`
-  is forced off; admin reset and password change delete trusted-device rows (S-4). Password changes
-  always end other sessions (S-8).
-- Role ranking on `POST /api/v1/staff` (S-5): no role above your own; role changes and password
-  resets only for accounts strictly below the caller; nobody changes their own role.
-- Anti-enumeration: unknown, customer and staff addresses are indistinguishable on the code path;
-  non-staff, unknown and wrong-password answers are identical on the password path (same hashing work).
-- Bootstrap: while no super admin exists, the first auth request creates the `BOOTSTRAP_SUPER_ADMIN_EMAIL`
-  user and `super_admin` row (one audit row) and, from `BOOTSTRAP_SUPER_ADMIN_PASSWORD`, seeds its
-  password once ever and only onto an account without a password (claimed by
-  `settings.auth.bootstrap_password_seeded`); seeding sets `must_change_password = 1` (S-7).
-  **Operational:** sign in as the owner right after the first deploy, then
-  `wrangler secret delete BOOTSTRAP_SUPER_ADMIN_PASSWORD` (review S-8 bootstrap window).
-- Residual (review S-8): a staff member behind the same NAT/CGNAT as an attacker can be locked out
-  per client for 15 min; Turnstile/edge rate limiting is the recommended follow-up (ops).
-- No self-service password reset: an admin sets a new initial password (POST /staff), which forces
-  change + re-enrolment. Lost authenticator: a backup code, or an admin reset.
+- `0003` and `0004` were rewritten in place (production has only 0001/0002; confirmed with `git log origin/main -- infra/cloudflare/migrations`).
+  - `0003`: the identity tables of both systems, and `staff_members`/`tenant_memberships` foreign keys to them.
+  - `0004`: `staff_two_factor`, `staff_rate_limit`, `customer_rate_limit`.
+- The Drizzle snapshot (`meta/0000_snapshot.json`) was regenerated; `pnpm db:generate` reports no changes.
+- `0008` (WT-12) is untouched.
+- **Every existing local/test D1 must be recreated.**
 
 ## Deploy needs
 
-- **Turnstile (review T-1):** create a widget for `box.affinityminds.in` only, managed mode,
-  **pre-clearance off** (agent-notes cloudflare-workers trap 1). Secret `TURNSTILE_SECRET_KEY`
-  (Wrangler secret via a workflow sync step like the others — WT-0) and var `TURNSTILE_SITE_KEY`
-  (`wrangler.jsonc` vars — WT-0). Until both are set, the account budget falls back to the cooldown.
-  Cloudflare's dummy keys return hostname `example.com`, so they fail our hostname check on
-  localhost; local dev simply shows the widget and the rejection (see `13-customer-turnstile-step-up.png`).
+- **Secrets** (the workflow syncs each once):
+  - `STAFF_AUTH_SECRET`, `CUSTOMER_AUTH_SECRET`
+  - `BOOTSTRAP_SUPER_ADMIN_PASSWORD` (GitHub environment secret, ≥ 12 chars)
+  - `TURNSTILE_SECRET_KEY` (WT-0 step)
+- **Retired:** `BETTER_AUTH_SECRET` (a workflow step deletes it).
+- **Vars:** `ENVIRONMENT=production`, `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `EMAIL_FROM`, `TURNSTILE_SITE_KEY`, `OPS_BASE_PATH` (`/ops` by default). `OTP_DEV_ECHO` must be absent.
+- `wrangler.jsonc`: `assets.run_worker_first: true` (the Worker serves the SPA through `ops-shell.ts`).
+- **After the first deploy:** sign in as the owner at `/ops/login` (forced password change and authenticator), then delete the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` Worker secret.
+- **Local:** `apps/worker-api/.dev.vars.example` lists every key.
 
-- Secrets: `BETTER_AUTH_SECRET` (existing step), **`BOOTSTRAP_SUPER_ADMIN_PASSWORD`** (new GitHub
-  environment secret, ≥ 12 characters; the new workflow step puts it into the Worker once).
-- Vars: `ENVIRONMENT=production`, `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `EMAIL_FROM`; `OTP_DEV_ECHO` absent.
-- Binding `EMAIL` with `em.affinity.ai.in` onboarded (customer codes only).
-- If a super admin row was already created in a deployed database by the earlier code (no password),
-  it gets its password on the next auth request after the secret is set (seed runs while not yet seeded).
-- Local: `apps/worker-api/.dev.vars` = `BETTER_AUTH_SECRET`, `ENVIRONMENT=development`, `OTP_DEV_ECHO=1`,
-  `BOOTSTRAP_SUPER_ADMIN_EMAIL`, `BOOTSTRAP_SUPER_ADMIN_PASSWORD`.
+### Ops recommendations (edge; the Worker's limits stay authoritative)
 
----
+1. **WAF rate-limiting rule on the auth endpoints**
+   - Paths: `box.affinityminds.in/api/auth/sign-in/*`, `/api/auth/email-otp/*`, `/api/ops/auth/*`.
+   - Counting characteristic: IP, with IPv6 grouped by /48.
+   - For example 30 requests per 10 min, then block for 10 min.
+2. **WAF custom rule for the staff surface**
+   - Paths: `${OPS_BASE_PATH}` and `${OPS_BASE_PATH}/*`, and `/api/ops/*`.
+   - Either an **IP / country allowlist** (managed challenge or block for everything else), or at least a managed challenge on first visit.
+   - Pre-clearance must stay **off** (agent-notes cloudflare-workers trap 1).
+3. **Turnstile widget** for `box.affinityminds.in` only, managed mode, pre-clearance off.
 
-## Tests (worker-api 373/373 after merging WT-3/WT-4, admin-web 4/4, licensing-contracts 16/16)
+## Tests (worker-api 469/469, admin-web 5/5, licensing-contracts 16/16)
 
-Third pass (T-1/T-2): `auth-stepup.test.ts` (5: /48 shares limits and counters; every failed check
-counts toward the budget; challenge_required for known and unknown alike, valid token passes send and
-sign-in; foreign-host or failed tokens refused; cooldown fallback audited once and budget reset),
-`auth-otp.test.ts` requester-only attempt spending, WT-8 `phase-1-third-pass` (T-2) green.
+- **`permission-matrix.test.ts`, "two identity systems never cross":**
+  - a staff cookie on `/api/v1/me` gets 401
+  - a customer cookie on `/api/v1/screens/tenants`, `POST /api/v1/tenants`, `/api/v1/staff` and `/api/v1/screens/audit` gets 401
+  - neither mount exposes the other's endpoints (404)
+  - a staff email on the customer mount mints nothing and creates no customer identity
+- **`authz.test.ts`:**
+  - each guard reads only its own session
+  - with both cookies present, each route uses only its own
+- **`ops-shell.test.ts`:**
+  - only known console routes under the base are marked and noindex
+  - unknown paths under the base are byte-identical to any other path
+  - `OPS_BASE_PATH` is honoured, and a malformed value falls back to the default
+  - `/api/ops/*` responses are noindex, with the ordinary 404
+- **Carried over and updated for the split:** `staff-auth`, `bootstrap`, `auth-otp`, `auth-stepup`, `staff`, `screens`.
+- **WT-2/3/5/6 suites:** 401 instead of 403 for a customer session on staff routes (owner decision).
+- **Every WT-8 review test is green**, passes 1–4, including U-1 and U-2.
+- **Review test edits:** some review tests were edited only where the owner's decisions moved what they address, never what they assert. The list is at the top of the review doc's fourth pass.
+- **admin-web:** `withBase`, `safeRedirect`, step-up error mapping.
+- **e2e smoke** (`tests/e2e-cloud`):
+  - `/` → customer email step, with no password field and no link to the ops base
+  - `${OPS_BASE_PATH}/login` → staff form with `X-Robots-Tag`
+  - an optional customer OTP → portal run
 
-Second pass adds WT-8 `review/phase-1-second-pass` (all green, unmodified) and in WT-1's files:
-`auth-otp.test.ts` "S-2" (owner gets a code after 40 sends from other clients) and "S-6";
-`staff-auth.test.ts` non-staff failures audited once + uniform 429, forced session revocation on
-password change, disable-code replay refused; `staff.test.ts` self role change 403.
-
-
-- `staff-auth.test.ts` (8): staff get the customer answer but no code, and a code for a staff email
-  fails like a wrong code; password sign-in for non-staff (incl. a former staff member with a
-  credential row) and unknown emails fails exactly like a wrong password; forced first sign-in
-  blocks every staff route until password change **then** authenticator (enable before the change
-  refused, same password refused); password + TOTP sign-in with a wrong code audited; 5 wrong codes
-  burn the challenge; a backup code works once; disable needs password + fresh code; password lockout
-  per (email, client) answers 429 with the wrong-password body while the owner elsewhere still signs in.
-- `bootstrap.test.ts` (2): two concurrent first requests → one user, one super admin, one credential,
-  one `STAFF_ROLE_GRANTED`, one `STAFF_PASSWORD_SET`; password never in audit; owner signs in into the
-  forced setup; staff get no email code; a changed secret never re-seeds.
-- `auth-otp.test.ts` (19): customer flow; closed sign-in (unknown email: same body/headers, zero user
-  and verification rows, `unknown_email` audit; fabricated code = wrong code); H-1 (owner not locked out
-  by another IP, per-email ceiling answers the same 200); M-3; L-2; H-2 extras; invalid/reused/expired
-  codes; resend reuses the valid code; 3 wrong codes burn it; per-IP limits; honeypot; sign-in only;
-  L-10; dev echo.
-- `staff.test.ts` (8): gates; new staff needs `initialPassword` (exactly one user row, password sign-in
-  into setup, password never audited); role change + idempotence; revoke; self/last-super-admin 409;
-  validation (incl. short password).
-- `authz.test.ts` (14), `screens.test.ts` (5), `foundation.test.ts` (7), WT-6 `permission-matrix` (3),
-  `query-plans` (7), WT-5 `subscriptions` (73), `migrations` (6), WT-8 `review/phase-1-hardening` (54):
-  all green.
-
-## Demo path (local; screenshots in `docs/evidence/wt-p1-auth/`, throwaway local D1)
+## Demo path (local wrangler dev + fresh local D1 + Playwright; `docs/evidence/wt-p1-auth/`)
 
 ```
-01 /login, Staff sign-in: soren@affinityminds.net + BOOTSTRAP_SUPER_ADMIN_PASSWORD → Continue
-02 /setup-password: initial → new (≥ 12)                     03 /setup-authenticator: confirm password
-04 QR (rendered in the browser) + manual key → six-digit code 05 backup codes, shown once → console
-06 console with the user menu (Super Admin); GET /api/v1/staff 200 → Sign out
-07 sign in again → authenticator step                         08 wrong code → error
-09 backup code → console                                      10/11 Customer sign-in: email → code step
-12 staff sign-in at 390 px
+01 /login: customer email step (no password field, no links)   02 code step   03 /portal
+04 /ops/login: staff email + password (X-Robots-Tag: noindex)
+05 /ops/setup-password   06 /ops/setup-authenticator QR   07 backup codes (shown once)
+08 console under /ops with the user menu (Super Admin)
+09 second sign-in: authenticator step (next time step; the enrolment code is not replayed)
+10 /ops/zzz: the same "Page not found" as any unknown path
 ```
 
-The QR, key and backup codes in the screenshots belong to a local database that no longer exists.
+## Decisions / deviations
 
-## Decisions / deviations to note
-
-- **Twofactor API vs the skill notes:** in 1.7.6 `two-factor/enable` requires the `password`
-  (the skill's example omits it) and `disable` requires the password (not a TOTP); the "fresh TOTP on
-  disable" rule is ours, enforced in the before hook by calling the instance's own `verifyTOTP`
-  (after Better Auth's rate limiter). Better Auth's own challenge/account lockout is used for TOTP.
-  I read the installed source rather than guessing; nothing here needed a guess.
-- **H-1 "while a valid code exists, do not send a new one":** implemented as "resends re-send the
-  *same* still-valid code" plus "over a cap: same 200, nothing sent". A strict "no mail while a code is
-  valid" would leave an owner who lost the mail waiting up to 5 minutes and contradicts the review's
-  negative test (owner at another IP must receive a message).
-- **Password lockout body:** 429 status with the wrong-password JSON body (as asked); the status
-  itself tells a caller they are locked, never whether the account exists (the per-client counter is
-  the same for staff, non-staff and unknown addresses).
-- **S-8 "do not hash non-staff attempts":** within the per-client limit the hash is kept, because
-  skipping it would let response time tell staff addresses from others; beyond the limit nothing is
-  hashed or recorded, and audit rows for non-staff/unknown addresses are once per 15 min.
-- **S-5:** revoking (DELETE) is not ranked (a super admin can still remove a rogue peer); the
-  last-super-admin guard still applies. Role changes of one's own account are refused.
-- **Counters location:** the failure counters and used-code claims live in `rate_limit` (Better
-  Auth's table from 0004) under hashed keys rather than a new column on `two_factor`; a dummy
-  rate-limit rule of 1 h keeps Better Auth's pruning from removing them early.
-- `db/schema.ts`, `env.ts`, `http.ts`, `routes/v1/index.ts`, `package.json`/lockfile and the workflow
-  were edited under the owner's decisions / WT-0 leave as listed above.
+- **Review tests edited** to follow the owner's decisions (paths, table names, customer-only routes); every assertion is unchanged. See the note in the review doc.
+- **Staff email on the customer surface:** with two systems, the customer surface no longer consults staff tables. A person who is both staff and a tenant member has a separate customer identity (created by a membership), and receives codes for it.
+- **Bootstrap** runs only on the staff mount (`/api/ops/auth/*`), and only into `staff_users`.
+- `ensureUserByEmail` remains as a deprecated alias of `ensureCustomerByEmail` (review tests import it).
+- **U-2** is WT-2's fix (ranking + last-owner guard), merged and adapted to `customer_users`.
+- **Files outside WT-1's area, edited under the owner's decisions or WT-0's leave:**
+  - `db/schema.ts`, migrations `0003`/`0004` and their snapshot
+  - `wrangler.jsonc`: `OPS_BASE_PATH`, `run_worker_first`
+  - the deploy workflow's secret steps, `.dev.vars.example`
+  - WT-2's `memberships.ts` and `screens/tenants.ts`
+  - WT-6's `fixtures.ts` (`seedStaff` → `staff_users`)
+  - `test/*` expectations for 401
+  - the e2e smoke test
 
 ## Requests to other worktrees
 
-- [ ] WT-0: move `rateLimit` (`src/auth/rate-limit-table.ts`) into `db/schema.ts` and regenerate the
-  Drizzle snapshot including 0004; add `ENVIRONMENT=development` to `.dev.vars.example` (wrangler.jsonc
-  now defaults to production, and `OTP_DEV_ECHO=1` with production makes `createAuth` throw).
-- [ ] WT-0: a Staff nav entry and screen on `/api/v1/staff` (create with initial password, reset).
-- [ ] WT-2: create membership users with `ensureUserByEmail`; fill `activeTenantId` in the session.
-- [ ] WT-12: `sendOtpEmail(env, {to, code}, {correlationId, client})` must keep writing the
-  `AUTH_OTP_SENT` audit row with `client`; the per-(email, client) cap counts it.
-- [ ] Ops (reviews M-3, T-1): Cloudflare WAF rate-limiting rule on `box.affinityminds.in`
-  `/api/auth/sign-in/*` (and `/api/auth/email-otp/*`), counting characteristic **IP with IPv6 /48
-  prefix** (`ip.src` grouped by /48; Enterprise "IPv6 prefix" or the closest available), e.g. 30
-  requests / 10 min → block 10 min. Defence in depth for CPU (password hashing) and code guessing; the
-  Worker's own limits stay authoritative.
-- [ ] WT-0: `TURNSTILE_SITE_KEY` var and a `TURNSTILE_SECRET_KEY` secret sync step (see Deploy needs).
+- [ ] WT-0: set the WAF rules above; set `OPS_BASE_PATH` to a random slug when the owner wants it.
+- [ ] WT-2: new customer identities only via `ensureCustomerByEmail`; tenant-member UI stays on the customer surface (`/portal`), never under the ops base.
+- [ ] WT-3/WT-5: staff screens only under the ops console; customer-facing views, if any, on the customer surface.
+- [ ] WT-6: `signInAs(env, {email, staffRole?})` returns a staff-system session when `staffRole` is given, else a customer-system session; `seedStaff` writes `staff_users`.
 
 ## Safe next action
 
-Review and merge PR #10 into `phase-1/identity`, set the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` environment
-secret before the next deploy, then sign in as the owner and complete the forced setup.
+Merge the PR into `phase-1/identity` and deploy. Then sign in at `/ops/login` as the owner, complete the forced setup, and delete the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` Worker secret.

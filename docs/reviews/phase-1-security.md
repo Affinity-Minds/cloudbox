@@ -316,6 +316,8 @@ Every first- and second-pass review test passes unmodified. The one failure is t
 
 # Fourth pass / merge verdict
 
+> **WT-1 note on test edits (owner decisions after this pass).** Staff and customers became two identity systems with separate mounts and tables (ADR 0002). The review tests were changed only where the owner's decision moved what they address, never in what they assert: staff endpoints `/api/auth/…` → `/api/ops/auth/…` (second pass), table names `user`/`verification` → `staff_users`/`customer_verifications`/`staff_verifications` (second pass), the bootstrap trigger `/api/auth/get-session` → `/api/ops/auth/get-session` (S-9), S-6 skips the customer-only `/api/v1/me/*` routes (a staff session is not read there: 401, asserted in `permission-matrix.test.ts`), and U-3 also accepts 401 for a customer session on a staff screen (it is not read at all).
+
 Reviewed commit: `origin/phase-1/identity` @ `c043a8b`, which includes WT-1 `229781c` (PR #14), WT-2 (tenants and memberships) and WT-3. It is merged into `review/phase-1-security`.
 New test file: `apps/worker-api/test/review/phase-1-fourth-pass.test.ts`.
 
@@ -351,6 +353,7 @@ Every earlier review test passes, including T-2. The 4 failures are the fourth-p
   - `U-1 … the variant does not sign in past the account cooldown / step-up` fails. The real address gets 429 `account_cooldown`, while the variant **signs in (200)** with the code from a client that never requested it.
 - **Fix:** fail closed on unparseable addresses. In the `/api/auth/*` middleware in `src/index.ts`, for `/email-otp/send-verification-otp`, `/sign-in/email-otp` and `/sign-in/email`, parse `body.email` with the contracts `Email` and answer 400 `invalid_request` if it fails. In the hooks, change `if (!email.success) return` / `return null` to throw. The staff password path is not affected, because Better Auth validates the raw address before lowercasing it; add it to the middleware check anyway.
 - **Negative test:** both U-1 tests.
+- **Fixed in `fef2e5b`** (WT-1, completed with the identity split in `8020566`): the contracts `Email` now normalises before validating (`normalizeEmail`: NFKC, trim, lower-case), so `"Kate"` becomes `kate` and every counter, cap, budget and guard keys on the one spelling. The `/api/auth/*` and `/api/ops/auth/*` gate (`src/index.ts`) parses `body.email` on send-code, code sign-in and password sign-in, answers 400 `{error:'invalid_request'}` when it does not parse, and hands Better Auth a request whose `email` is the normalised value; the hooks throw instead of returning. Both U-1 tests pass unmodified.
 
 ### U-2 (Medium) Tenant standing is not ranked: a tenant admin can make itself owner and remove the owner
 - **Where:** `src/routes/v1/memberships.ts:119-158` (PATCH) and `:160-192` (DELETE), plus POST with `standing: "owner"`. `requireTenantManageOrAdmin` admits `admin` and `owner` equally, and nothing compares the caller's standing with the target's or the new one. There is no last-owner guard.
@@ -360,6 +363,7 @@ Every earlier review test passes, including T-2. The 4 failures are the fourth-p
   - `U-2 … cannot revoke the tenant's only owner` fails: 200.
   - `(holds) a tenant user cannot change its own standing` passes: 403.
 - **Fix:** mirror the staff ranking from S-5 for tenant members (staff with `tenant.manage` bypass it). A member may only grant a standing at or below its own. It may change or revoke only memberships strictly below its own. Keep a last-active-owner guard inside the `UPDATE` / `DELETE` statement, as in L-8.
+- **Fixed** by WT-2 (`d4f26af`, standing ranking + last-active-owner guard), merged into `wt/p1-auth` in `24a674e` and adapted to customer identities (`customer_users`). Both U-2 tests pass.
 
 ## Tenant boundary (WT-2 glance): holds
 The test `U-3 (holds)` checks all three:
