@@ -24,7 +24,7 @@ This document lists all third-party software components included in or used by C
 
 **Repository:** https://www.wireguard.com/, https://github.com/cloudbase/wintun  
 **License:** To verify  
-**Usage:** Windows kernel driver, embedded via Netclient | Speculative: WireGuard likely under LGPL or permissive; Wintun developed by Cloudbase (permissive). Verify during Phase 6 implementation. |
+**Usage:** Windows kernel driver, embedded via Netclient | Licence: to verify from the upstream repositories during Phase 6 before bundling. No claim is made here. |
 
 ---
 
