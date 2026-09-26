@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { authFor, HONEYPOT_HEADER } from "./auth";
+import { authContextFor, createAuth, HONEYPOT_HEADER } from "./auth";
 import { requireUser } from "./auth/middleware";
+import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
@@ -48,10 +49,13 @@ app.get("/api/version", (c) =>
 
 // Better Auth. Sign-out goes through the audited v1 logout so there is one way out.
 app.post("/api/auth/sign-out", requireUser(), logout);
-app.on(["GET", "POST"], "/api/auth/*", (c): Response | Promise<Response> => {
+app.on(["GET", "POST"], "/api/auth/*", async (c): Promise<Response> => {
   // Honeypot enforced server-side: a plain 400 that names nothing (agent-notes ux-patterns).
   if (c.req.header(HONEYPOT_HEADER)) return c.json({ error: "invalid_request" }, 400);
-  return authFor(c).handler(c.req.raw);
+  const request = authContextFor(c);
+  // Until a super admin exists, the bootstrap address needs a user row to be able to sign in.
+  await ensureBootstrapSuperAdmin(c.env, request);
+  return createAuth(c.env, request).handler(c.req.raw);
 });
 
 app.get("/api/v1/foundation", async (c) => {

@@ -6,7 +6,8 @@ import { zValidator } from "@hono/zod-validator";
 import { asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
-import { authFor } from "../../auth";
+import { authContextFor } from "../../auth";
+import { ensureUserByEmail } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
 import { staffMembers, user } from "../../db/schema";
@@ -58,38 +59,31 @@ staff.post(
     const db = createDb(c.env.DB);
     const actor = c.var.user;
 
-    // The user may never have signed in: create the Better Auth user through the library so the
-    // grant is waiting when they first verify a code.
-    const ctx = await authFor(c).$context;
-    const found = await ctx.internalAdapter.findUserByEmail(email);
-    const target =
-      found?.user ??
-      (await ctx.internalAdapter.createUser(
-        { email, name: "", emailVerified: false },
-        { method: "admin" },
-      ));
+    // The user may never have signed in: create the row (admin action) so the grant is waiting
+    // when they first verify a code. Sign-in itself never creates users (ADR 0002).
+    const targetId = await ensureUserByEmail(c.env, email, authContextFor(c));
 
     const [existing] = await db
       .select({ role: staffMembers.role })
       .from(staffMembers)
-      .where(eq(staffMembers.userId, target.id));
+      .where(eq(staffMembers.userId, targetId));
     if (existing?.role === role) {
-      const [member] = await listStaff(db, target.id);
+      const [member] = await listStaff(db, targetId);
       return c.json(member, 200);
     }
-    if (existing?.role === "super_admin" && (await isLastSuperAdmin(db, target.id))) {
+    if (existing?.role === "super_admin" && (await isLastSuperAdmin(db, targetId))) {
       return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
     }
 
     await db.batch([
       db
         .insert(staffMembers)
-        .values({ userId: target.id, role, createdBy: actor.id })
+        .values({ userId: targetId, role, createdBy: actor.id })
         .onConflictDoUpdate({ target: staffMembers.userId, set: { role } }),
       audit(db, {
         eventType: "STAFF_ROLE_GRANTED",
         entityType: "staff_member",
-        entityId: target.id,
+        entityId: targetId,
         actor: { type: "user", id: actor.id },
         before: existing ? { role: existing.role } : null,
         after: { role, email },
@@ -97,7 +91,7 @@ staff.post(
         source: "api",
       }),
     ]);
-    const [member] = await listStaff(db, target.id);
+    const [member] = await listStaff(db, targetId);
     return c.json(member, existing ? 200 : 201);
   },
 );

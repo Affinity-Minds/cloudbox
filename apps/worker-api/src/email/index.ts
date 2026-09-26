@@ -24,7 +24,13 @@ export function otpEmailBody(code: string): { text: string; html: string } {
   return { text, html };
 }
 
-type SendOutcome = { messageId?: string; errorCode?: string; echoed?: true };
+type SendOutcome = {
+  /** Same field as the `unknown_email` record written by the sign-in hook (src/auth/index.ts). */
+  outcome: "sent" | "send_failed";
+  messageId?: string;
+  errorCode?: string;
+  echoed?: true;
+};
 
 /** Sends the code; never throws, so a send failure cannot change the HTTP response. */
 export async function sendOtpEmail(
@@ -43,14 +49,17 @@ export async function sendOtpEmail(
         subject: OTP_EMAIL_SUBJECT,
         ...otpEmailBody(message.code),
       });
-      outcome = { messageId: result.messageId };
+      outcome = { outcome: "sent", messageId: result.messageId };
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
-      outcome = { errorCode: typeof code === "string" ? code : "E_SEND_FAILED" };
+      outcome = {
+        outcome: "send_failed",
+        errorCode: typeof code === "string" ? code : "E_SEND_FAILED",
+      };
       console.error("otp email send failed", outcome.errorCode);
     }
   } else {
-    outcome = { errorCode: "E_NO_EMAIL_BINDING" };
+    outcome = { outcome: "send_failed", errorCode: "E_NO_EMAIL_BINDING" };
   }
 
   // Local development only: `wrangler dev` without remote bindings, and tests.

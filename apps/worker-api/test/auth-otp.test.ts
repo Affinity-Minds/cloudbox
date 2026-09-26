@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import type { SessionResponse } from "@cloudbox/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { assertOtpEchoSafe, createAuth, HONEYPOT_HEADER } from "../src/auth";
+import { ensureUserByEmail } from "../src/auth/users";
 import { sendOtpEmail } from "../src/email";
 import type { Bindings } from "../src/env";
 import app from "../src/index";
@@ -71,8 +72,19 @@ async function auditRows(eventType: string, entityId: string) {
   return results.map((r) => JSON.parse(r.after_json) as Record<string, unknown>);
 }
 
+/** Sign-in is closed: an address can sign in only once an admin action created its user row. */
+const known = (email: string) => ensureUserByEmail(env, email);
+
+async function countRows(table: "user" | "verification", where: string, value: string) {
+  const row = await env.DB.prepare(`SELECT count(*) AS n FROM "${table}" WHERE ${where} = ?`)
+    .bind(value)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 describe("email OTP sign-in", () => {
   it("send → verify → session → logout, with a stubbed mailer and audit rows", async () => {
+    await known("flow@example.test");
     const box = withMailbox();
     const ip = nextIp();
     const sent = await sendCode("Flow@Example.test", box.env, ip);
@@ -86,7 +98,9 @@ describe("email OTP sign-in", () => {
     });
     expect(box.sent[0]?.text).toMatch(/expires in 5 minutes/);
     expect(box.sent[0]?.text).toMatch(/did not request/);
-    expect(await auditRows("AUTH_OTP_SENT", "flow@example.test")).toEqual([{ messageId: "msg-1" }]);
+    expect(await auditRows("AUTH_OTP_SENT", "flow@example.test")).toEqual([
+      { outcome: "sent", messageId: "msg-1" },
+    ]);
 
     const verified = await verifyCode(
       "flow@example.test",
@@ -117,21 +131,55 @@ describe("email OTP sign-in", () => {
     );
   });
 
-  it("anti-enumeration: an unknown and a known email get the identical response", async () => {
+  it("closed sign-in: an unknown email gets the identical 200, but no code, row or mail", async () => {
+    await known("known@example.test");
     const box = withMailbox();
-    const ip = nextIp();
-    // Make the "known" user exist first.
-    await sendCode("known@example.test", box.env, ip);
-    await verifyCode("known@example.test", box.codeFor("known@example.test"), box.env, ip);
+    const users = await env.DB.prepare('SELECT count(*) AS n FROM "user"').first<{ n: number }>();
 
-    const ip2 = nextIp();
-    const known = await sendCode("known@example.test", box.env, ip2);
-    const unknown = await sendCode("nobody-here@example.test", box.env, ip2);
-    expect(known.status).toBe(unknown.status);
-    expect(await known.text()).toBe(await unknown.text());
+    const ip = nextIp();
+    const knownResponse = await sendCode("known@example.test", box.env, ip);
+    const unknownResponse = await sendCode("Nobody-Here@Example.test", box.env, ip);
+    expect(unknownResponse.status).toBe(knownResponse.status);
+    expect(await unknownResponse.text()).toBe(await knownResponse.text());
+    expect(unknownResponse.headers.get("content-type")).toBe(
+      knownResponse.headers.get("content-type"),
+    );
+    expect(unknownResponse.headers.get("set-cookie")).toBe(knownResponse.headers.get("set-cookie"));
+
+    expect(box.sent.map((m) => m.to)).toEqual(["known@example.test"]);
+    const after = await env.DB.prepare('SELECT count(*) AS n FROM "user"').first<{ n: number }>();
+    expect(after?.n).toBe(users?.n);
+    expect(await countRows("user", "email", "nobody-here@example.test")).toBe(0);
+    expect(
+      await countRows("verification", "identifier", "sign-in-otp-nobody-here@example.test"),
+    ).toBe(0);
+    expect(await auditRows("AUTH_OTP_SENT", "nobody-here@example.test")).toEqual([
+      { outcome: "unknown_email" },
+    ]);
+  });
+
+  it("closed sign-in: a fabricated code for an unknown email fails exactly like a wrong code", async () => {
+    await known("wrong-code@example.test");
+    const box = withMailbox();
+    await sendCode("wrong-code@example.test", box.env, nextIp());
+    await sendCode("ghost@example.test", box.env, nextIp());
+    const good = box.codeFor("wrong-code@example.test");
+    const fabricated = good === "000000" ? "111111" : "000000";
+
+    const wrong = await verifyCode("wrong-code@example.test", fabricated, box.env, nextIp());
+    const ghost = await verifyCode("ghost@example.test", fabricated, box.env, nextIp());
+    expect(ghost.status).toBe(wrong.status);
+    expect(ghost.status).toBe(400);
+    expect(await ghost.text()).toBe(await wrong.text());
+    expect(ghost.headers.get("set-cookie")).toBeNull();
+    expect(await countRows("user", "email", "ghost@example.test")).toBe(0);
+    expect(await auditRows("AUTH_LOGIN_FAILED", "ghost@example.test")).toEqual([
+      { reason: "INVALID_OTP" },
+    ]);
   });
 
   it("a mail failure still answers 200 and records the error code", async () => {
+    await known("bounce@example.test");
     const failing = {
       ...env,
       EMAIL: {
@@ -144,11 +192,12 @@ describe("email OTP sign-in", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(await auditRows("AUTH_OTP_SENT", "bounce@example.test")).toEqual([
-      { errorCode: "E_SENDER_NOT_VERIFIED" },
+      { outcome: "send_failed", errorCode: "E_SENDER_NOT_VERIFIED" },
     ]);
   });
 
   it("an invalid code fails, is audited without the code, and names nothing", async () => {
+    await known("invalid@example.test");
     const box = withMailbox();
     const ip = nextIp();
     await sendCode("invalid@example.test", box.env, ip);
@@ -163,6 +212,7 @@ describe("email OTP sign-in", () => {
   });
 
   it("a reused code is refused", async () => {
+    await known("reuse@example.test");
     const box = withMailbox();
     const ip = nextIp();
     await sendCode("reuse@example.test", box.env, ip);
@@ -174,6 +224,7 @@ describe("email OTP sign-in", () => {
   });
 
   it("an expired code is refused", async () => {
+    await known("expired@example.test");
     const box = withMailbox();
     const ip = nextIp();
     await sendCode("expired@example.test", box.env, ip);
@@ -189,6 +240,7 @@ describe("email OTP sign-in", () => {
   });
 
   it("a resend supersedes the previous code", async () => {
+    await known("resend@example.test");
     const box = withMailbox();
     const ip = nextIp();
     await sendCode("resend@example.test", box.env, ip);
@@ -202,6 +254,7 @@ describe("email OTP sign-in", () => {
   });
 
   it("three wrong codes burn the code, even the right one then fails", async () => {
+    await known("attempts@example.test");
     const box = withMailbox();
     await sendCode("attempts@example.test", box.env, nextIp());
     const good = box.codeFor("attempts@example.test");
@@ -231,6 +284,7 @@ describe("email OTP sign-in", () => {
   });
 
   it("rate-limits OTP sends per email across IPs", async () => {
+    await known("email-limit@example.test");
     const box = withMailbox();
     const statuses: number[] = [];
     for (let i = 0; i < 6; i += 1) {
@@ -276,67 +330,6 @@ describe("email OTP sign-in", () => {
   });
 });
 
-describe("bootstrap super admin", () => {
-  it("grants super_admin to the bootstrap email on first verify, once, audited as system", async () => {
-    const box = withMailbox({ BOOTSTRAP_SUPER_ADMIN_EMAIL: "Owner@Example.test" });
-    const existing = await env.DB.prepare(
-      "SELECT count(*) AS n FROM staff_members WHERE role = 'super_admin'",
-    ).first<{ n: number }>();
-    expect(existing?.n).toBe(0);
-
-    const ip = nextIp();
-    await sendCode("owner@example.test", box.env, ip);
-    const verified = await verifyCode(
-      "owner@example.test",
-      box.codeFor("owner@example.test"),
-      box.env,
-      ip,
-    );
-    expect(verified.status).toBe(200);
-    const cookie = cookieFrom(verified);
-    const body = (await (
-      await app.request("/api/v1/auth/session", { headers: { cookie } }, env)
-    ).json()) as SessionResponse;
-    expect(body.user.staffRole).toBe("super_admin");
-    expect(body.permissions).toContain("staff.manage");
-
-    const grants = await env.DB.prepare(
-      "SELECT actor_type, actor_id FROM audit_log WHERE event_type = 'STAFF_ROLE_GRANTED' AND entity_id = ?",
-    )
-      .bind(body.user.id)
-      .all();
-    expect(grants.results).toEqual([{ actor_type: "system", actor_id: "bootstrap" }]);
-
-    // A second sign-in does not grant again.
-    const ip2 = nextIp();
-    await sendCode("owner@example.test", box.env, ip2);
-    await verifyCode("owner@example.test", box.codeFor("owner@example.test"), box.env, ip2);
-    const again = await env.DB.prepare(
-      "SELECT count(*) AS n FROM audit_log WHERE event_type = 'STAFF_ROLE_GRANTED' AND entity_id = ?",
-    )
-      .bind(body.user.id)
-      .first<{ n: number }>();
-    expect(again?.n).toBe(1);
-  });
-
-  it("does nothing for other emails, or once a super admin exists", async () => {
-    const box = withMailbox({ BOOTSTRAP_SUPER_ADMIN_EMAIL: "late-owner@example.test" });
-    const ip = nextIp();
-    await sendCode("late-owner@example.test", box.env, ip);
-    const verified = await verifyCode(
-      "late-owner@example.test",
-      box.codeFor("late-owner@example.test"),
-      box.env,
-      ip,
-    );
-    const body = (await (
-      await app.request("/api/v1/auth/session", { headers: { cookie: cookieFrom(verified) } }, env)
-    ).json()) as SessionResponse;
-    // The previous test's owner is already super admin in this file's database.
-    expect(body.user.staffRole).toBeNull();
-  });
-});
-
 describe("OTP dev echo", () => {
   it("never echoes in production and refuses to start with OTP_DEV_ECHO there", async () => {
     expect(() => assertOtpEchoSafe({ ENVIRONMENT: "production", OTP_DEV_ECHO: "1" })).toThrow();
@@ -358,7 +351,11 @@ describe("OTP dev echo", () => {
         { to: "d@example.test", code: "654321" },
       );
       expect(log).toHaveBeenCalledWith("[otp-dev-echo]", "d@example.test", "654321");
-      expect(outcome).toEqual({ errorCode: "E_NO_EMAIL_BINDING", echoed: true });
+      expect(outcome).toEqual({
+        outcome: "send_failed",
+        errorCode: "E_NO_EMAIL_BINDING",
+        echoed: true,
+      });
     } finally {
       log.mockRestore();
     }

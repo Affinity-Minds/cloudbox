@@ -73,6 +73,11 @@ describe("staff management API", () => {
       createdBy: root.userId,
     });
 
+    const users = await env.DB.prepare('SELECT count(*) AS n FROM "user" WHERE email = ?')
+      .bind("new.support@example.test")
+      .first<{ n: number }>();
+    expect(users?.n).toBe(1);
+
     // First sign-in through the real OTP flow (the user row exists but is unverified).
     let code = "";
     const mailEnv = {

@@ -7,7 +7,7 @@ import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { emailOTP } from "better-auth/plugins";
-import { and, count, eq, gt, sql } from "drizzle-orm";
+import { and, count, eq, gt } from "drizzle-orm";
 import type { Context } from "hono";
 import { audit } from "../audit";
 import { createDb, type Db } from "../db/client";
@@ -34,6 +34,8 @@ const SIGN_IN_OTP_PATH = "/sign-in/email-otp";
 
 export type AuthRequestContext = {
   correlationId?: string | null;
+  /** `executionCtx.waitUntil` when serving a request: the email send runs after the response. */
+  waitUntil?: (promise: Promise<unknown>) => void;
   /** Origin of the incoming request. Better Auth would infer the same; passing it is explicit. */
   baseURL?: string;
 };
@@ -64,36 +66,6 @@ async function otpSendsInWindow(db: Db, email: string): Promise<number> {
   return row?.n ?? 0;
 }
 
-/**
- * First successful sign-in of `BOOTSTRAP_SUPER_ADMIN_EMAIL` while no super admin exists grants the
- * role. The existence check and the insert are one statement, so two racing sign-ins cannot both win.
- */
-async function bootstrapSuperAdmin(
-  env: Bindings,
-  db: Db,
-  user: { id: string; email: string },
-  correlationId: string | null,
-): Promise<void> {
-  const bootstrapEmail = env.BOOTSTRAP_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
-  if (!bootstrapEmail || user.email.toLowerCase() !== bootstrapEmail) return;
-  const result = await db.run(sql`
-    INSERT INTO staff_members (user_id, role, created_by)
-    SELECT ${user.id}, 'super_admin', 'system'
-    WHERE NOT EXISTS (SELECT 1 FROM staff_members WHERE role = 'super_admin')
-    ON CONFLICT (user_id) DO NOTHING`);
-  if ((result.meta?.changes ?? 0) === 0) return;
-  await audit(db, {
-    eventType: "STAFF_ROLE_GRANTED",
-    entityType: "staff_member",
-    entityId: user.id,
-    actor: { type: "system", id: "bootstrap" },
-    before: null,
-    after: { role: "super_admin", email: user.email, reason: "bootstrap" },
-    correlationId,
-    source: "api",
-  });
-}
-
 function errorCode(returned: unknown): string {
   if (returned instanceof APIError) {
     const body = returned.body as { code?: string } | undefined;
@@ -119,6 +91,10 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
       // Session + user in one D1 round trip (the relations are in db/schema.ts).
       database: { joins: true },
+      // Send the email after answering, so a known address does not answer measurably slower than
+      // an unknown one (Better Auth's own advice for the OTP sender). Without a request context
+      // (tests, scripts) the send is awaited.
+      ...(request.waitUntil ? { backgroundTasks: { handler: request.waitUntil } } : {}),
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -126,10 +102,28 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
         // Only sign-in codes exist here; other types would answer differently for unknown emails.
         const parsed = OtpSendRequest.safeParse(ctx.body);
         if (!parsed.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
-        if ((await otpSendsInWindow(db, parsed.data.email)) >= OTP_SENDS_PER_EMAIL.max) {
+        const email = parsed.data.email;
+        if ((await otpSendsInWindow(db, email)) >= OTP_SENDS_PER_EMAIL.max) {
           throw new APIError("TOO_MANY_REQUESTS", {
             message: "Too many requests. Please try again later.",
           });
+        }
+        // Closed sign-in (ADR 0002): an address without a user row gets exactly the answer a known
+        // one gets, but no code is generated, stored or sent. Recorded like a send, so the
+        // per-email limit applies to unknown addresses too.
+        if (!(await ctx.context.internalAdapter.findUserByEmail(email))) {
+          const record = audit(db, {
+            eventType: "AUTH_OTP_SENT",
+            entityType: AUTH_EMAIL_ENTITY,
+            entityId: email,
+            actor: { type: "system", id: "email-otp" },
+            before: null,
+            after: { outcome: "unknown_email" },
+            correlationId,
+            source: "api",
+          }).then(() => undefined);
+          await ctx.context.runInBackgroundOrAwait(record);
+          return ctx.json({ success: true });
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
@@ -146,7 +140,6 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
             correlationId,
             source: "api",
           });
-          await bootstrapSuperAdmin(env, db, signedIn.user, correlationId);
           return;
         }
         const body = ctx.body as { email?: unknown } | undefined;
@@ -167,6 +160,8 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
     plugins: [
       emailOTP({
         otpLength: 6,
+        // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts).
+        disableSignUp: true,
         expiresIn: 5 * 60,
         allowedAttempts: 3,
         storeOTP: "hashed",
@@ -187,10 +182,18 @@ export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
 
 /** The auth instance for a Hono request: its correlation id and its own origin as base URL. */
 export function authFor(c: Context<AppEnv>) {
-  return createAuth(c.env, {
-    correlationId: c.var.correlationId,
-    baseURL: new URL(c.req.url).origin,
-  });
+  return createAuth(c.env, authContextFor(c));
+}
+
+export function authContextFor(c: Context<AppEnv>): AuthRequestContext {
+  let waitUntil: AuthRequestContext["waitUntil"];
+  try {
+    const executionCtx = c.executionCtx;
+    waitUntil = (promise) => executionCtx.waitUntil(promise);
+  } catch {
+    // app.request() in tests has no ExecutionContext.
+  }
+  return { correlationId: c.var.correlationId, baseURL: new URL(c.req.url).origin, waitUntil };
 }
 
 export type Auth = ReturnType<typeof createAuth>;
