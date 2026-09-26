@@ -311,3 +311,66 @@ Every first- and second-pass review test passes unmodified. The one failure is t
 - **Phase 1 as merged at this SHA: no open High with present impact; OK to merge to main.** S-1 and S-2, the previous blockers, are closed and verified by the review tests.
 - **Condition:** T-1 is High and blocks the merge of any route that authorises a customer (WT-2). Fix it together with WT-2, or before.
 - **Should fix soon:** T-2 (Medium), and pinning actions by commit SHA (Low).
+
+---
+
+# Fourth pass / merge verdict
+
+Reviewed commit: `origin/phase-1/identity` @ `c043a8b`, which includes WT-1 `229781c` (PR #14), WT-2 (tenants and memberships) and WT-3. It is merged into `review/phase-1-security`.
+New test file: `apps/worker-api/test/review/phase-1-fourth-pass.test.ts`.
+
+```
+pnpm --filter @cloudbox/worker-api test
+Test Files  1 failed | 22 passed (23)
+Tests       4 failed | 433 passed (437)
+```
+Every earlier review test passes, including T-2. The 4 failures are the fourth-pass findings below.
+
+## T-1 / T-2 fixes: what holds
+- **IPv6 /48 keying:** `advanced.ipAddress.ipv6Subnet: 48` is set, so Better Auth's limits and every `counters.ts` key share the same /48 client.
+- **Account budget and step-up** (`src/auth/challenge.ts`):
+  - It is the same for every address. It counts only failures, which anyone can cause for any address, so `challenge_required` depends only on a counter the caller controls and does not reveal which addresses exist.
+  - Siteverify checks `success` and that `hostname` equals the request host.
+  - Turnstile tokens are single use at Cloudflare, so a token cannot be replayed for a second address. A token is not bound to one address, but it buys exactly one request, which is acceptable.
+- **Foreign guesses:** they do not consume the owner's attempts. T-2 passes.
+- **Cooldown as an interim measure:** 30 failures from 30 /48s or IPv4 addresses per hour does give a repeatable 15-minute lockout of any customer while `TURNSTILE_SECRET_KEY` is unset. **This is acceptable only as an interim, and only if it is closed at go-live.** The deploy workflow currently just logs "not set" (`deploy-cloudflare.yml:167`). Make that step fail when `ENVIRONMENT` is `production` and customer sign-in is enabled, or at least emit `::warning::` and list it in the go-live checklist. Not blocking.
+
+## New findings
+### U-1 (High, blocks the merge) A Unicode case variant of the email skips every CloudBox code-sign-in control
+- **Where:**
+  - `src/auth/index.ts`, `before` hook for `/sign-in/email-otp`: `if (!email.success) return;`
+  - `src/auth/challenge.ts:82-83`: `if (!email.success) return null;`
+  - The `after` hook records failures for the address `"invalid"`, so a variant failure counts toward nothing.
+- **Why it works:** the contracts `Email` parser (zod `z.email()`) is ASCII-only, so `"Kate@x"` fails it. Better Auth's `signInEmailOTP` does not validate the address; it only calls `toLowerCase()`, and `"K".toLowerCase() === "k"`. The request therefore reaches the real `kate@x` code while skipping:
+  - the per-client failure cap (S-6)
+  - the account budget, cooldown and Turnstile step-up (T-1)
+  - the "never requested a code" guard (T-2)
+- **Exploit path:** any customer address containing `k`. The attacker requests codes under the real address, which is capped per client. Then they guess using the variant from as many clients as they like. Only Better Auth's per-IP limit (3 / 60 s per IPv4 or /48) and 5 attempts per code remain, so with a pool of IPv4 proxies the T-1 arithmetic applies again. A correct guess signs in as the customer, and since WT-2 merged, that is a tenant member or owner.
+- **Evidence:**
+  - `U-1 … wrong guesses for 'Kate' (Kelvin sign) do not consume the owner's attempts` fails with `expected 403 to be 200`: the variant burned the owner's code.
+  - `U-1 … the variant does not sign in past the account cooldown / step-up` fails. The real address gets 429 `account_cooldown`, while the variant **signs in (200)** with the code from a client that never requested it.
+- **Fix:** fail closed on unparseable addresses. In the `/api/auth/*` middleware in `src/index.ts`, for `/email-otp/send-verification-otp`, `/sign-in/email-otp` and `/sign-in/email`, parse `body.email` with the contracts `Email` and answer 400 `invalid_request` if it fails. In the hooks, change `if (!email.success) return` / `return null` to throw. The staff password path is not affected, because Better Auth validates the raw address before lowercasing it; add it to the middleware check anyway.
+- **Negative test:** both U-1 tests.
+
+### U-2 (Medium) Tenant standing is not ranked: a tenant admin can make itself owner and remove the owner
+- **Where:** `src/routes/v1/memberships.ts:119-158` (PATCH) and `:160-192` (DELETE), plus POST with `standing: "owner"`. `requireTenantManageOrAdmin` admits `admin` and `owner` equally, and nothing compares the caller's standing with the target's or the new one. There is no last-owner guard.
+- **Exploit path:** a tenant admin PATCHes its own membership to `owner` and then revokes the real owner. The result is a takeover inside that tenant. It does not cross tenants.
+- **Evidence:**
+  - `U-2 … a tenant admin cannot make itself owner` fails: 200.
+  - `U-2 … cannot revoke the tenant's only owner` fails: 200.
+  - `(holds) a tenant user cannot change its own standing` passes: 403.
+- **Fix:** mirror the staff ranking from S-5 for tenant members (staff with `tenant.manage` bypass it). A member may only grant a standing at or below its own. It may change or revoke only memberships strictly below its own. Keep a last-active-owner guard inside the `UPDATE` / `DELETE` statement, as in L-8.
+
+## Tenant boundary (WT-2 glance): holds
+The test `U-3 (holds)` checks all three:
+- A member of tenant A gets 403 on `GET /screens/tenants/:idB` (the screen needs staff `tenant.view`).
+- A member of A gets 403 on `POST /me/active-tenant {tenantId: B}` (membership is re-resolved server-side, and `getActiveTenantId` re-checks it on every read).
+- A member of A gets 403 on `POST /tenants/:idB/memberships` (standing is read from the path `tenantId`).
+
+A tenant `user` cannot change its own standing.
+
+## Merge verdict
+**Do not merge Phase 1 to main yet: U-1 (High) is open.** The fix is small (validate the address before anything else, and fail closed in the hooks), and the two U-1 tests show when it is done. After U-1 is fixed, merging is acceptable with these follow-ups:
+- **U-2** (Medium): tenant takeover by a tenant admin. Fix it before customers get self-service member management in the UI.
+- Make the deploy fail or warn loudly while `TURNSTILE_SECRET_KEY` is missing in production.
+- Pin actions by commit SHA (Low).
