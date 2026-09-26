@@ -280,7 +280,27 @@ function errorCode(returned: unknown): string {
   return "unknown";
 }
 
-export function authOptions(env: Bindings, request: AuthRequestContext = {}, self: AuthSelf = {}) {
+/**
+ * The two sign-in surfaces (owner decision, ADR 0009/0002): customers at /api/auth/* (email code
+ * only), staff at /api/ops/auth/* (password + authenticator only). Separate Better Auth instances,
+ * separate cookie names, disjoint endpoint allowlists (src/index.ts); one session table.
+ */
+export type Surface = "customer" | "staff";
+export const AUTH_BASE_PATH: Record<Surface, string> = {
+  customer: "/api/auth",
+  staff: "/api/ops/auth",
+};
+export const COOKIE_PREFIX: Record<Surface, string> = {
+  customer: "cloudbox",
+  staff: "cloudbox-ops",
+};
+
+function surfaceOptions(
+  env: Bindings,
+  request: AuthRequestContext,
+  self: AuthSelf,
+  surface: Surface,
+) {
   const correlationId = request.correlationId ?? null;
   const db = createDb(env.DB);
   // Who is acting on a session or two-factor endpoint; set by the before hook, read by the after
@@ -308,24 +328,15 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
   }
   return {
     baseURL: request.baseURL,
-    basePath: "/api/auth",
+    basePath: AUTH_BASE_PATH[surface],
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: trustedOrigins(env),
     database: drizzleAdapter(db, { provider: "sqlite", schema: { ...schema, rateLimit } }),
-    // Passwords exist only for staff (ADR 0009). No sign-up and no reset by email: an admin sets
-    // an initial password (POST /api/v1/staff), which forces a change and re-enrolment.
-    emailAndPassword: {
-      enabled: true,
-      disableSignUp: true,
-      minPasswordLength: MIN_PASSWORD_LENGTH,
-      maxPasswordLength: 256,
-      revokeSessionsOnPasswordReset: true,
-    },
     // Per-IP limits, stored in D1 so every isolate shares them. The emailOTP plugin's rules apply
     // to its paths (OTP send and sign-in: 3 / 60 s each); everything else under /api/auth is 60/min.
     rateLimit: {
       enabled: true,
-      storage: "database",
+      storage: "database" as const,
       window: 60,
       max: 60,
       // Never matches a request: it only makes Better Auth keep idle rows for an hour, so the
@@ -333,6 +344,9 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
       customRules: { "/cloudbox-counter-horizon": { window: COUNTER_HORIZON_SECONDS, max: 1 } },
     },
     advanced: {
+      // Distinct cookie names: a browser holds at most one session per surface, and each mount
+      // only ever reads and writes its own.
+      cookiePrefix: COOKIE_PREFIX[surface],
       // A client is an IPv4 address or an IPv6 /48 (review T-1): a routed /48 is one party, not
       // 65,536 /64s. Every per-IP limit and every per-client counter uses this key.
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"], ipv6Subnet: 48 },
@@ -679,6 +693,22 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
         }
       }),
     },
+  };
+}
+
+/** Staff surface (/api/ops/auth): email + password, then authenticator (ADR 0009). */
+export function authOptions(env: Bindings, request: AuthRequestContext = {}, self: AuthSelf = {}) {
+  return {
+    ...surfaceOptions(env, request, self, "staff"),
+    // Passwords exist only for staff (ADR 0009). No sign-up and no reset by email: an admin sets
+    // an initial password (POST /api/v1/staff), which forces a change and re-enrolment.
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      minPasswordLength: MIN_PASSWORD_LENGTH,
+      maxPasswordLength: 256,
+      revokeSessionsOnPasswordReset: true,
+    },
     plugins: [
       // Staff second factor: authenticator app (TOTP) with backup codes. Better Auth's own
       // account lockout (10 consecutive failures → 15 min) applies to sign-in verification.
@@ -687,6 +717,17 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
         totpOptions: { digits: 6, period: 30 },
         backupCodeOptions: { amount: 10, length: 10 },
       }),
+    ],
+  } satisfies BetterAuthOptions;
+}
+
+/** Customer surface (/api/auth): an emailed six-digit code, nothing else (ADR 0002). */
+export function customerAuthOptions(env: Bindings, request: AuthRequestContext = {}) {
+  const correlationId = request.correlationId ?? null;
+  return {
+    ...surfaceOptions(env, request, {}, "customer"),
+    emailAndPassword: { enabled: false },
+    plugins: [
       emailOTP({
         otpLength: 6,
         // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts).
@@ -710,6 +751,8 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
   } satisfies BetterAuthOptions;
 }
 
+
+/** The staff instance (/api/ops/auth). Also the one for admin actions on users and passwords. */
 export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
   assertAuthConfig(env);
   const self: AuthSelf = {};
@@ -718,9 +761,20 @@ export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
   return auth;
 }
 
-/** The auth instance for a Hono request: its correlation id and its own origin as base URL. */
+/** The customer instance (/api/auth). */
+export function createCustomerAuth(env: Bindings, request: AuthRequestContext = {}) {
+  assertAuthConfig(env);
+  return betterAuth(customerAuthOptions(env, request));
+}
+
+/** The staff auth instance for a Hono request: its correlation id and its own origin as base URL. */
 export function authFor(c: Context<AppEnv>) {
   return createAuth(c.env, authContextFor(c));
+}
+
+/** The customer auth instance for a Hono request. */
+export function customerAuthFor(c: Context<AppEnv>) {
+  return createCustomerAuth(c.env, authContextFor(c));
 }
 
 export function authContextFor(c: Context<AppEnv>): AuthRequestContext {
