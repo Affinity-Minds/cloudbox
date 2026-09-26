@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../../env";
 import audit from "./audit";
 import overview from "./overview";
+import subscriptions from "./subscriptions";
 import tenants from "./tenants";
 
 const screens = new Hono<AppEnv>();
@@ -11,5 +12,6 @@ const screens = new Hono<AppEnv>();
 screens.route("/overview", overview);
 screens.route("/audit", audit);
 screens.route("/tenants", tenants); // WT-2
+screens.route("/subscriptions", subscriptions); // WT-5
 
 export default screens;

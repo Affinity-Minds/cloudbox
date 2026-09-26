@@ -2,6 +2,28 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — Drizzle `db.batch` on D1 silently shifted joined columns (WT-5)
+**Symptom:** Entitlement issuance answered `409 device_not_enrolled` for an enrolled device; a screen query failed with `ambiguous column name: generation`.
+
+**Cause:** Drizzle's D1 batch path turns each row object into an array with `Object.values` and then maps by position. A select over a join that returns two columns with the same SQL name (`devices.status` and `subscriptions.status`, `devices.id` and `subscriptions.id`) collapses to one key, so every later field shifts by one. The same query run alone (not in a batch) is fine, which hides it. Separately, a subquery alias equal to a real column name (`max(generation) as generation`) is ambiguous in the outer join.
+
+**Fix:** In batched selects, alias every duplicated column name (`sql\`${devices.status}\`.as("device_status")`) and give aggregates distinct aliases (`max_generation`). Comment at the query in `src/entitlement/service.ts`.
+
+**Blast radius:** Any `db.batch([...])` containing a join that selects same-named columns from two tables. Screen loaders are the usual place (fast-data-hydration pushes everything into one batch).
+
+**Verification:** `test/subscriptions.test.ts` issuance and screen tests.
+
+## 2026-09-27 — Zod `.partial()` kept a `.default()`: an empty PATCH would have re-activated a subscription (WT-5)
+**Symptom:** `CreateSubscriptionRequest.omit({planCode}).partial().parse({})` returned `{ status: "active" }`.
+
+**Cause:** In Zod 4, `.partial()` wraps a field that has `.default()`; the default still fills a missing value.
+
+**Fix:** `UpdateSubscriptionRequest` is spelled out with optional fields and no defaults, plus a "at least one field" refinement.
+
+**Blast radius:** Any update schema derived with `.partial()` from a create schema that has defaults (agent-notes cloudflare-workers #16 is the sibling: defaults only exist after `parse`).
+
+**Verification:** `PATCH /subscriptions/:id` with `{}` answers 400; covered in `test/subscriptions.test.ts`.
+
 ## 2026-09-27 — A developer's `.dev.vars` changed worker test results
 **Symptom:** `a mail failure still answers 200 and records the error code` passed, then failed after `wrangler dev` was set up locally: the audit row read `{echoed:true}` instead of `{errorCode:…}`.
 

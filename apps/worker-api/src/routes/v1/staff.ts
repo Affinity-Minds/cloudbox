@@ -3,10 +3,11 @@
 // the `staff.manage` permission row and audited as STAFF_ROLE_GRANTED / STAFF_ROLE_REVOKED.
 import { CreateStaffRequest, type StaffMember, type StaffRole } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
-import { authFor } from "../../auth";
+import { authContextFor } from "../../auth";
+import { ensureUserByEmail, setInitialStaffPassword } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
 import { staffMembers, user } from "../../db/schema";
@@ -30,17 +31,16 @@ function listStaff(db: Db, userId?: string) {
     .orderBy(asc(user.email));
 }
 
-/** True when `userId` is the only super admin, so removing or demoting them would lock everyone out. */
-async function isLastSuperAdmin(db: Db, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({
-      isSuper: sql<number>`max(case when ${staffMembers.userId} = ${userId} then 1 else 0 end)`,
-      others: sql<number>`sum(case when ${staffMembers.userId} != ${userId} then 1 else 0 end)`,
-    })
-    .from(staffMembers)
-    .where(eq(staffMembers.role, "super_admin"));
-  return Number(row?.isSuper ?? 0) === 1 && Number(row?.others ?? 0) === 0;
-}
+/**
+ * SQL condition, true while changing `userId`'s row cannot remove the last super admin: the row is
+ * not a super admin, or another super admin exists. Used inside the write itself (review L-8), so
+ * two super admins demoting each other at the same moment cannot both succeed.
+ */
+const keepsASuperAdmin = (userId: string) =>
+  sql`(${staffMembers.role} != 'super_admin' OR (SELECT count(*) FROM staff_members AS other
+    WHERE other.role = 'super_admin' AND other.user_id != ${userId}) > 0)`;
+
+const changed = (result: { meta?: { changes?: number } }) => (result.meta?.changes ?? 0) > 0;
 
 staff.get("/", requirePermission("staff.manage"), async (c) => {
   const items: StaffMember[] = await listStaff(createDb(c.env.DB));
@@ -54,50 +54,63 @@ staff.post(
     if (!result.success) return c.json({ error: "invalid_request" }, 400);
   }),
   async (c) => {
-    const { email, role } = c.req.valid("json");
+    const { email, role, initialPassword } = c.req.valid("json");
     const db = createDb(c.env.DB);
     const actor = c.var.user;
 
-    // The user may never have signed in: create the Better Auth user through the library so the
-    // grant is waiting when they first verify a code.
-    const ctx = await authFor(c).$context;
-    const found = await ctx.internalAdapter.findUserByEmail(email);
-    const target =
-      found?.user ??
-      (await ctx.internalAdapter.createUser(
-        { email, name: "", emailVerified: false },
-        { method: "admin" },
-      ));
-
     const [existing] = await db
-      .select({ role: staffMembers.role })
+      .select({ userId: staffMembers.userId, role: staffMembers.role })
       .from(staffMembers)
-      .where(eq(staffMembers.userId, target.id));
-    if (existing?.role === role) {
-      const [member] = await listStaff(db, target.id);
-      return c.json(member, 200);
-    }
-    if (existing?.role === "super_admin" && (await isLastSuperAdmin(db, target.id))) {
-      return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
+      .innerJoin(user, eq(user.id, staffMembers.userId))
+      .where(eq(user.email, email));
+    // A new staff member signs in with password + authenticator (ADR 0009): the admin sets the
+    // initial password here and hands it over out of band.
+    if (!existing && !initialPassword) {
+      return c.json({ error: "invalid_request", detail: "initial_password_required" }, 400);
     }
 
-    await db.batch([
-      db
+    // The user may never have signed in: create the row (admin action). Sign-in itself never
+    // creates users (ADR 0002/0009).
+    const targetId = existing?.userId ?? (await ensureUserByEmail(c.env, email, authContextFor(c)));
+
+    if (existing?.role !== role) {
+      const result = await db
         .insert(staffMembers)
-        .values({ userId: target.id, role, createdBy: actor.id })
-        .onConflictDoUpdate({ target: staffMembers.userId, set: { role } }),
-      audit(db, {
+        .values({ userId: targetId, role, createdBy: actor.id })
+        .onConflictDoUpdate({
+          target: staffMembers.userId,
+          set: { role },
+          setWhere: keepsASuperAdmin(targetId),
+        })
+        .run();
+      if (!changed(result)) return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
+      await audit(db, {
         eventType: "STAFF_ROLE_GRANTED",
         entityType: "staff_member",
-        entityId: target.id,
+        entityId: targetId,
         actor: { type: "user", id: actor.id },
         before: existing ? { role: existing.role } : null,
         after: { role, email },
         correlationId: c.var.correlationId,
         source: "api",
-      }),
-    ]);
-    const [member] = await listStaff(db, target.id);
+      });
+    }
+    if (initialPassword) {
+      // Forces a password change and authenticator re-enrolment at next sign-in and ends the
+      // member's sessions. The password itself is never audited or logged.
+      await setInitialStaffPassword(c.env, targetId, initialPassword, authContextFor(c));
+      await audit(db, {
+        eventType: "STAFF_PASSWORD_SET",
+        entityType: "staff_member",
+        entityId: targetId,
+        actor: { type: "user", id: actor.id },
+        before: null,
+        after: { reason: existing ? "admin_reset" : "new_staff", mustChangePassword: true },
+        correlationId: c.var.correlationId,
+        source: "api",
+      });
+    }
+    const [member] = await listStaff(db, targetId);
     return c.json(member, existing ? 200 : 201);
   },
 );
@@ -113,23 +126,23 @@ staff.delete("/:userId", requirePermission("staff.manage"), async (c) => {
     .from(staffMembers)
     .where(eq(staffMembers.userId, userId));
   if (!existing) return c.json({ error: "not_found" }, 404);
-  if (existing.role === "super_admin" && (await isLastSuperAdmin(db, userId))) {
+  const result = await db
+    .delete(staffMembers)
+    .where(and(eq(staffMembers.userId, userId), keepsASuperAdmin(userId)))
+    .run();
+  if (!changed(result)) {
     return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
   }
-
-  await db.batch([
-    db.delete(staffMembers).where(eq(staffMembers.userId, userId)),
-    audit(db, {
-      eventType: "STAFF_ROLE_REVOKED",
-      entityType: "staff_member",
-      entityId: userId,
-      actor: { type: "user", id: actor.id },
-      before: { role: existing.role as StaffRole },
-      after: null,
-      correlationId: c.var.correlationId,
-      source: "api",
-    }),
-  ]);
+  await audit(db, {
+    eventType: "STAFF_ROLE_REVOKED",
+    entityType: "staff_member",
+    entityId: userId,
+    actor: { type: "user", id: actor.id },
+    before: { role: existing.role as StaffRole },
+    after: null,
+    correlationId: c.var.correlationId,
+    source: "api",
+  });
   return c.body(null, 204);
 });
 

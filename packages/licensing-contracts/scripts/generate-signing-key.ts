@@ -1,0 +1,19 @@
+// One-off: mint the server entitlement signing key (docs/runbooks/licensing-key-rotation.md).
+//
+//   node packages/licensing-contracts/scripts/generate-signing-key.ts \
+//     | gh secret set ENTITLEMENT_SIGNING_JWK --env production --repo Affinity-Minds/cloudbox
+//
+// stdout carries ONLY the private JWK (one line, for a pipe; never paste it anywhere else).
+// stderr carries the kid and the public JWK for the runbook record. The public half needs no manual
+// step: the Worker inserts it into `signing_keys` on first issuance (ensureSigningKey).
+import { generateServerSigningKey } from "../src/keys.ts";
+
+const key = await generateServerSigningKey();
+if (process.stdout.isTTY) {
+  process.stderr.write(
+    "Refusing to print a private key to a terminal. Pipe stdout into `gh secret set` (see header).\n",
+  );
+  process.exit(1);
+}
+process.stdout.write(JSON.stringify(key.privateJwk));
+process.stderr.write(`kid: ${key.kid}\npublic JWK: ${JSON.stringify(key.publicJwk)}\n`);

@@ -17,10 +17,11 @@ export default defineConfig(async () => {
           compatibilityDate: "2026-08-01",
           d1Databases: ["DB", "UPGRADE_DB"],
           bindings: {
+            ENVIRONMENT: "development",
             TEST_MIGRATIONS: migrations,
             // Test-only secret (never deployed); Better Auth refuses to start without one.
             BETTER_AUTH_SECRET: "test-only-better-auth-secret-0123456789abcdef",
-            // Deterministic regardless of a developer's local .dev.vars.
+            // Deterministic regardless of a developer's local .dev.vars (which the pool also reads).
             OTP_DEV_ECHO: "0",
           },
         },

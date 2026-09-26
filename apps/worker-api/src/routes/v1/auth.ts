@@ -12,7 +12,7 @@ import { getActiveTenantId } from "./me";
 
 const auth = new Hono<AppEnv>();
 
-auth.get("/session", requireUser(), async (c) => {
+auth.get("/session", requireUser({ allowSetupPending: true }), async (c) => {
   const principal = await getPrincipal(c);
   if (!principal) return c.json({ error: "unauthenticated" }, 401);
   const body: SessionResponse = {
@@ -20,6 +20,7 @@ auth.get("/session", requireUser(), async (c) => {
     permissions: [...principal.permissions].sort(),
     // WT-2: settings-style per-user row, re-validated against a live membership on every read.
     activeTenantId: await getActiveTenantId(createDb(c.env.DB), principal.user.id),
+    setup: principal.setup,
   };
   return c.json(body);
 });
@@ -47,6 +48,6 @@ export async function logout(c: Context<AppEnv>) {
   return response;
 }
 
-auth.post("/logout", requireUser(), logout);
+auth.post("/logout", requireUser({ allowSetupPending: true }), logout);
 
 export default auth;

@@ -1,15 +1,20 @@
 // Shell: WT-0 (sidebar-07 from nav.ts). Auth guard: WT-1 (`beforeLoad` → /login without a session).
 // The guard only routes the browser; every API call is authorised server-side regardless.
-import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { requireSession } from "@/auth/session";
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { pendingSetupPath, requireSession } from "@/auth/session";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: async ({ context, location }) => ({
-    session: await requireSession(context.queryClient, location.href),
-  }),
+  beforeLoad: async ({ context, location }) => {
+    const session = await requireSession(context.queryClient, location.href);
+    // Staff must replace the initial password and enrol an authenticator first (ADR 0009); the
+    // server refuses staff routes until then anyway (403 setup_required).
+    const setup = pendingSetupPath(session);
+    if (setup) throw redirect({ to: setup });
+    return { session };
+  },
   component: AppShell,
 });
 
