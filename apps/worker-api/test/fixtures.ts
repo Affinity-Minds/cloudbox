@@ -2,7 +2,12 @@
 // Each seed* helper takes the raw `D1Database` binding (usually `env.DB`, or a `countingD1(...)`
 // wrapper), inserts through the Drizzle schema so columns can never drift from `db/schema.ts`,
 // and returns the row it inserted (camelCase, matching the `@cloudbox/contracts` shape).
-import type { MembershipStanding, StaffRole, SubscriptionStatus, TenantStatus } from "@cloudbox/contracts";
+import type {
+  MembershipStanding,
+  StaffRole,
+  SubscriptionStatus,
+  TenantStatus,
+} from "@cloudbox/contracts";
 import { createDb } from "../src/db/client";
 import {
   devices,
@@ -14,21 +19,10 @@ import {
 } from "../src/db/schema";
 import { newId, nowIso } from "../src/ids";
 
+// signInAs is owned by WT-1 (test/auth-fixtures.ts): it creates a real Better Auth session
+// through the library's own test-utils plugin, not by hand-minting a session row.
+export { type SignedIn, signInAs, TEST_ORIGIN } from "./auth-fixtures";
 export { type CountingD1, countingD1 } from "./counting-d1";
-
-// signInAs is owned by WT-1 (test/auth-fixtures.ts: creates a Better Auth session through the
-// library's own adapter API, not by hand-minting a row). That file does not exist in this
-// worktree yet, so importing it here would break every test file that imports ./fixtures. Once
-// it lands, delete the stub below and replace this whole block with:
-//   export { signInAs } from "./auth-fixtures";
-const pending = (name: string): never => {
-  throw new Error(`WT-6 implements ${name}`);
-};
-
-/** Creates a Better Auth session through the library and returns the request header. */
-export async function signInAs(_userId: string): Promise<{ Cookie: string }> {
-  return pending("signInAs");
-}
 
 // ─── id / value helpers ─────────────────────────────────────────────────────────────────────
 
@@ -252,14 +246,21 @@ export async function seedSubscription(
     validFrom,
     validUntil,
     maxManagedUsers: input.maxManagedUsers ?? 6,
-    featuresJson: JSON.stringify(
-      input.features ?? ["remote_access", "managed_backup", "fleet"],
-    ),
+    featuresJson: JSON.stringify(input.features ?? ["remote_access", "managed_backup", "fleet"]),
     offlineGraceDays: input.offlineGraceDays ?? 7,
     renewalWarningDays: input.renewalWarningDays ?? 30,
     createdAt: now,
     updatedAt: now,
   });
 
-  return { subscriptionId, tenantId: input.tenantId, planCode, status, validFrom, validUntil, createdAt: now, updatedAt: now };
+  return {
+    subscriptionId,
+    tenantId: input.tenantId,
+    planCode,
+    status,
+    validFrom,
+    validUntil,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

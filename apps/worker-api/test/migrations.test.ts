@@ -7,14 +7,36 @@ import { describe, expect, it } from "vitest";
  * below deliberately dirties it. Tests that need a genuinely empty D1 call this first so they
  * are correct regardless of test order within the file, not just today's order.
  */
-async function resetD1(db: D1Database): Promise<void> {
+async function tableNames(db: D1Database): Promise<string[]> {
   const tables = await db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'",
     )
     .all<{ name: string }>();
-  for (const { name } of tables.results) {
-    await db.prepare(`DROP TABLE IF EXISTS "${name}"`).run();
+  return tables.results.map((t) => t.name);
+}
+
+/**
+ * Drops every user table, in as many passes as it takes: FK constraints reject dropping a
+ * referenced table before its dependents, and `sqlite_master`'s order is not dependency order.
+ * Each pass drops whatever it can and retries the rest; it gives up only if a whole pass drops
+ * nothing (a real cycle, which none of these schemas have).
+ */
+async function resetD1(db: D1Database): Promise<void> {
+  let remaining = await tableNames(db);
+  while (remaining.length > 0) {
+    const failed: string[] = [];
+    for (const name of remaining) {
+      try {
+        await db.prepare(`DROP TABLE "${name}"`).run();
+      } catch {
+        failed.push(name);
+      }
+    }
+    if (failed.length === remaining.length) {
+      throw new Error(`resetD1: stuck dropping ${failed.join(", ")}`);
+    }
+    remaining = failed;
   }
 }
 
@@ -122,7 +144,7 @@ describe("every migration file applies from empty, in order", () => {
   it("creates the full schema with nothing pre-existing", async () => {
     const db = env.UPGRADE_DB;
     await resetD1(db);
-    expect(env.TEST_MIGRATIONS.length).toBeGreaterThanOrEqual(3);
+    expect(env.TEST_MIGRATIONS.length).toBeGreaterThanOrEqual(4);
 
     await applyD1Migrations(db, env.TEST_MIGRATIONS);
 
@@ -149,6 +171,7 @@ describe("every migration file applies from empty, in order", () => {
         "subscriptions",
         "entitlements",
         "signing_keys",
+        "rate_limit",
       ]),
     );
 
@@ -166,6 +189,7 @@ describe("every migration file applies from empty, in order", () => {
 
   it("fails loudly, not silently-partially, if a migration runs out of order", async () => {
     const db = env.UPGRADE_DB;
+    await resetD1(db);
     // 0003 ALTERs audit_log and references `permissions`/`plans`, which only exist after
     // 0001/0002 ran. Applying it alone must throw (D1 surfaces the underlying SQLite error, per
     // agent-notes cloudflare-workers #7 — walk `.cause` if this ever needs a specific message),
@@ -174,19 +198,20 @@ describe("every migration file applies from empty, in order", () => {
     expect(identityOnly).toHaveLength(1);
     await expect(applyD1Migrations(db, identityOnly)).rejects.toThrow();
 
-    // Loud failure, not partial: none of 0003's own tables exist either. A migration script is
-    // not wrapped statement-by-statement, so "no such table: permissions" on an early ALTER/INSERT
+    // Loud failure, not partial: none of 0003's own tables exist either (only D1's/the pool's own
+    // bookkeeping tables remain — `tableNames` already excludes `sqlite_%`/`_cf_%`; `d1_migrations`
+    // is `applyD1Migrations`'s own tracking table, not one of ours). A migration script is not
+    // wrapped statement-by-statement, so "no such table: permissions" on an early ALTER/INSERT
     // does not leave later CREATE TABLEs in this same file half-applied — SQLite errors immediately.
-    const tables = await db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-      .all<{ name: string }>();
-    expect(tables.results.map((t) => t.name)).toEqual([]);
+    const tables = (await tableNames(db)).filter((name) => name !== "d1_migrations");
+    expect(tables).toEqual([]);
   });
 });
 
 describe("applying the full migration chain twice", () => {
   it("is a no-op, not a duplicate-schema error or a silent partial apply", async () => {
     const db = env.UPGRADE_DB;
+    await resetD1(db);
     await applyD1Migrations(db, env.TEST_MIGRATIONS);
     const before = await db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")

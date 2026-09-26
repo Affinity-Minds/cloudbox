@@ -68,14 +68,26 @@ Pass `planCode` if the test needs a different plan row seeded first — this hel
 create plan rows. Returns
 `{ subscriptionId, tenantId, planCode, status, validFrom, validUntil, createdAt, updatedAt }`.
 
-## `signInAs(userId)` — not implemented here
+## `signInAs(env, { email, name?, staffRole? })` — re-exported, not implemented here
 
-Owned by WT-1, in `apps/worker-api/test/auth-fixtures.ts` (does not exist in this worktree yet).
-It must create a session through Better Auth's own adapter API, not by hand-minting a `session`
-row, so it stays correct if Better Auth's session shape changes. Until that file lands, the
-stub in `fixtures.ts` throws `Error: WT-6 implements signInAs` — write tests against it as
-`test.todo` (see `test/permission-matrix.test.ts` for the pattern). Once WT-1's file exists,
-replace the stub with `export { signInAs } from "./auth-fixtures";`.
+Owned by WT-1, in `apps/worker-api/test/auth-fixtures.ts`. Creates the user if missing (email
+verified, as after a real OTP sign-in), upserts a `staff_members` row when `staffRole` is given,
+and returns a real Better Auth session through the library's own test-utils plugin — never a
+hand-minted `session` row. Returns `{ cookie, userId, headers }`, where `headers` is ready to
+pass straight to `app.request(path, { headers }, env)` (it carries the cookie plus a same-origin
+`Origin`, since Better Auth's CSRF check inspects `Origin` on writes):
+
+```ts
+import { signInAs } from "./fixtures";
+
+const { headers } = await signInAs(env, { email: "reader@example.test", staffRole: "read_only" });
+const response = await app.request("/api/v1/tenants", { headers }, env);
+```
+
+Note the first argument is the `Bindings` (`env`), not a user id — `signInAs` creates the user
+itself rather than taking one `seedStaff` already created. Use one or the other for a given
+test, not both, unless the test specifically needs a `staff_members` row to already exist before
+sign-in.
 
 ## `countingD1(db)` — re-exported, not re-implemented
 

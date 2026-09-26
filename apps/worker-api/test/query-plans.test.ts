@@ -38,13 +38,15 @@ describe("query plans avoid unindexed scans on tenant-scoped tables", () => {
   for (const query of queries) {
     it(query.name, async () => {
       const statement = env.DB.prepare(`EXPLAIN QUERY PLAN ${query.sql}`);
-      const bound = query.params && query.params.length > 0 ? statement.bind(...query.params) : statement;
+      const bound =
+        query.params && query.params.length > 0 ? statement.bind(...query.params) : statement;
       const plan = await bound.all<PlanRow>();
 
       const badScans = plan.results.filter((row) => isUnindexedScanOfGuardedTable(row.detail));
-      expect(badScans, `plan for "${query.name}":\n${JSON.stringify(plan.results, null, 2)}`).toEqual(
-        [],
-      );
+      expect(
+        badScans,
+        `plan for "${query.name}":\n${JSON.stringify(plan.results, null, 2)}`,
+      ).toEqual([]);
     });
   }
 });
