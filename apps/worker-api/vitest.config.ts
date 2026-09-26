@@ -20,6 +20,8 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             // Test-only secret (never deployed); Better Auth refuses to start without one.
             BETTER_AUTH_SECRET: "test-only-better-auth-secret-0123456789abcdef",
+            // Deterministic regardless of a developer's local .dev.vars.
+            OTP_DEV_ECHO: "0",
           },
         },
       }),
