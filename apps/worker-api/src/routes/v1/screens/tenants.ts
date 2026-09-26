@@ -14,11 +14,11 @@ import { requirePermission } from "../../../authz/permissions";
 import { createDb, type Db } from "../../../db/client";
 import {
   auditLog,
+  customerUsers,
   devices,
   subscriptions,
   tenantMemberships,
   tenants,
-  user,
 } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
 
@@ -124,15 +124,15 @@ export async function loadTenantDetailScreen(
         id: tenantMemberships.id,
         tenantId: tenantMemberships.tenantId,
         userId: tenantMemberships.userId,
-        email: user.email,
-        name: user.name,
+        email: customerUsers.email,
+        name: customerUsers.name,
         standing: tenantMemberships.standing,
         status: tenantMemberships.status,
         invitedBy: tenantMemberships.invitedBy,
         createdAt: tenantMemberships.createdAt,
       })
       .from(tenantMemberships)
-      .innerJoin(user, eq(tenantMemberships.userId, user.id))
+      .innerJoin(customerUsers, eq(tenantMemberships.userId, customerUsers.id))
       .where(eq(tenantMemberships.tenantId, tenantId))
       .orderBy(desc(tenantMemberships.createdAt)),
     db

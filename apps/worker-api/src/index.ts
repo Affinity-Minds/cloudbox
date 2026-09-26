@@ -1,11 +1,11 @@
+import { Email } from "@cloudbox/contracts";
+import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { Email } from "@cloudbox/contracts";
-import type { Context, Next } from "hono";
 import { authContextFor, createAuth, customerAuthFor, HONEYPOT_HEADER } from "./auth";
 import { customerCodeStepUp } from "./auth/challenge";
-import { isSameOriginWrite, requireUser } from "./auth/middleware";
+import { guardFor, isSameOriginWrite } from "./auth/middleware";
 import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
@@ -124,16 +124,25 @@ app.use("/api/ops/*", async (c, next) => {
   c.res.headers.set("X-Robots-Tag", "noindex, nofollow");
 });
 // Sign-out goes through the audited logout so there is one way out per surface.
-app.post("/api/auth/sign-out", requireUser({ allowSetupPending: true }), logoutFor("customer"));
-app.post("/api/ops/auth/sign-out", requireUser({ allowSetupPending: true }), logoutFor("staff"));
-app.on(["GET", "POST"], "/api/auth/*", async (c): Promise<Response> => {
-  const context = authContextFor(c);
-  // Until a super admin exists, the bootstrap address needs a user row (one read once it does).
-  await ensureBootstrapSuperAdmin(c.env, context);
-  return customerAuthFor(c).handler(normalisedRequests.get(c.req.raw) ?? c.req.raw);
-});
+app.post(
+  "/api/auth/sign-out",
+  guardFor("customer", () => true),
+  logoutFor("customer"),
+);
+app.post(
+  "/api/ops/auth/sign-out",
+  guardFor("staff", () => true, { allowSetupPending: true }),
+  logoutFor("staff"),
+);
+app.on(
+  ["GET", "POST"],
+  "/api/auth/*",
+  (c): Promise<Response> =>
+    customerAuthFor(c).handler(normalisedRequests.get(c.req.raw) ?? c.req.raw),
+);
 app.on(["GET", "POST"], "/api/ops/auth/*", async (c): Promise<Response> => {
   const context = authContextFor(c);
+  // Until a super admin exists, the bootstrap address needs a staff identity (one read once it does).
   await ensureBootstrapSuperAdmin(c.env, context);
   return createAuth(c.env, context).handler(normalisedRequests.get(c.req.raw) ?? c.req.raw);
 });

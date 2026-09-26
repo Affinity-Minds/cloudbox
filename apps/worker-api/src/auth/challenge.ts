@@ -53,7 +53,7 @@ export async function verifyTurnstile(
 async function counters(db: Db, email: string) {
   const [budget, cooldown] = await Promise.all([accountBudgetKey(email), cooldownKey(email)]);
   const rows = await db.all<{ key: string; count: number; last_request: number }>(
-    sql`SELECT key, count, last_request FROM rate_limit WHERE key IN (${budget}, ${cooldown})`,
+    sql`SELECT key, count, last_request FROM customer_rate_limit WHERE key IN (${budget}, ${cooldown})`,
   );
   const now = Date.now();
   const live = (key: string, windowSeconds: number) => {
@@ -104,7 +104,7 @@ export async function customerCodeStepUp(
   if (state.coolingDown) return cooldown();
   if (state.failures < OTP_ACCOUNT_BUDGET.max) return null;
   if (await claimOnce(db, state.cooldownKey, ACCOUNT_COOLDOWN_SECONDS)) {
-    await db.run(sql`DELETE FROM rate_limit WHERE key = ${state.budgetKey}`);
+    await db.run(sql`DELETE FROM customer_rate_limit WHERE key = ${state.budgetKey}`);
     await audit(db, {
       eventType: "AUTH_ACCOUNT_COOLDOWN",
       entityType: "auth_email",

@@ -16,10 +16,10 @@ import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { audit } from "../../audit";
 import { guard } from "../../auth/middleware";
-import { ensureUserByEmail } from "../../auth/users";
+import { ensureCustomerByEmail } from "../../auth/users";
 import { getTenantStanding } from "../../authz/permissions";
 import { createDb } from "../../db/client";
-import { tenantMemberships, tenants, user } from "../../db/schema";
+import { customerUsers, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
@@ -54,7 +54,7 @@ router.post(
     // Server API, never a raw insert into `user` (agent-notes / brief, and per WT-1's ADR
     // 0002/0009: sign-in never creates a user row, so this invite is the only way one comes to
     // exist for a tenant member).
-    const userId = await ensureUserByEmail(c.env, input.email, {
+    const userId = await ensureCustomerByEmail(c.env, input.email, {
       correlationId: c.var.correlationId,
     });
 
@@ -106,9 +106,9 @@ router.post(
       source: "api",
     });
     const userRow = db
-      .select({ email: user.email, name: user.name })
-      .from(user)
-      .where(eq(user.id, userId));
+      .select({ email: customerUsers.email, name: customerUsers.name })
+      .from(customerUsers)
+      .where(eq(customerUsers.id, userId));
 
     const [[row], , [invitedUser]] = await db.batch([mutation, auditWrite, userRow]);
 

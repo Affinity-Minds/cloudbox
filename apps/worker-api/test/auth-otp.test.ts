@@ -2,7 +2,13 @@ import { env } from "cloudflare:test";
 import type { SessionResponse } from "@cloudbox/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { audit } from "../src/audit";
-import { assertAuthConfig, createAuth, HONEYPOT_HEADER, OTP_FAILURE_CAP } from "../src/auth";
+import {
+  assertAuthConfig,
+  createAuth,
+  createCustomerAuth,
+  HONEYPOT_HEADER,
+  OTP_FAILURE_CAP,
+} from "../src/auth";
 import { bumpCounter, counterKey } from "../src/auth/counters";
 import { ensureUserByEmail } from "../src/auth/users";
 import { createDb } from "../src/db/client";
@@ -489,15 +495,16 @@ describe("email OTP sign-in", () => {
 describe("OTP dev echo", () => {
   it("never echoes in production and refuses to start with OTP_DEV_ECHO there", async () => {
     expect(() =>
-      assertAuthConfig({ ENVIRONMENT: "production", OTP_DEV_ECHO: "1", BETTER_AUTH_SECRET: "x" }),
+      assertAuthConfig({ ENVIRONMENT: "production", OTP_DEV_ECHO: "1", STAFF_AUTH_SECRET: "x" }),
     ).toThrow();
     expect(() => createAuth({ ...env, ENVIRONMENT: "production", OTP_DEV_ECHO: "1" })).toThrow();
-    // L-10: no secret, no auth.
-    expect(() => createAuth({ ...env, BETTER_AUTH_SECRET: undefined })).toThrow(
-      /BETTER_AUTH_SECRET/,
+    // L-10: no secret, no auth — each identity system checks its own.
+    expect(() => createAuth({ ...env, STAFF_AUTH_SECRET: undefined })).toThrow(/STAFF_AUTH_SECRET/);
+    expect(() => createCustomerAuth({ ...env, CUSTOMER_AUTH_SECRET: undefined })).toThrow(
+      /CUSTOMER_AUTH_SECRET/,
     );
     expect(() =>
-      assertAuthConfig({ ENVIRONMENT: "development", OTP_DEV_ECHO: "1", BETTER_AUTH_SECRET: "x" }),
+      assertAuthConfig({ ENVIRONMENT: "development", OTP_DEV_ECHO: "1", STAFF_AUTH_SECRET: "x" }),
     ).not.toThrow();
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});

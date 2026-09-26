@@ -19,8 +19,10 @@ export default defineConfig(async () => {
           bindings: {
             ENVIRONMENT: "development",
             TEST_MIGRATIONS: migrations,
-            // Test-only secret (never deployed); Better Auth refuses to start without one.
-            BETTER_AUTH_SECRET: "test-only-better-auth-secret-0123456789abcdef",
+            // Test-only secrets (never deployed), one per identity system; Better Auth refuses to
+            // start without one.
+            STAFF_AUTH_SECRET: "test-only-staff-auth-secret-0123456789abcdef",
+            CUSTOMER_AUTH_SECRET: "test-only-customer-auth-secret-0123456789abc",
             // Deterministic regardless of a developer's local .dev.vars (which the pool also reads).
             OTP_DEV_ECHO: "0",
             TURNSTILE_SECRET_KEY: "",

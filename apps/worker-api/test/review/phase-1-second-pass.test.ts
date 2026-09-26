@@ -105,7 +105,8 @@ async function enrol(email: string) {
   );
   const cookies = jar();
   expect(
-    (await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL }, { cookies })).status,
+    (await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL }, { cookies }))
+      .status,
   ).toBe(200);
   expect(
     (
@@ -116,7 +117,11 @@ async function enrol(email: string) {
       )
     ).status,
   ).toBe(200);
-  const enabled = await authPost("/api/ops/auth/two-factor/enable", { password: CHOSEN }, { cookies });
+  const enabled = await authPost(
+    "/api/ops/auth/two-factor/enable",
+    { password: CHOSEN },
+    { cookies },
+  );
   const { totpURI, backupCodes } = (await enabled.json()) as {
     totpURI: string;
     backupCodes: string[];
@@ -136,7 +141,11 @@ async function enrol(email: string) {
 /** Password step of a sign-in for an enrolled staff member: a jar holding the pending challenge. */
 async function challenge(email: string) {
   const cookies = jar();
-  const res = await authPost("/api/ops/auth/sign-in/email", { email, password: CHOSEN }, { cookies });
+  const res = await authPost(
+    "/api/ops/auth/sign-in/email",
+    { email, password: CHOSEN },
+    { cookies },
+  );
   expect(res.status).toBe(200);
   await expect(res.json()).resolves.toMatchObject({ twoFactorRedirect: true });
   return cookies;

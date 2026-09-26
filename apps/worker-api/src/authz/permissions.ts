@@ -4,7 +4,7 @@
 // `role_permissions` row and the super admin loses that permission on the next request.
 import { and, eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
-import { guard } from "../auth/middleware";
+import { guardFor } from "../auth/middleware";
 import { createDb } from "../db/client";
 import { tenantMemberships } from "../db/schema";
 import type { AppEnv } from "../env";
@@ -42,7 +42,8 @@ const STANDING_RANK: Record<TenantStanding, number> = { user: 1, admin: 2, owner
 
 /** Staff permission gate: 401 without a session, 403 unless the user's staff role holds `key`. */
 export function requirePermission(key: Permission): MiddlewareHandler<AppEnv> {
-  return guard((principal) => principal.permissions.has(key));
+  // Staff session and staff tables only: a customer session is never consulted (ADR 0002).
+  return guardFor("staff", (principal) => principal.permissions.has(key));
 }
 
 const standings = new WeakMap<Request, Map<string, Promise<TenantStanding | null>>>();
@@ -60,9 +61,12 @@ export function getTenantStanding(
     perRequest = new Map();
     standings.set(c.req.raw, perRequest);
   }
-  let standing = perRequest.get(tenantId);
+  // Memberships belong to customer identities; a staff identity has no tenant standing (ADR 0002).
+  if (c.var.user.surface !== "customer") return Promise.resolve(null);
+  const userId = c.var.user.id;
+  const cacheKey = `${userId}:${tenantId}`;
+  let standing = perRequest.get(cacheKey);
   if (!standing) {
-    const userId = c.var.user.id;
     standing = createDb(c.env.DB)
       .select({ standing: tenantMemberships.standing })
       .from(tenantMemberships)
@@ -75,14 +79,15 @@ export function getTenantStanding(
       )
       .limit(1)
       .then((rows) => rows[0]?.standing ?? null);
-    perRequest.set(tenantId, standing);
+    perRequest.set(cacheKey, standing);
   }
   return standing;
 }
 
 /** Tenant membership gate on `:tenantId`, at least `min` standing (owner > admin > user). */
 export function requireTenantStanding(min: TenantStanding): MiddlewareHandler<AppEnv> {
-  return guard(async (_principal, c) => {
+  // Customer session and customer tables only: memberships reference customer identities.
+  return guardFor("customer", async (_principal, c) => {
     const tenantId = c.req.param("tenantId");
     if (!tenantId) return false;
     const standing = await getTenantStanding(c, tenantId);

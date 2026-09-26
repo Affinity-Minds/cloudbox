@@ -16,7 +16,10 @@ export type Bindings = {
   /** `"1"` only outside production: WT-1 echoes the OTP in the send response for local tests. */
   OTP_DEV_ECHO?: string;
 
-  BETTER_AUTH_SECRET?: string;
+  /** Better Auth secret of the staff identity system (/api/ops/auth). */
+  STAFF_AUTH_SECRET?: string;
+  /** Better Auth secret of the customer identity system (/api/auth). */
+  CUSTOMER_AUTH_SECRET?: string;
   /** Turnstile widget for the customer sign-in step-up (review T-1). Public; a var. */
   TURNSTILE_SITE_KEY?: string;
   /** Turnstile siteverify secret. Without it the step-up falls back to a per-account cooldown. */
@@ -29,6 +32,8 @@ export type Bindings = {
 
 /** Signed-in principal, set by `requireUser()` (WT-1). */
 export type AppUser = {
+  /** Identity system (WT-1): staff (/api/ops/auth) or customer (/api/auth). */
+  surface?: "staff" | "customer";
   id: string;
   email: string;
   name: string;

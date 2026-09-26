@@ -1,36 +1,38 @@
-// Owner: WT-1. Users exist only because an admin action (or the bootstrap rule) created them:
-// sign-in never creates a `user` row (ADR 0002/0009). Staff grants, tenant memberships (WT-2) and
-// the bootstrap super admin all go through `ensureUserByEmail`. Staff passwords are hashed and
-// stored by Better Auth's own hasher and internal adapter; plaintext is never stored or logged.
+// Owner: WT-1. Identities exist only because an admin action (or the bootstrap rule) created them;
+// sign-in never creates one (ADR 0002/0009). Two identity systems, nothing shared: customers
+// (`customer_users`, created for tenant memberships via `ensureCustomerByEmail`) and staff
+// (`staff_users`, created by staff grants and the bootstrap via `ensureStaffUserByEmail`). Staff
+// passwords are hashed and stored by Better Auth's own hasher and internal adapter; plaintext is
+// never stored or logged.
 import { normalizeEmail } from "@cloudbox/contracts";
 import { eq, sql } from "drizzle-orm";
 import { audit } from "../audit";
 import { createDb } from "../db/client";
-import { staffMembers, twoFactor, user } from "../db/schema";
+import { staffMembers, staffTwoFactor, staffUsers } from "../db/schema";
 import type { Bindings } from "../env";
 import {
   type AuthRequestContext,
   createAuth,
+  createCustomerAuth,
   deleteTrustedDevices,
   PRODUCTION_ORIGIN,
 } from "./index";
 
+/** The staff identity system's Better Auth context. */
 function authContext(env: Bindings, request: AuthRequestContext) {
   return createAuth(env, { ...request, baseURL: request.baseURL ?? PRODUCTION_ORIGIN }).$context;
 }
 
-/**
- * Returns the id of the `user` with this email, creating it through Better Auth's internal adapter
- * when missing (email unverified until their first sign-in). Idempotent and safe under
- * concurrency: a lost race on the unique email index re-reads the winner's row.
- */
-export async function ensureUserByEmail(
-  env: Bindings,
-  email: string,
-  request: AuthRequestContext = {},
-): Promise<string> {
+/** The customer identity system's Better Auth context. */
+function customerContext(env: Bindings, request: AuthRequestContext) {
+  return createCustomerAuth(env, { ...request, baseURL: request.baseURL ?? PRODUCTION_ORIGIN })
+    .$context;
+}
+
+type AdapterContext = Awaited<ReturnType<typeof authContext>>;
+
+async function ensureIdentity(ctx: AdapterContext, email: string): Promise<string> {
   const normalized = normalizeEmail(email);
-  const ctx = await authContext(env, request);
   const found = await ctx.internalAdapter.findUserByEmail(normalized);
   if (found) return found.user.id;
   try {
@@ -45,6 +47,31 @@ export async function ensureUserByEmail(
     throw error;
   }
 }
+
+/**
+ * The id of the customer identity (`customer_users`) with this email, created through the customer
+ * Better Auth instance when missing. For tenant memberships (WT-2). Idempotent and race-safe: a lost
+ * race on the unique email index re-reads the winner's row.
+ */
+export async function ensureCustomerByEmail(
+  env: Bindings,
+  email: string,
+  request: AuthRequestContext = {},
+): Promise<string> {
+  return ensureIdentity((await customerContext(env, request)) as unknown as AdapterContext, email);
+}
+
+/** The id of the staff identity (`staff_users`) with this email, created when missing. */
+export async function ensureStaffUserByEmail(
+  env: Bindings,
+  email: string,
+  request: AuthRequestContext = {},
+): Promise<string> {
+  return ensureIdentity(await authContext(env, request), email);
+}
+
+/** @deprecated Customer identities: use `ensureCustomerByEmail` (kept for existing callers). */
+export const ensureUserByEmail = ensureCustomerByEmail;
 
 /**
  * Sets an admin-chosen initial password for a staff member (ADR 0009): stores Better Auth's hash
@@ -75,8 +102,8 @@ export async function setInitialStaffPassword(
       .update(staffMembers)
       .set({ mustChangePassword: true })
       .where(eq(staffMembers.userId, userId)),
-    db.delete(twoFactor).where(eq(twoFactor.userId, userId)),
-    db.update(user).set({ twoFactorEnabled: false }).where(eq(user.id, userId)),
+    db.delete(staffTwoFactor).where(eq(staffTwoFactor.userId, userId)),
+    db.update(staffUsers).set({ twoFactorEnabled: false }).where(eq(staffUsers.id, userId)),
   ]);
   await ctx.internalAdapter.deleteUserSessions(userId);
   // Trusted devices would otherwise skip the new authenticator (review S-4).
@@ -110,7 +137,7 @@ export async function ensureBootstrapSuperAdmin(
   const hasSuper = Boolean(state?.has_super);
   if (hasSuper && (state?.seeded || !password)) return;
 
-  const userId = await ensureUserByEmail(env, email, request);
+  const userId = await ensureStaffUserByEmail(env, email, request);
   if (!hasSuper) {
     const result = await db.run(sql`
       INSERT INTO staff_members (user_id, role, created_by, must_change_password)

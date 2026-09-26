@@ -7,10 +7,10 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
 import { authContextFor } from "../../auth";
-import { ensureUserByEmail, setInitialStaffPassword } from "../../auth/users";
+import { ensureStaffUserByEmail, setInitialStaffPassword } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
-import { staffMembers, user } from "../../db/schema";
+import { staffMembers, staffUsers } from "../../db/schema";
 import type { AppEnv } from "../../env";
 
 const staff = new Hono<AppEnv>();
@@ -21,16 +21,16 @@ function listStaff(db: Db, userId?: string) {
   return db
     .select({
       userId: staffMembers.userId,
-      email: user.email,
-      name: user.name,
+      email: staffUsers.email,
+      name: staffUsers.name,
       role: staffMembers.role,
       createdBy: staffMembers.createdBy,
       createdAt: staffMembers.createdAt,
     })
     .from(staffMembers)
-    .innerJoin(user, eq(user.id, staffMembers.userId))
+    .innerJoin(staffUsers, eq(staffUsers.id, staffMembers.userId))
     .where(userId === undefined ? undefined : eq(staffMembers.userId, userId))
-    .orderBy(asc(user.email));
+    .orderBy(asc(staffUsers.email));
 }
 
 /**
@@ -63,8 +63,8 @@ staff.post(
     const [existing] = await db
       .select({ userId: staffMembers.userId, role: staffMembers.role })
       .from(staffMembers)
-      .innerJoin(user, eq(user.id, staffMembers.userId))
-      .where(eq(user.email, email));
+      .innerJoin(staffUsers, eq(staffUsers.id, staffMembers.userId))
+      .where(eq(staffUsers.email, email));
     // A new staff member signs in with password + authenticator (ADR 0009): the admin sets the
     // initial password here and hands it over out of band.
     if (!existing && !initialPassword) {
@@ -88,7 +88,8 @@ staff.post(
 
     // The user may never have signed in: create the row (admin action). Sign-in itself never
     // creates users (ADR 0002/0009).
-    const targetId = existing?.userId ?? (await ensureUserByEmail(c.env, email, authContextFor(c)));
+    const targetId =
+      existing?.userId ?? (await ensureStaffUserByEmail(c.env, email, authContextFor(c)));
 
     if (existing?.role !== role) {
       const result = await db

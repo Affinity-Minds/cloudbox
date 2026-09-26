@@ -106,7 +106,11 @@ const wrongCode = (code: string) => (code === "000000" ? "111111" : "000000");
 async function enrol(email: string) {
   await createStaff(email);
   const cookies = jar();
-  const first = await authPost("/api/ops/auth/sign-in/email", { email, password: INITIAL }, cookies);
+  const first = await authPost(
+    "/api/ops/auth/sign-in/email",
+    { email, password: INITIAL },
+    cookies,
+  );
   expect(first.status).toBe(200);
   const changed = await authPost(
     "/api/ops/auth/change-password",
@@ -256,7 +260,11 @@ describe("forced first sign-in: password change, then authenticator", () => {
     expect(midway.setup).toEqual({ passwordChangeRequired: false, authenticatorRequired: true });
     expect((await get("/api/v1/screens/audit", cookies)).status).toBe(403);
 
-    const enabled = await authPost("/api/ops/auth/two-factor/enable", { password: CHOSEN }, cookies);
+    const enabled = await authPost(
+      "/api/ops/auth/two-factor/enable",
+      { password: CHOSEN },
+      cookies,
+    );
     expect(enabled.status).toBe(200);
     const { totpURI, backupCodes } = (await enabled.json()) as {
       totpURI: string;
@@ -381,7 +389,11 @@ describe("signing in with password + authenticator", () => {
 
   it("turning the authenticator off needs the password and a fresh code", async () => {
     const { cookies, totpURI } = await enrol("disable@example.test");
-    const noCode = await authPost("/api/ops/auth/two-factor/disable", { password: CHOSEN }, cookies);
+    const noCode = await authPost(
+      "/api/ops/auth/two-factor/disable",
+      { password: CHOSEN },
+      cookies,
+    );
     expect(noCode.status).toBe(401);
     const code = await totpFor(totpURI);
     const badCode = await authPost(
@@ -390,7 +402,11 @@ describe("signing in with password + authenticator", () => {
       cookies,
     );
     expect(badCode.status).toBe(401);
-    const ok = await authPost("/api/ops/auth/two-factor/disable", { password: CHOSEN, code }, cookies);
+    const ok = await authPost(
+      "/api/ops/auth/two-factor/disable",
+      { password: CHOSEN, code },
+      cookies,
+    );
     expect(ok.status).toBe(200);
     // Without an authenticator, staff are back in the forced setup.
     const session = (await (await get("/api/v1/auth/session", cookies)).json()) as SessionResponse;
@@ -507,7 +523,9 @@ describe("second-pass review (S-1, S-8, M-3)", () => {
       { email: "disable-replay@example.test", password: CHOSEN },
       other,
     );
-    expect((await authPost("/api/ops/auth/two-factor/verify-totp", { code }, other)).status).toBe(200);
+    expect((await authPost("/api/ops/auth/two-factor/verify-totp", { code }, other)).status).toBe(
+      200,
+    );
     // …then the same code to disable is refused.
     const replay = await authPost(
       "/api/ops/auth/two-factor/disable",

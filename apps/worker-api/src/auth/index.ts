@@ -23,7 +23,6 @@ import {
   counterKey,
   readCounter,
 } from "./counters";
-import { rateLimit } from "./rate-limit-table";
 
 export const PRODUCTION_ORIGIN = "https://box.affinityminds.in";
 const VITE_DEV_ORIGIN = "http://localhost:5173";
@@ -83,9 +82,13 @@ export type AuthRequestContext = {
  * in production. Called by `createAuth`, so every auth request refuses to run misconfigured.
  */
 export function assertAuthConfig(
-  env: Pick<Bindings, "ENVIRONMENT" | "OTP_DEV_ECHO" | "BETTER_AUTH_SECRET">,
+  env: Pick<
+    Bindings,
+    "ENVIRONMENT" | "OTP_DEV_ECHO" | "STAFF_AUTH_SECRET" | "CUSTOMER_AUTH_SECRET"
+  >,
+  surface: Surface = "staff",
 ): void {
-  if (!env.BETTER_AUTH_SECRET) throw new Error("BETTER_AUTH_SECRET is not set");
+  if (!env[AUTH_SECRET[surface]]) throw new Error(`${AUTH_SECRET[surface]} is not set`);
   if (env.ENVIRONMENT === "production" && env.OTP_DEV_ECHO === "1") {
     throw new Error("OTP_DEV_ECHO must not be set in production");
   }
@@ -190,7 +193,7 @@ type Actor = {
 /** Deletes every trusted-device record of a user (Better Auth keeps them as verification rows). */
 export function deleteTrustedDevices(db: Db, userId: string) {
   return db.run(
-    sql`DELETE FROM verification WHERE identifier LIKE 'trust-device-%' AND value = ${userId}`,
+    sql`DELETE FROM staff_verifications WHERE identifier LIKE 'trust-device-%' AND value = ${userId}`,
   );
 }
 
@@ -201,17 +204,27 @@ type AuthSelf = {
   };
 };
 
-/** The user row and staff state for an email: one query. */
-async function accountByEmail(db: Db, email: string) {
+/** The staff identity and its staff role for an email: one query (staff tables only). */
+async function staffByEmail(db: Db, email: string) {
   const [row] = await db
     .select({
-      userId: schema.user.id,
+      userId: schema.staffUsers.id,
       staffRole: schema.staffMembers.role,
       mustChangePassword: schema.staffMembers.mustChangePassword,
     })
-    .from(schema.user)
-    .leftJoin(schema.staffMembers, eq(schema.staffMembers.userId, schema.user.id))
-    .where(eq(schema.user.email, email.toLowerCase()))
+    .from(schema.staffUsers)
+    .leftJoin(schema.staffMembers, eq(schema.staffMembers.userId, schema.staffUsers.id))
+    .where(eq(schema.staffUsers.email, email))
+    .limit(1);
+  return row ?? null;
+}
+
+/** The customer identity for an email (customer tables only). */
+async function customerByEmail(db: Db, email: string) {
+  const [row] = await db
+    .select({ userId: schema.customerUsers.id })
+    .from(schema.customerUsers)
+    .where(eq(schema.customerUsers.email, email))
     .limit(1);
   return row ?? null;
 }
@@ -290,10 +303,37 @@ export const AUTH_BASE_PATH: Record<Surface, string> = {
   customer: "/api/auth",
   staff: "/api/ops/auth",
 };
-export const COOKIE_PREFIX: Record<Surface, string> = {
-  customer: "cloudbox",
-  staff: "cloudbox-ops",
+/** Session cookie names (other Better Auth cookies use the matching prefix). */
+export const SESSION_COOKIE: Record<Surface, string> = {
+  customer: "cbx_session",
+  staff: "cbx_ops_session",
 };
+const COOKIE_PREFIX: Record<Surface, string> = { customer: "cbx", staff: "cbx_ops" };
+/** Each identity system signs with its own secret. */
+export const AUTH_SECRET = {
+  customer: "CUSTOMER_AUTH_SECRET",
+  staff: "STAFF_AUTH_SECRET",
+} as const satisfies Record<Surface, keyof Bindings>;
+/**
+ * Two identity systems, nothing shared (owner decision, ADR 0002): each Better Auth instance has its
+ * own tables (Drizzle export names below; SQL names are their snake_case).
+ */
+export const AUTH_MODELS = {
+  staff: {
+    user: "staffUsers",
+    session: "staffSessions",
+    account: "staffAccounts",
+    verification: "staffVerifications",
+    rateLimit: "staffRateLimit",
+  },
+  customer: {
+    user: "customerUsers",
+    session: "customerSessions",
+    account: "customerAccounts",
+    verification: "customerVerifications",
+    rateLimit: "customerRateLimit",
+  },
+} as const;
 
 function surfaceOptions(
   env: Bindings,
@@ -322,21 +362,26 @@ function surfaceOptions(
       );
       await bumpCounter(db, await accountBudgetKey(email), OTP_ACCOUNT_BUDGET.windowSeconds);
     }
-    const account = email === "invalid" ? null : await accountByEmail(db, email);
-    if ((!account || account.staffRole) && (await recentFailure(db, email, "email_otp"))) return;
+    const account = email === "invalid" ? null : await customerByEmail(db, email);
+    if (!account && (await recentFailure(db, email, "email_otp"))) return;
     await auditLoginFailure(db, email, { method: "email_otp", reason, client }, correlationId);
   }
   return {
     baseURL: request.baseURL,
     basePath: AUTH_BASE_PATH[surface],
-    secret: env.BETTER_AUTH_SECRET,
+    secret: env[AUTH_SECRET[surface]],
     trustedOrigins: trustedOrigins(env),
-    database: drizzleAdapter(db, { provider: "sqlite", schema: { ...schema, rateLimit } }),
+    database: drizzleAdapter(db, { provider: "sqlite", schema }),
+    user: { modelName: AUTH_MODELS[surface].user },
+    session: { modelName: AUTH_MODELS[surface].session },
+    account: { modelName: AUTH_MODELS[surface].account },
+    verification: { modelName: AUTH_MODELS[surface].verification },
     // Per-IP limits, stored in D1 so every isolate shares them. The emailOTP plugin's rules apply
     // to its paths (OTP send and sign-in: 3 / 60 s each); everything else under /api/auth is 60/min.
     rateLimit: {
       enabled: true,
       storage: "database" as const,
+      modelName: AUTH_MODELS[surface].rateLimit,
       window: 60,
       max: 60,
       // Never matches a request: it only makes Better Auth keep idle rows for an hour, so the
@@ -347,6 +392,7 @@ function surfaceOptions(
       // Distinct cookie names: a browser holds at most one session per surface, and each mount
       // only ever reads and writes its own.
       cookiePrefix: COOKIE_PREFIX[surface],
+      cookies: { session_token: { name: SESSION_COOKIE[surface] } },
       // A client is an IPv4 address or an IPv6 /48 (review T-1): a routed /48 is one party, not
       // 65,536 /64s. Every per-IP limit and every per-client counter uses this key.
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"], ipv6Subnet: 48 },
@@ -370,19 +416,19 @@ function surfaceOptions(
               // Same answer as a send; any code already sent stays valid (resendStrategy "reuse").
               return ctx.json({ success: true });
             }
-            // Closed sign-in (ADR 0002/0009): an address without a user row, or a staff address
-            // (staff sign in with password + authenticator, never with a code), gets exactly the
+            // Closed sign-in (ADR 0002): an address without a customer identity gets exactly the
             // answer a customer gets, but no code is generated, stored or sent. Recorded like a
-            // send (with the client), so the caps above bound these rows too.
-            const account = await accountByEmail(db, email);
-            if (!account || account.staffRole) {
+            // send (with the client), so the caps above bound these rows too. Staff identities are
+            // a separate system and are never consulted here.
+            const account = await customerByEmail(db, email);
+            if (!account) {
               const record = audit(db, {
                 eventType: "AUTH_OTP_SENT",
                 entityType: AUTH_EMAIL_ENTITY,
                 entityId: email,
                 actor: { type: "system", id: "email-otp" },
                 before: null,
-                after: { outcome: account ? "staff_email" : "unknown_email", client },
+                after: { outcome: "unknown_email", client },
                 correlationId,
                 source: "api",
               }).then(() => undefined);
@@ -414,8 +460,6 @@ function surfaceOptions(
               await recordOtpFailure(email.data, "INVALID_OTP", client);
               throw APIError.from("BAD_REQUEST", INVALID_OTP);
             };
-            // A staff address never holds a code; refuse it exactly like a wrong code.
-            if ((await accountByEmail(db, email.data))?.staffRole) return refuse();
             // A client that never requested a code for this address (T-2): check its guess without
             // touching the code's attempt count, so other clients cannot burn the owner's code.
             // Better Auth's own storage and primitives: its encryption, its constant-time compare.
@@ -454,7 +498,7 @@ function surfaceOptions(
             // Passwords are for staff only: anyone else fails exactly like a wrong password, after
             // the same hashing work Better Auth does for an unknown user (so timing does not tell
             // staff addresses apart), and counts toward the same per-client limit.
-            if (!(await accountByEmail(db, email.data))?.staffRole) {
+            if (!(await staffByEmail(db, email.data))?.staffRole) {
               await ctx.context.password.hash(
                 typeof body?.password === "string" ? body.password : "",
               );
@@ -478,7 +522,7 @@ function surfaceOptions(
         // Password change and authenticator endpoints: who is acting, and in which order.
         const session = await getSessionFromCtx(ctx);
         if (session) {
-          const staff = await accountByEmail(db, session.user.email);
+          const staff = await staffByEmail(db, session.user.email);
           actor = {
             userId: session.user.id,
             email: session.user.email,
@@ -717,6 +761,7 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
         issuer: "CloudBox",
         totpOptions: { digits: 6, period: 30 },
         backupCodeOptions: { amount: 10, length: 10 },
+        schema: { twoFactor: { modelName: "staffTwoFactor" } },
       }),
     ],
   } satisfies BetterAuthOptions;
@@ -752,10 +797,9 @@ export function customerAuthOptions(env: Bindings, request: AuthRequestContext =
   } satisfies BetterAuthOptions;
 }
 
-
 /** The staff instance (/api/ops/auth). Also the one for admin actions on users and passwords. */
 export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
-  assertAuthConfig(env);
+  assertAuthConfig(env, "staff");
   const self: AuthSelf = {};
   const auth = betterAuth(authOptions(env, request, self));
   self.auth = auth;
@@ -764,7 +808,7 @@ export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
 
 /** The customer instance (/api/auth). */
 export function createCustomerAuth(env: Bindings, request: AuthRequestContext = {}) {
-  assertAuthConfig(env);
+  assertAuthConfig(env, "customer");
   return betterAuth(customerAuthOptions(env, request));
 }
 

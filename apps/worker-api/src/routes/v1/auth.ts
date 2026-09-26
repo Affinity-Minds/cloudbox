@@ -5,14 +5,14 @@ import type { SessionResponse } from "@cloudbox/contracts";
 import { type Context, Hono } from "hono";
 import { audit } from "../../audit";
 import { authFor, customerAuthFor, type Surface } from "../../auth";
-import { getPrincipal, requireUser } from "../../auth/middleware";
+import { getPrincipal, requireSession } from "../../auth/middleware";
 import { createDb } from "../../db/client";
 import type { AppEnv } from "../../env";
 import { getActiveTenantId } from "./me";
 
 const auth = new Hono<AppEnv>();
 
-auth.get("/session", requireUser({ allowSetupPending: true }), async (c) => {
+auth.get("/session", requireSession({ allowSetupPending: true }), async (c) => {
   const principal = await getPrincipal(c);
   if (!principal) return c.json({ error: "unauthenticated" }, 401);
   const body: SessionResponse = {
@@ -58,6 +58,6 @@ export function logoutFor(surface: Surface | "current") {
   };
 }
 
-auth.post("/logout", requireUser({ allowSetupPending: true }), logoutFor("current"));
+auth.post("/logout", requireSession({ allowSetupPending: true }), logoutFor("current"));
 
 export default auth;

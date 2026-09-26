@@ -12,10 +12,10 @@ import { createDb } from "../src/db/client";
 import {
   devices,
   staffMembers,
+  staffUsers,
   subscriptions,
   tenantMemberships,
   tenants,
-  user,
 } from "../src/db/schema";
 import { newId, nowIso } from "../src/ids";
 
@@ -44,7 +44,7 @@ export type SeededStaff = {
 };
 
 /**
- * Inserts the Better Auth `user` row (only the columns the generated schema has: id, name,
+ * Inserts the staff identity row (`staff_users`, the staff Better Auth system; ADR 0002) (only the columns the generated schema has: id, name,
  * email — `email_verified`/timestamps take their column defaults) plus the matching
  * `staff_members` row.
  */
@@ -57,7 +57,7 @@ export async function seedStaff(
   const name = input.name ?? input.email.split("@")[0] ?? "Staff";
   const createdAt = nowIso();
 
-  await db.insert(user).values({ id: userId, name, email: input.email });
+  await db.insert(staffUsers).values({ id: userId, name, email: input.email });
   await db.insert(staffMembers).values({
     userId,
     role: input.role,

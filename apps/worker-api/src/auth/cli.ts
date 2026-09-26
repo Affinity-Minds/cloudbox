@@ -1,12 +1,11 @@
-// Read only by the Better Auth CLI (`pnpm auth:generate`). Both surfaces' plugins, so the generated
-// tables cover the staff (twoFactor) and customer (emailOTP) mounts. No bindings.
+// Read only by the Better Auth CLI. Two identity systems, two configs (owner decision, ADR 0002):
+//   pnpm dlx auth@1.7.6 generate --config src/auth/cli.ts --output .wrangler/staff-schema.ts -y
+//   pnpm dlx auth@1.7.6 generate --config src/auth/cli-customer.ts --output .wrangler/customer-schema.ts -y
+// then copy both table sets into src/db/schema.ts. No bindings.
 import { betterAuth } from "better-auth";
 import type { Bindings } from "../env";
-import { authOptions, customerAuthOptions } from "./index";
+import { authOptions } from "./index";
 
-const env = { DB: {} as D1Database, BETTER_AUTH_SECRET: "cli" } as Bindings;
-const staff = authOptions(env);
-export const auth = betterAuth({
-  ...staff,
-  plugins: [...staff.plugins, ...customerAuthOptions(env).plugins],
-});
+export const auth = betterAuth(
+  authOptions({ DB: {} as D1Database, STAFF_AUTH_SECRET: "cli" } as Bindings),
+);
