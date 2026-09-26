@@ -7,7 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import type { z } from "zod";
+import { z } from "zod";
 import { describeError } from "@/api/client";
 import { createTenant, updateTenant } from "@/api/tenants";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,21 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 
+// A blank optional field posts as "" from an uncontrolled input, not undefined; CreateTenantRequest's
+// `.optional()` only accepts undefined, so an empty (never-touched) field would otherwise fail
+// validation as "not a valid email". Blank-string-as-unset is a form concern, not a wire concern.
+const blankToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => (value === "" || Number.isNaN(value) ? undefined : value), schema);
+
 const FormSchema = CreateTenantRequest.extend({
+  legalName: blankToUndefined(CreateTenantRequest.shape.legalName),
+  primaryContactEmail: blankToUndefined(CreateTenantRequest.shape.primaryContactEmail),
+  supportContactEmail: blankToUndefined(CreateTenantRequest.shape.supportContactEmail),
+  billingContactEmail: blankToUndefined(CreateTenantRequest.shape.billingContactEmail),
+  timezone: blankToUndefined(CreateTenantRequest.shape.timezone),
+  planCode: blankToUndefined(CreateTenantRequest.shape.planCode),
+  notes: blankToUndefined(CreateTenantRequest.shape.notes),
+  renewalWarningDays: blankToUndefined(CreateTenantRequest.shape.renewalWarningDays),
   status: TenantStatus.exclude(["archived"]).optional(),
 });
 type FormValues = z.input<typeof FormSchema>;

@@ -49,16 +49,20 @@ export async function loadTenantsScreen(db: Db, query: TenantsScreenQuery): Prom
   ].filter((f): f is NonNullable<typeof f> => f !== undefined);
   const where = filters.length > 0 ? and(...filters) : undefined;
 
+  // Raw table.column names, not interpolated Column objects: inside a correlated subquery,
+  // Drizzle's `sql` tag does not reliably qualify a column from the OUTER table (`tenants.id`
+  // here) with its table name, so it collides with the subquery's own same-named column and
+  // silently counts against the wrong table. Verified against a real D1 (see handoff).
   const deviceCount = sql<number>`(
-    select count(*) from ${devices} where ${devices.tenantId} = ${tenants.id} and ${devices.status} = 'enrolled'
+    select count(*) from devices where devices.tenant_id = tenants.id and devices.status = 'enrolled'
   )`.mapWith(Number);
   const memberCount = sql<number>`(
-    select count(*) from ${tenantMemberships}
-    where ${tenantMemberships.tenantId} = ${tenants.id} and ${tenantMemberships.status} = 'active'
+    select count(*) from tenant_memberships
+    where tenant_memberships.tenant_id = tenants.id and tenant_memberships.status = 'active'
   )`.mapWith(Number);
   const nextSubscriptionExpiry = sql<string | null>`(
-    select min(${subscriptions.validUntil}) from ${subscriptions}
-    where ${subscriptions.tenantId} = ${tenants.id} and ${subscriptions.status} in ${OPEN_SUBSCRIPTION_STATUSES}
+    select min(valid_until) from subscriptions
+    where subscriptions.tenant_id = tenants.id and subscriptions.status in ${OPEN_SUBSCRIPTION_STATUSES}
   )`;
 
   const [items, statusFacets, planFacets, totalRows] = await db.batch([

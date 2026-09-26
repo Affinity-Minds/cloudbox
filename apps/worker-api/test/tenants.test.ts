@@ -104,6 +104,48 @@ describe("POST /api/v1/tenants", () => {
     expect(body.facets.status.some((f) => f.value === "provisioning")).toBe(true);
   });
 
+  it("counts a real member, device and subscription against the right tenant (not the other way round)", async () => {
+    // Regression guard: the correlated-subquery counts once compared the OUTER tenant id against
+    // the SUBQUERY's own same-named column (e.g. tenant_memberships.id) instead of its tenant_id,
+    // because Drizzle's `sql` tag doesn't always qualify an interpolated outer Column with its
+    // table name inside a nested subquery — so every count came back 0 while the DB held real
+    // rows. A tenant with no related rows can't catch that; this one has one of each.
+    const tenant = (await (
+      await createTenant(admin, { displayName: "Counted Org" })
+    ).json()) as Tenant;
+
+    const invited = await call(`/api/v1/tenants/${tenant.id}/memberships`, admin, {
+      method: "POST",
+      body: JSON.stringify({ email: "counted-member@example.test", standing: "owner" }),
+    });
+    expect(invited.status).toBe(201);
+
+    await env.DB.prepare(
+      `INSERT INTO devices
+         (id, tenant_id, name, status, device_public_key_jwk, device_key_thumbprint, key_protection, hostname)
+       VALUES (?, ?, 'PC-1', 'enrolled', '{}', ?, 'tpm', 'PC-1')`,
+    )
+      .bind(`dev_${crypto.randomUUID()}`, tenant.id, `thumb_${crypto.randomUUID()}`)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO subscriptions
+         (id, tenant_id, plan_code, status, valid_from, valid_until, max_managed_users, features_json,
+          offline_grace_days, renewal_warning_days)
+       VALUES (?, ?, 'cloudbox-6', 'active', '2026-01-01T00:00:00.000Z', '2027-06-01T00:00:00.000Z', 6, '[]', 7, 30)`,
+    )
+      .bind(`sub_${crypto.randomUUID()}`, tenant.id)
+      .run();
+
+    const body = (await (await call("/api/v1/screens/tenants", admin)).json()) as TenantsScreen;
+    const row = body.items.find((item) => item.id === tenant.id);
+    expect(row).toMatchObject({
+      deviceCount: 1,
+      memberCount: 1,
+      nextSubscriptionExpiry: "2027-06-01T00:00:00.000Z",
+    });
+  });
+
   it("filters by status, plan and free text", async () => {
     await createTenant(admin, { displayName: "Filter Me Org", planCode: "cloudbox-6" });
     const byQuery = await call("/api/v1/screens/tenants?q=Filter%20Me", admin);
