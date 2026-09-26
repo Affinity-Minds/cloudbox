@@ -116,7 +116,18 @@ jobs:
           PHASE0_ADMIN_KEY: ${{ steps.phase0-key.outputs.key }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error             --retry 5 --retry-delay 2             -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release"             -H "content-type: application/json"             -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY"             --data "$(jq -cn --arg sha "$GITHUB_SHA" '{status:"deployed",sha:$sha}')"             | tee /tmp/audited-change.json
+          # The secret rotated a moment ago creates a new Worker version; give the edge time to serve it.
+          body="$(jq -cn --arg sha "$GITHUB_SHA" '{status:"deployed",sha:$sha}')"
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error -o /tmp/audited-change.json -w '%{http_code}' \
+              -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release" \
+              -H "content-type: application/json" \
+              -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY" \
+              --data "$body" || echo 000)"
+            if [ "$code" = "200" ]; then cat /tmp/audited-change.json; exit 0; fi
+            echo "attempt $attempt: HTTP $code (waiting for the new Worker version)"; sleep 5
+          done
+          echo "::error::Audited release change never returned 200"; cat /tmp/audited-change.json || true; exit 1
 
       - name: Verify production health, version, D1 and audit
         shell: bash
