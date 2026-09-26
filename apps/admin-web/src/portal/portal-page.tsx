@@ -11,6 +11,7 @@ import { myTenantsQuery, setActiveTenant } from "@/api/tenants";
 import { EmptyState, ErrorState, PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TenantCards } from "./tenant-cards";
 
 // Route (guard, prefetch) lives in portal/router.tsx: the customer surface's own router (WT-1).
 export function PortalPage() {
@@ -31,6 +32,10 @@ export function PortalPage() {
 
   return (
     <main className="mx-auto max-w-lg pt-16">
+      {/* WT-14: Tenant ID for the team + plan state, per organisation. */}
+      <PageHeader title="Your organisations" description={session.data?.user.email} />
+      <TenantCards />
+      <div className="h-6" />
       <PageHeader title="Your tenants" description="Pick which one you're working in." />
       <div className="border-x border-b">
         {tenants.isPending ? (

@@ -321,11 +321,14 @@ describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-s
   const OPEN_DURING_SETUP = new Set(["GET /api/v1/auth/session", "POST /api/v1/auth/logout"]);
   // WT-1 (owner decision, two identity systems): customer-only routes never read a staff session,
   // so a staff account mid-setup gets 401 there, not setup_required. Asserted in authz tests.
-  const CUSTOMER_ONLY = (path: string) => path.startsWith("/api/v1/me");
+  // WT-14: self-service onboarding and the Connect device list are customer-only too.
+  const CUSTOMER_ONLY = (path: string) =>
+    ["/api/v1/me", "/api/v1/onboarding", "/api/v1/connect"].some((p) => path.startsWith(p));
   const PUBLIC = new Set([
     "GET /api/v1",
     "GET /api/v1/foundation",
     "PATCH /api/v1/foundation/release",
+    "GET /api/v1/onboarding/config", // WT-14: public by design
   ]);
   const routes = [
     ...new Map(

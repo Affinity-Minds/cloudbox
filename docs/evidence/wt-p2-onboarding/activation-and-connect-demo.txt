@@ -1,0 +1,22 @@
+staff sign-in: 200
+staff change-password: 200
+staff authenticator enrolled: 200
+generated 5 keys, e.g. CBX-LIC-R9KDW-VV7SQ-CF3PX-BGFQN
+
+## acme-server-01 (CBX-00001)
+POST /api/v1/onboarding/activation-grants → 201 {"grant":"CBX-ENROLL-VGA6…","enrollmentTokenId":"tok_5d8a5363-0185-44c9-83da-52b8a265494d","tenantId":"ten_54b24ad5-7ae9-48f8-b908-71f9ffd218a3","tenantCode":"CBX-00001","expiresAt":"2026-09-26T22:48:58.319Z"}
+POST /api/v1/agent/enroll → 201 {"deviceId":"dev_dcebc43b-2142-4c32-9022-15dd4eab0380","tenantId":"ten_54b24ad5-7ae9-48f8-b908-71f9ffd218a3","tenantCode":"CBX-00001","deviceName":"CLOUDBOX-00001","deviceToken":"<redacted>","licenseState":"licensed"}
+POST /api/v1/agent/heartbeat → 200 {"serverTime":"2026-09-26T22:33:58.540Z","entitlementGeneration":1,"commands":[],"licenseState":"licensed"}
+GET /api/v1/agent/entitlement → 200
+
+## bright-server-01 (CBX-00002)
+POST /api/v1/onboarding/activation-grants → 201 {"grant":"CBX-ENROLL-WCK8…","enrollmentTokenId":"tok_c1cbb98f-c718-408f-9122-3b191d3afa6f","tenantId":"ten_23e1656a-451f-488d-b77f-ad8aa7129507","tenantCode":"CBX-00002","expiresAt":"2026-09-26T22:48:58.638Z"}
+POST /api/v1/agent/enroll → 201 {"deviceId":"dev_c0807f2c-db71-44de-a90f-69d34a2dc554","tenantId":"ten_23e1656a-451f-488d-b77f-ad8aa7129507","tenantCode":"CBX-00002","deviceName":"CLOUDBOX-00002","deviceToken":"<redacted>","licenseState":"no_active_plan","message":"No active plan found. Please contact the CloudBox admin."}
+POST /api/v1/agent/heartbeat → 200 {"serverTime":"2026-09-26T22:33:58.774Z","entitlementGeneration":null,"commands":[],"licenseState":"no_active_plan","message":"No active plan found. Please contact the CloudBox admin."}
+GET /api/v1/agent/entitlement → 404
+
+## Connect
+POST /api/auth/connect/send-code (member) → 200 {"success":true}
+POST /api/auth/connect/send-code (not a member) → 200 {"success":true}
+POST /api/auth/connect/verify → 200 {"token":"<redacted>","user":{"name":"","email":"owner@acme-dental.test","emailVerified":true,"image":null,"createdAt":"2026-09-26T22:33:50.032Z","updatedAt":"2026-09-26T22:33:50.032Z","id":"xxNc1CWQx7vuty8wWNwRTJnRnwNP0iBl"},"tenantId":"ten_54b24ad5-7ae9-48f8-b908-71f9ffd218a3","tenantCode":"CBX-00001"}
+GET /api/v1/connect/devices → 200 {"tenantId":"ten_54b24ad5-7ae9-48f8-b908-71f9ffd218a3","tenantCode":"CBX-00001","tenantName":"Acme Dental","plan":{"state":"active","planCode":"cloudbox-6","planName":"CloudBox 6","maxDevices":1,"validFrom":"2026-09-26T22:33:58.455Z","validUntil":"2027-09-26T22:33:58.455Z","message":null},"devices":[{"deviceId":"dev_dcebc43b-2142-4c32-9022-15dd4eab0380","name":"CLOUDBOX-00001","hostname":"acme-server-01","online":true,"lastSeenAt":"2026-09-26T22:33:58.540Z","licenseState":"active"}]}

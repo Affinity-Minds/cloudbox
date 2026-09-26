@@ -7,6 +7,7 @@ import type {
   FleetDeviceDetail,
   FleetEntitlementRow,
   LicenseState,
+  TenantPlan,
 } from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -133,7 +134,11 @@ function DeviceDetail() {
 
         {data && tab === "overview" ? <OverviewTab device={data.device} /> : null}
         {data && tab === "license" ? (
-          <LicenseTab entitlements={data.entitlements} licenseState={data.device.licenseState} />
+          <LicenseTab
+            entitlements={data.entitlements}
+            licenseState={data.device.licenseState}
+            plan={data.plan}
+          />
         ) : null}
         {data && tab === "health" ? <HealthTab lastHealth={data.device.lastHealth} /> : null}
         {data && tab === "audit" ? <AuditTab audit={data.audit} /> : null}
@@ -186,13 +191,25 @@ function OverviewTab({ device }: { device: FleetDeviceDetail }) {
 function LicenseTab({
   entitlements,
   licenseState,
+  plan,
 }: {
   entitlements: FleetEntitlementRow[];
   licenseState: LicenseState;
+  plan?: TenantPlan;
 }) {
   const subscriptionId = entitlements[0]?.subscriptionId;
   return (
     <div className="space-y-3 p-4">
+      {/* WT-14: the tenant's plan state, read-only (auto-issuance follows it on heartbeat). */}
+      {plan ? (
+        <p className="text-xs text-muted-foreground" data-testid="tenant-plan-state">
+          Tenant plan:{" "}
+          <span className="font-mono text-foreground">{plan.state.replaceAll("_", " ")}</span>
+          {plan.planCode ? ` · ${plan.planCode}` : ""}
+          {plan.validUntil ? ` · until ${plan.validUntil.slice(0, 10)}` : ""}
+          {plan.message ? ` — ${plan.message}` : ""}
+        </p>
+      ) : null}
       <div className="flex items-center justify-between">
         <LicenseStatePill state={licenseState} />
         {subscriptionId ? (

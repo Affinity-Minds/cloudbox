@@ -1,14 +1,22 @@
 // Owner: WT-2. Module `tenants`, mounted at `/api/v1/tenants` in routes/v1/index.ts.
 // Routes (docs/handoffs/foundation.md): POST /, PATCH /:tenantId, POST /:tenantId/archive.
 // All three are staff-only (`tenant.manage`) and audited with full before/after rows.
+//
+// `primaryContactEmail` is required on create (contracts): that address becomes tenant member 1,
+// standing `owner`, in the same atomic write as the tenant row (owner decision, follow-up to
+// WT-2). A later PATCH that changes `primaryContactEmail` never touches memberships — the
+// existing owner keeps their access and the new contact is not auto-added; only tenant creation
+// provisions a membership. See the "Standing ranking" section of the handoff for why the
+// last-active-owner guard in memberships.ts already covers this auto-created row correctly.
 import { CreateTenantRequest, UpdateTenantRequest } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
+import { ensureCustomerByEmail } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
-import { devices, subscriptions, tenants } from "../../db/schema";
+import { devices, subscriptions, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
@@ -34,7 +42,7 @@ async function allocateNextTenantCode(db: Db, now: string): Promise<string> {
 }
 
 /** Non-cancelled subscription statuses: still a live commercial obligation on the tenant. */
-const OPEN_SUBSCRIPTION_STATUSES = ["trial", "active", "past_due", "suspended"] as const;
+const OPEN_SUBSCRIPTION_STATUSES = ["pending", "trial", "active", "past_due", "suspended"] as const;
 
 router.post(
   "/",
@@ -49,6 +57,19 @@ router.post(
     const id = newId("tenant");
     const publicCode = await allocateNextTenantCode(db, now);
 
+    // Server API, never a raw insert into `customer_users` (per WT-1's ADR 0002/0009: sign-in
+    // never creates an identity). Idempotent by email: a second tenant sharing the same primary
+    // contact reuses this same customer identity rather than creating a duplicate.
+    const ownerUserId = await ensureCustomerByEmail(c.env, input.primaryContactEmail, {
+      correlationId: c.var.correlationId,
+    });
+    const membershipId = newId("membership");
+    const membershipValues = {
+      standing: "owner" as const,
+      status: "active" as const,
+      invitedBy: c.var.user.id,
+    };
+
     const [[created]] = await db.batch([
       db
         .insert(tenants)
@@ -57,7 +78,7 @@ router.post(
           publicCode,
           displayName: input.displayName,
           legalName: input.legalName ?? null,
-          primaryContactEmail: input.primaryContactEmail ?? null,
+          primaryContactEmail: input.primaryContactEmail,
           supportContactEmail: input.supportContactEmail ?? null,
           billingContactEmail: input.billingContactEmail ?? null,
           timezone: input.timezone ?? "UTC",
@@ -68,6 +89,13 @@ router.post(
           updatedAt: now,
         })
         .returning(),
+      db.insert(tenantMemberships).values({
+        id: membershipId,
+        tenantId: id,
+        userId: ownerUserId,
+        createdAt: now,
+        ...membershipValues,
+      }),
       audit(db, {
         eventType: "TENANT_CREATED",
         entityType: "tenant",
@@ -77,6 +105,24 @@ router.post(
         after: { id, publicCode, ...input },
         correlationId: c.var.correlationId,
         source: "api",
+      }),
+      audit(db, {
+        eventType: "USER_INVITED",
+        entityType: "membership",
+        entityId: membershipId,
+        actor: { type: "user", id: c.var.user.id, tenantId: id },
+        before: null,
+        after: {
+          id: membershipId,
+          tenantId: id,
+          userId: ownerUserId,
+          createdAt: now,
+          ...membershipValues,
+        },
+        correlationId: c.var.correlationId,
+        // Distinguishes this auto-provisioned owner from a manual invite through
+        // memberships.ts (which audits the same event type with `source: "api"`).
+        source: "primary_contact",
       }),
     ]);
 
@@ -102,6 +148,8 @@ router.patch(
     const patch: Partial<typeof tenants.$inferInsert> = { updatedAt: now };
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.legalName !== undefined) patch.legalName = input.legalName;
+    // Deliberately does not touch tenant_memberships: only POST / (create) provisions the owner
+    // membership. Changing the contact on record later never adds or removes a member.
     if (input.primaryContactEmail !== undefined)
       patch.primaryContactEmail = input.primaryContactEmail;
     if (input.supportContactEmail !== undefined)

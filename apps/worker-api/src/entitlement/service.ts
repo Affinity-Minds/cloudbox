@@ -32,7 +32,14 @@ export class EntitlementRefusal extends Error {
   }
 }
 
-export type Actor = { id: string; correlationId?: string | null };
+export type Actor = {
+  id: string;
+  correlationId?: string | null;
+  /** Default `user` (staff). WT-14's activation and heartbeat auto-issuance pass `system`. */
+  type?: "user" | "system";
+  /** Audit `source`; default `api`. WT-14: `activation` or `auto`. */
+  source?: string;
+};
 
 const RECORD_COLUMNS = {
   id: entitlements.id,
@@ -232,14 +239,14 @@ export async function issueForDevice(
         eventType: kind === "issue" ? "LICENSE_ISSUED" : "LICENSE_RENEWED",
         entityType: "entitlement",
         entityId: licenseId,
-        actor: { type: "user", id: actor.id },
+        actor: { type: actor.type ?? "user", id: actor.id },
         before:
           latest === undefined
             ? null
             : { generation: latest.generation, revokedAt: latest.revokedAt },
         after: { ...record, claims },
         correlationId: actor.correlationId,
-        source: "api",
+        source: actor.source ?? "api",
       }),
     ]);
   } catch (error) {
