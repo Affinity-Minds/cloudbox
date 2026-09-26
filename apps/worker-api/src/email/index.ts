@@ -1,9 +1,12 @@
-// Owner: WT-1. Sends through the Cloudflare Email Service `send_email` binding `EMAIL`.
+// Owner: WT-1. Sends through the configured email provider registry (WT-12, `../email/send.ts`),
+// which falls back to the Cloudflare Email Service `send_email` binding `EMAIL` when no providers
+// are configured, preserving this file's original behaviour.
 // Better Auth answers the OTP request with 200 whatever happens here (anti-enumeration), so the
 // outcome is recorded in audit_log as AUTH_OTP_SENT; a broken mailer must not look healthy.
 import { audit } from "../audit";
 import { createDb } from "../db/client";
 import type { Bindings } from "../env";
+import { sendEmail } from "./send";
 
 export type OtpEmail = { to: string; code: string };
 
@@ -33,25 +36,11 @@ export async function sendOtpEmail(
   context: { correlationId?: string | null } = {},
 ): Promise<SendOutcome> {
   const to = message.to.toLowerCase();
-  let outcome: SendOutcome;
-
-  if (env.EMAIL && env.EMAIL_FROM) {
-    try {
-      const result = await env.EMAIL.send({
-        to,
-        from: env.EMAIL_FROM,
-        subject: OTP_EMAIL_SUBJECT,
-        ...otpEmailBody(message.code),
-      });
-      outcome = { messageId: result.messageId };
-    } catch (error) {
-      const code = (error as { code?: unknown })?.code;
-      outcome = { errorCode: typeof code === "string" ? code : "E_SEND_FAILED" };
-      console.error("otp email send failed", outcome.errorCode);
-    }
-  } else {
-    outcome = { errorCode: "E_NO_EMAIL_BINDING" };
-  }
+  let outcome: SendOutcome = await sendEmail(
+    env,
+    { to, subject: OTP_EMAIL_SUBJECT, ...otpEmailBody(message.code) },
+    { purpose: "otp", correlationId: context.correlationId },
+  );
 
   // Local development only: `wrangler dev` without remote bindings, and tests.
   if (env.OTP_DEV_ECHO === "1" && env.ENVIRONMENT !== "production") {

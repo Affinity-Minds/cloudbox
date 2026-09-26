@@ -45,4 +45,10 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT rowid, id, event_type, entity_type, entity_id, actor_type, actor_id, actor_tenant_id, action, before_json, after_json, correlation_id, source, created_at FROM "audit_log" ORDER BY rowid DESC LIMIT ?`,
     params: [51],
   },
+  // ─── email/send.ts (loadEnabledProviders): one query, cached 60s per isolate ──────────────
+  {
+    name: "email.send: enabled providers ordered by priority",
+    sql: `SELECT "id", "name", "kind", "from_address", "config_json", "secret_ciphertext", "secret_iv" FROM "email_providers" WHERE "email_providers"."enabled" = ? ORDER BY "email_providers"."priority" ASC`,
+    params: [1],
+  },
 ];
