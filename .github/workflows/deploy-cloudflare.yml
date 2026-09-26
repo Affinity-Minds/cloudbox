@@ -164,7 +164,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${TURNSTILE_SECRET_KEY}" ]; then echo "not set; customer step-up uses the cooldown fallback"; exit 0; fi
+          if [ -z "${TURNSTILE_SECRET_KEY}" ]; then echo "::warning::TURNSTILE_SECRET_KEY is not set; customer sign-in step-up falls back to a per-account cooldown (review U-cooldown). Set the production environment secret."; exit 0; fi
           printf '%s' "$TURNSTILE_SECRET_KEY" | pnpm wrangler secret put TURNSTILE_SECRET_KEY
 
       - name: Deploy Worker
