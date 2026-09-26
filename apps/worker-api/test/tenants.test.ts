@@ -42,15 +42,43 @@ async function auditFor(entityType: string, entityId: string) {
   }));
 }
 
+async function findMemberships(tenantId: string) {
+  const { results } = await env.DB.prepare(
+    "SELECT id, tenant_id, user_id, standing, status, invited_by FROM tenant_memberships WHERE tenant_id = ? ORDER BY rowid",
+  )
+    .bind(tenantId)
+    .all<{
+      id: string;
+      tenant_id: string;
+      user_id: string;
+      standing: string;
+      status: string;
+      invited_by: string | null;
+    }>();
+  return results;
+}
+
+async function findCustomerByEmail(email: string) {
+  return env.DB.prepare("SELECT id, email, name FROM customer_users WHERE email = ?")
+    .bind(email.toLowerCase())
+    .first<{ id: string; email: string; name: string }>();
+}
+
 describe("POST /api/v1/tenants", () => {
   it("allocates sequential CBX codes atomically and audits TENANT_CREATED", async () => {
-    const first = await createTenant(admin, { displayName: "Example Org" });
+    const first = await createTenant(admin, {
+      displayName: "Example Org",
+      primaryContactEmail: "example-org-owner@example.test",
+    });
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as Tenant;
     expect(firstBody.publicCode).toMatch(/^CBX-\d{5}$/);
     expect(firstBody.status).toBe("provisioning");
 
-    const second = await createTenant(admin, { displayName: "Second Org" });
+    const second = await createTenant(admin, {
+      displayName: "Second Org",
+      primaryContactEmail: "second-org-owner@example.test",
+    });
     const secondBody = (await second.json()) as Tenant;
     expect(Number(secondBody.publicCode.slice(4))).toBe(Number(firstBody.publicCode.slice(4)) + 1);
 
@@ -71,14 +99,26 @@ describe("POST /api/v1/tenants", () => {
   });
 
   it("rejects an invalid body with the error shape", async () => {
-    const response = await createTenant(admin, { displayName: "" });
+    const response = await createTenant(admin, {
+      displayName: "",
+      primaryContactEmail: "invalid-org@example.test",
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
+  });
+
+  it("rejects a tenant with no primary contact email — required from now on", async () => {
+    const response = await createTenant(admin, { displayName: "No Contact Org" });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
   });
 
   it("appears in the screens/tenants loader in at most three D1 round trips", async () => {
     const created = (await (
-      await createTenant(admin, { displayName: "Loader Org" })
+      await createTenant(admin, {
+        displayName: "Loader Org",
+        primaryContactEmail: "loader-org-owner@example.test",
+      })
     ).json()) as Tenant;
 
     const counted = countingD1(env.DB);
@@ -97,7 +137,9 @@ describe("POST /api/v1/tenants", () => {
       displayName: "Loader Org",
       status: "provisioning",
       deviceCount: 0,
-      memberCount: 0,
+      // 1, not 0: the primary contact is auto-provisioned as member 1 (standing owner) at
+      // creation (owner decision, follow-up to WT-2).
+      memberCount: 1,
       nextSubscriptionExpiry: null,
       health: "unknown",
     });
@@ -111,7 +153,10 @@ describe("POST /api/v1/tenants", () => {
     // table name inside a nested subquery — so every count came back 0 while the DB held real
     // rows. A tenant with no related rows can't catch that; this one has one of each.
     const tenant = (await (
-      await createTenant(admin, { displayName: "Counted Org" })
+      await createTenant(admin, {
+        displayName: "Counted Org",
+        primaryContactEmail: "counted-org-owner@example.test",
+      })
     ).json()) as Tenant;
 
     const invited = await call(`/api/v1/tenants/${tenant.id}/memberships`, admin, {
@@ -127,13 +172,18 @@ describe("POST /api/v1/tenants", () => {
     const row = body.items.find((item) => item.id === tenant.id);
     expect(row).toMatchObject({
       deviceCount: 1,
-      memberCount: 1,
+      // 2: the auto-provisioned primary-contact owner, plus the explicit invite above.
+      memberCount: 2,
       nextSubscriptionExpiry: "2027-06-01T00:00:00.000Z",
     });
   });
 
   it("filters by status, plan and free text", async () => {
-    await createTenant(admin, { displayName: "Filter Me Org", planCode: "cloudbox-6" });
+    await createTenant(admin, {
+      displayName: "Filter Me Org",
+      primaryContactEmail: "filter-me-owner@example.test",
+      planCode: "cloudbox-6",
+    });
     const byQuery = await call("/api/v1/screens/tenants?q=Filter%20Me", admin);
     const byQueryBody = (await byQuery.json()) as TenantsScreen;
     expect(byQueryBody.items.every((i) => i.displayName.includes("Filter Me"))).toBe(true);
@@ -154,7 +204,11 @@ describe("POST /api/v1/tenants", () => {
 describe("PATCH /api/v1/tenants/:tenantId", () => {
   it("updates fields and audits TENANT_UPDATED with before/after", async () => {
     const created = (await (
-      await createTenant(admin, { displayName: "Patchable Org", notes: "before" })
+      await createTenant(admin, {
+        displayName: "Patchable Org",
+        primaryContactEmail: "patchable-org-owner@example.test",
+        notes: "before",
+      })
     ).json()) as Tenant;
 
     const response = await call(`/api/v1/tenants/${created.id}`, admin, {
@@ -183,7 +237,10 @@ describe("PATCH /api/v1/tenants/:tenantId", () => {
 describe("POST /api/v1/tenants/:tenantId/archive", () => {
   async function seedArchiveCandidate() {
     const created = (await (
-      await createTenant(admin, { displayName: "Archive Candidate" })
+      await createTenant(admin, {
+        displayName: "Archive Candidate",
+        primaryContactEmail: "archive-candidate-owner@example.test",
+      })
     ).json()) as Tenant;
     // Fresh tenants start "provisioning"; move to "active" so it looks like a real, in-use tenant.
     await call(`/api/v1/tenants/${created.id}`, admin, {
@@ -236,7 +293,10 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
 describe("GET /api/v1/screens/tenants/:tenantId", () => {
   it("returns tenant, memberships, devices, subscriptions and audit in one round trip", async () => {
     const tenant = (await (
-      await createTenant(admin, { displayName: "Detail Org" })
+      await createTenant(admin, {
+        displayName: "Detail Org",
+        primaryContactEmail: "detail-org-owner@example.test",
+      })
     ).json()) as Tenant;
 
     const counted = countingD1(env.DB);
@@ -250,14 +310,129 @@ describe("GET /api/v1/screens/tenants/:tenantId", () => {
 
     const body = (await response.json()) as TenantDetailScreen;
     expect(body.tenant.id).toBe(tenant.id);
-    expect(body.memberships).toEqual([]);
+    // Not []: the primary contact is auto-provisioned as member 1 (standing owner).
+    expect(body.memberships).toHaveLength(1);
+    expect(body.memberships[0]).toMatchObject({
+      tenantId: tenant.id,
+      email: "detail-org-owner@example.test",
+      standing: "owner",
+      status: "active",
+    });
     expect(body.devices).toEqual([]);
     expect(body.subscriptions).toEqual([]);
-    expect(body.auditEvents[0]).toMatchObject({ eventType: "TENANT_CREATED" });
+    // Inserted after TENANT_CREATED in the same atomic write, so it has the later rowid and
+    // sorts first (desc).
+    expect(body.auditEvents[0]).toMatchObject({ eventType: "USER_INVITED" });
+    expect(body.auditEvents[1]).toMatchObject({ eventType: "TENANT_CREATED" });
   });
 
   it("404s an unknown tenant", async () => {
     const response = await call("/api/v1/screens/tenants/ten_missing", admin);
     expect(response.status).toBe(404);
+  });
+});
+
+describe("POST /api/v1/tenants: the primary contact becomes the first Owner member", () => {
+  it("creates the customer identity and an active Owner membership, atomically with the tenant", async () => {
+    const email = "primary-owner-1@example.test";
+    const created = (await (
+      await createTenant(admin, { displayName: "Owner Org", primaryContactEmail: email })
+    ).json()) as Tenant;
+
+    const customer = await findCustomerByEmail(email);
+    expect(customer).toBeTruthy();
+
+    const memberships = await findMemberships(created.id);
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]).toMatchObject({
+      tenant_id: created.id,
+      user_id: customer?.id,
+      standing: "owner",
+      status: "active",
+      invited_by: admin.userId,
+    });
+
+    const events = await auditFor("membership", memberships[0]?.id ?? "");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventType: "USER_INVITED",
+      before: null,
+      after: { standing: "owner", status: "active", userId: customer?.id },
+    });
+  });
+
+  it("reuses the existing customer user when a second tenant shares the same primary contact", async () => {
+    const email = "shared-owner@example.test";
+    const first = (await (
+      await createTenant(admin, { displayName: "First Shared Org", primaryContactEmail: email })
+    ).json()) as Tenant;
+    const second = (await (
+      await createTenant(admin, { displayName: "Second Shared Org", primaryContactEmail: email })
+    ).json()) as Tenant;
+
+    const [firstMembership] = await findMemberships(first.id);
+    const [secondMembership] = await findMemberships(second.id);
+    expect(firstMembership?.user_id).toBeTruthy();
+    expect(secondMembership?.user_id).toBe(firstMembership?.user_id);
+
+    const { results } = await env.DB.prepare("SELECT id FROM customer_users WHERE email = ?")
+      .bind(email)
+      .all();
+    expect(results).toHaveLength(1);
+  });
+
+  it("a PATCH that changes primaryContactEmail does not touch memberships", async () => {
+    const oldEmail = "old-contact@example.test";
+    const newEmail = "new-contact@example.test";
+    const created = (await (
+      await createTenant(admin, {
+        displayName: "Contact Change Org",
+        primaryContactEmail: oldEmail,
+      })
+    ).json()) as Tenant;
+
+    const before = await findMemberships(created.id);
+    expect(before).toHaveLength(1);
+
+    const patched = await call(`/api/v1/tenants/${created.id}`, admin, {
+      method: "PATCH",
+      body: JSON.stringify({ primaryContactEmail: newEmail }),
+    });
+    expect(patched.status).toBe(200);
+    expect(((await patched.json()) as Tenant).primaryContactEmail).toBe(newEmail);
+
+    // The old owner is untouched: same rows, same standing/status.
+    const after = await findMemberships(created.id);
+    expect(after).toEqual(before);
+
+    // The new contact was never provisioned: PATCH never calls ensureCustomerByEmail.
+    const newContact = await findCustomerByEmail(newEmail);
+    expect(newContact).toBeNull();
+  });
+
+  it("refuses to create a tenant with no primary contact email", async () => {
+    const response = await createTenant(admin, { displayName: "No Contact Org 2" });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
+  });
+
+  it("the last-active-owner guard counts the auto-created owner (review U-2/L-8)", async () => {
+    const email = "sole-owner@example.test";
+    const created = (await (
+      await createTenant(admin, { displayName: "Sole Owner Org", primaryContactEmail: email })
+    ).json()) as Tenant;
+    const [membership] = await findMemberships(created.id);
+    if (!membership) throw new Error("expected the auto-created owner membership to exist");
+
+    const response = await call(
+      `/api/v1/tenants/${created.id}/memberships/${membership.id}`,
+      admin,
+      { method: "DELETE" },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "last_owner" });
+
+    const [stillThere] = await findMemberships(created.id);
+    expect(stillThere?.status).toBe("active");
   });
 });

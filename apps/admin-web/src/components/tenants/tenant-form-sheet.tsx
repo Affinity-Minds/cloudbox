@@ -1,6 +1,11 @@
 // Create/edit sheet. Nothing is written until Save (agent-notes ux-patterns): a new tenant has no
 // id and does not exist until the create request lands; editing an existing tenant patches only
 // the fields the form touched.
+//
+// Primary contact email is required on create (owner decision, follow-up to WT-2): the server
+// makes that address tenant member 1 with standing `owner`, atomically with the tenant row.
+// Editing the contact later (PATCH) never touches memberships — the hint text below the field
+// says so in both modes.
 import { CreateTenantRequest, type Tenant, TenantStatus } from "@cloudbox/contracts";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectNative } from "@/components/ui/select-native";
 import {
@@ -54,7 +59,9 @@ type FormValues = z.input<typeof FormSchema>;
 const EDITABLE_STATUSES = TenantStatus.exclude(["archived"]).options;
 
 function toFormValues(tenant?: Tenant): FormValues {
-  if (!tenant) return { displayName: "" };
+  // primaryContactEmail is required on create (owner decision): start blank, not omitted, so the
+  // field renders empty rather than "undefined" and required-field validation runs on submit.
+  if (!tenant) return { displayName: "", primaryContactEmail: "" };
   return {
     displayName: tenant.displayName,
     legalName: tenant.legalName ?? undefined,
@@ -150,8 +157,14 @@ export function TenantFormSheet({
                 <Input
                   id="primaryContactEmail"
                   type="email"
+                  required
                   {...form.register("primaryContactEmail")}
                 />
+                <FieldDescription>
+                  {isEdit
+                    ? "Changing this does not change tenant membership — the current Owner keeps their access, and this new contact is not added as a member."
+                    : "The primary contact becomes the first Owner and can sign in with a one-time code at /login."}
+                </FieldDescription>
                 <FieldError errors={[form.formState.errors.primaryContactEmail]} />
               </Field>
               <Field>
