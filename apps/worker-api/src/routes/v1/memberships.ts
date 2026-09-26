@@ -9,13 +9,17 @@
 // The Hono generic's third parameter declares this router's *mount* path, not its own routes, so
 // `c.req.param("tenantId")` resolves against the parent `:tenantId` segment (Hono does not
 // propagate a parent router's path params into a sub-router's own param-key typing otherwise).
-import { CreateMembershipRequest, UpdateMembershipRequest } from "@cloudbox/contracts";
+import {
+  CreateMembershipRequest,
+  type MembershipStanding,
+  UpdateMembershipRequest,
+} from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
-import { and, eq } from "drizzle-orm";
-import type { MiddlewareHandler } from "hono";
+import { and, eq, sql } from "drizzle-orm";
+import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { audit } from "../../audit";
-import { guard } from "../../auth/middleware";
+import { getPrincipal, guard, type Principal } from "../../auth/middleware";
 import { ensureUserByEmail } from "../../auth/users";
 import { getTenantStanding } from "../../authz/permissions";
 import { createDb } from "../../db/client";
@@ -37,6 +41,53 @@ function requireTenantManageOrAdmin(): MiddlewareHandler<AppEnv> {
   });
 }
 
+const STANDING_RANK: Record<MembershipStanding, number> = { user: 1, admin: 2, owner: 3 };
+
+/**
+ * Ranking (review U-2, mirrors staff S-5): staff with `tenant.manage` bypass this entirely — there
+ * is no tenant standing to rank them against. A tenant member may only grant a standing at or
+ * below its own, and may only change or revoke a membership whose *current* standing is strictly
+ * below its own (which also rules out touching its own membership, since its own standing is never
+ * strictly below itself). Returns a ready-to-return 403 response, or null when allowed.
+ */
+async function assertStandingRank(
+  c: Context<AppEnv>,
+  principal: Principal,
+  tenantId: string,
+  target: { currentStanding?: MembershipStanding; newStanding?: MembershipStanding },
+): Promise<Response | null> {
+  if (principal.permissions.has("tenant.manage")) return null;
+  const actorStanding = await getTenantStanding(c, tenantId);
+  const actorRank = actorStanding ? STANDING_RANK[actorStanding] : 0;
+  if (target.currentStanding !== undefined && STANDING_RANK[target.currentStanding] >= actorRank) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  if (target.newStanding !== undefined && STANDING_RANK[target.newStanding] > actorRank) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  return null;
+}
+
+/**
+ * SQL condition, true while writing this membership cannot remove the tenant's last active owner:
+ * the row is not currently an active owner, the write keeps it an owner, or another active owner
+ * exists for the same tenant. Used inside the write itself (review L-8 pattern, mirrored from
+ * `staff.ts`'s `keepsASuperAdmin`), so two concurrent writes against the same membership cannot
+ * both succeed in removing the last owner. `newStanding` is always a bound parameter (never raw
+ * text), including when omitted (DELETE): `null = 'owner'` is simply never true in SQLite.
+ */
+const keepsAnOwner = (tenantId: string, membershipId: string, newStanding?: MembershipStanding) =>
+  sql`(
+    ${tenantMemberships.standing} != 'owner'
+    OR ${tenantMemberships.status} != 'active'
+    OR ${newStanding ?? null} = 'owner'
+    OR (SELECT count(*) FROM tenant_memberships AS other
+        WHERE other.tenant_id = ${tenantId} AND other.standing = 'owner' AND other.status = 'active'
+          AND other.id != ${membershipId}) > 0
+  )`;
+
+const changed = (result: { meta?: { changes?: number } }) => (result.meta?.changes ?? 0) > 0;
+
 router.post(
   "/",
   requireTenantManageOrAdmin(),
@@ -50,6 +101,13 @@ router.post(
 
     const tenant = await db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
     if (!tenant) return c.json({ error: "not_found" }, 404);
+
+    const principal = await getPrincipal(c);
+    if (!principal) return c.json({ error: "unauthenticated" }, 401);
+    const rankDenied = await assertStandingRank(c, principal, tenantId, {
+      newStanding: input.standing,
+    });
+    if (rankDenied) return rankDenied;
 
     // Server API, never a raw insert into `user` (agent-notes / brief, and per WT-1's ADR
     // 0002/0009: sign-in never creates a user row, so this invite is the only way one comes to
@@ -135,25 +193,47 @@ router.patch(
       .get();
     if (!before) return c.json({ error: "not_found" }, 404);
 
-    const [[updated]] = await db.batch([
-      db
-        .update(tenantMemberships)
-        .set({ standing: input.standing })
-        .where(eq(tenantMemberships.id, membershipId))
-        .returning(),
-      audit(db, {
-        eventType: "USER_STANDING_CHANGED",
-        entityType: "membership",
-        entityId: membershipId,
-        actor: { type: "user", id: c.var.user.id, tenantId },
-        before,
-        after: { ...before, standing: input.standing },
-        correlationId: c.var.correlationId,
-        source: "api",
-      }),
-    ]);
+    const principal = await getPrincipal(c);
+    if (!principal) return c.json({ error: "unauthenticated" }, 401);
+    const rankDenied = await assertStandingRank(c, principal, tenantId, {
+      currentStanding: before.standing,
+      newStanding: input.standing,
+    });
+    if (rankDenied) return rankDenied;
 
-    return c.json(updated);
+    const result = await db
+      .update(tenantMemberships)
+      .set({ standing: input.standing })
+      .where(
+        and(
+          eq(tenantMemberships.id, membershipId),
+          keepsAnOwner(tenantId, membershipId, input.standing),
+        ),
+      )
+      .run();
+    if (!changed(result)) {
+      return c.json(
+        {
+          error: "last_owner",
+          detail: "Promote another member to owner before changing this one.",
+        },
+        409,
+      );
+    }
+
+    const after = { ...before, standing: input.standing };
+    await audit(db, {
+      eventType: "USER_STANDING_CHANGED",
+      entityType: "membership",
+      entityId: membershipId,
+      actor: { type: "user", id: c.var.user.id, tenantId },
+      before,
+      after,
+      correlationId: c.var.correlationId,
+      source: "api",
+    });
+
+    return c.json(after);
   },
 );
 
@@ -170,25 +250,38 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
   if (!before) return c.json({ error: "not_found" }, 404);
   if (before.status === "revoked") return c.json(before);
 
-  const [[updated]] = await db.batch([
-    db
-      .update(tenantMemberships)
-      .set({ status: "revoked" })
-      .where(eq(tenantMemberships.id, membershipId))
-      .returning(),
-    audit(db, {
-      eventType: "USER_REMOVED",
-      entityType: "membership",
-      entityId: membershipId,
-      actor: { type: "user", id: c.var.user.id, tenantId },
-      before,
-      after: { ...before, status: "revoked" },
-      correlationId: c.var.correlationId,
-      source: "api",
-    }),
-  ]);
+  const principal = await getPrincipal(c);
+  if (!principal) return c.json({ error: "unauthenticated" }, 401);
+  const rankDenied = await assertStandingRank(c, principal, tenantId, {
+    currentStanding: before.standing,
+  });
+  if (rankDenied) return rankDenied;
 
-  return c.json(updated);
+  const result = await db
+    .update(tenantMemberships)
+    .set({ status: "revoked" })
+    .where(and(eq(tenantMemberships.id, membershipId), keepsAnOwner(tenantId, membershipId)))
+    .run();
+  if (!changed(result)) {
+    return c.json(
+      { error: "last_owner", detail: "Promote another member to owner before revoking this one." },
+      409,
+    );
+  }
+
+  const after = { ...before, status: "revoked" as const };
+  await audit(db, {
+    eventType: "USER_REMOVED",
+    entityType: "membership",
+    entityId: membershipId,
+    actor: { type: "user", id: c.var.user.id, tenantId },
+    before,
+    after,
+    correlationId: c.var.correlationId,
+    source: "api",
+  });
+
+  return c.json(after);
 });
 
 export default router;
