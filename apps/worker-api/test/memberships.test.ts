@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
-import type { Membership, Tenant } from "@cloudbox/contracts";
+import type { Membership } from "@cloudbox/contracts";
 import { beforeAll, describe, expect, it } from "vitest";
 import app from "../src/index";
-import { type SignedIn, signInAs } from "./auth-fixtures";
+import { type SignedIn, seedMembership, seedTenant, signInAs } from "./fixtures";
 
 let staffAdmin: SignedIn;
 let staffReadOnly: SignedIn;
@@ -28,22 +28,6 @@ const call = (path: string, who: SignedIn | null, init: RequestInit = {}) =>
     env,
   );
 
-async function seedTenant(displayName: string): Promise<Tenant> {
-  const response = await call("/api/v1/tenants", staffAdmin, {
-    method: "POST",
-    body: JSON.stringify({ displayName }),
-  });
-  return (await response.json()) as Tenant;
-}
-
-async function seedMembership(tenantId: string, userId: string, standing: string) {
-  await env.DB.prepare(
-    "INSERT INTO tenant_memberships (id, tenant_id, user_id, standing) VALUES (?, ?, ?, ?)",
-  )
-    .bind(`mem_${crypto.randomUUID()}`, tenantId, userId, standing)
-    .run();
-}
-
 async function auditFor(entityType: string, entityId: string) {
   const { results } = await env.DB.prepare(
     "SELECT event_type, before_json, after_json FROM audit_log WHERE entity_type = ? AND entity_id = ? ORDER BY rowid",
@@ -59,15 +43,15 @@ async function auditFor(entityType: string, entityId: string) {
 
 describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   it("creates the Better Auth user, the membership, and audits USER_INVITED", async () => {
-    const tenant = await seedTenant("Invite Org");
-    const response = await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+    const tenant = await seedTenant(env.DB, { displayName: "Invite Org" });
+    const response = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
       method: "POST",
       body: JSON.stringify({ email: "New.Invitee@example.test", standing: "owner" }),
     });
     expect(response.status).toBe(201);
     const membership = (await response.json()) as Membership;
     expect(membership).toMatchObject({
-      tenantId: tenant.id,
+      tenantId: tenant.tenantId,
       standing: "owner",
       status: "active",
       email: "new.invitee@example.test",
@@ -88,10 +72,10 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   });
 
   it("reuses an existing Better Auth user by email instead of creating a duplicate", async () => {
-    const tenant = await seedTenant("Reuse Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Reuse Org" });
     const existing = await signInAs(env, { email: "reused-person@example.test" });
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+    const response = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
       method: "POST",
       body: JSON.stringify({ email: "reused-person@example.test", standing: "user" }),
     });
@@ -101,14 +85,14 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   });
 
   it("409s inviting the same active member twice", async () => {
-    const tenant = await seedTenant("Duplicate Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Duplicate Org" });
     const body = JSON.stringify({ email: "dup@example.test", standing: "user" });
-    const first = await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+    const first = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
       method: "POST",
       body,
     });
     expect(first.status).toBe(201);
-    const second = await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+    const second = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
       method: "POST",
       body,
     });
@@ -116,8 +100,8 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   });
 
   it("401s anonymous and 403s a staff member without tenant.manage or tenant standing", async () => {
-    const tenant = await seedTenant("Guarded Org");
-    const path = `/api/v1/tenants/${tenant.id}/memberships`;
+    const tenant = await seedTenant(env.DB, { displayName: "Guarded Org" });
+    const path = `/api/v1/tenants/${tenant.tenantId}/memberships`;
     expect(
       (
         await call(path, null, {
@@ -134,18 +118,22 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   });
 
   it("tenant boundary: a tenant admin may invite into their own tenant but not another's", async () => {
-    const tenantA = await seedTenant("Tenant A");
-    const tenantB = await seedTenant("Tenant B");
+    const tenantA = await seedTenant(env.DB, { displayName: "Tenant A" });
+    const tenantB = await seedTenant(env.DB, { displayName: "Tenant B" });
     const tenantAdmin = await signInAs(env, { email: "tenant-admin-person@example.test" });
-    await seedMembership(tenantA.id, tenantAdmin.userId, "admin");
+    await seedMembership(env.DB, {
+      tenantId: tenantA.tenantId,
+      userId: tenantAdmin.userId,
+      standing: "admin",
+    });
 
-    const ownTenant = await call(`/api/v1/tenants/${tenantA.id}/memberships`, tenantAdmin, {
+    const ownTenant = await call(`/api/v1/tenants/${tenantA.tenantId}/memberships`, tenantAdmin, {
       method: "POST",
       body: JSON.stringify({ email: "invited-by-tenant-admin@example.test", standing: "user" }),
     });
     expect(ownTenant.status).toBe(201);
 
-    const otherTenant = await call(`/api/v1/tenants/${tenantB.id}/memberships`, tenantAdmin, {
+    const otherTenant = await call(`/api/v1/tenants/${tenantB.tenantId}/memberships`, tenantAdmin, {
       method: "POST",
       body: JSON.stringify({ email: "should-not-be-invited@example.test", standing: "user" }),
     });
@@ -154,11 +142,15 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
   });
 
   it("a plain tenant member (standing 'user') cannot invite anyone", async () => {
-    const tenant = await seedTenant("Member Only Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Member Only Org" });
     const member = await signInAs(env, { email: "plain-member@example.test" });
-    await seedMembership(tenant.id, member.userId, "user");
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: member.userId,
+      standing: "user",
+    });
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/memberships`, member, {
+    const response = await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, member, {
       method: "POST",
       body: JSON.stringify({ email: "x@example.test", standing: "user" }),
     });
@@ -168,16 +160,16 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
 
 describe("PATCH /api/v1/tenants/:tenantId/memberships/:id", () => {
   it("changes standing and audits USER_STANDING_CHANGED with before/after", async () => {
-    const tenant = await seedTenant("Standing Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Standing Org" });
     const invited = (await (
-      await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+      await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
         method: "POST",
         body: JSON.stringify({ email: "promote-me@example.test", standing: "user" }),
       })
     ).json()) as Membership;
 
     const response = await call(
-      `/api/v1/tenants/${tenant.id}/memberships/${invited.id}`,
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${invited.id}`,
       staffAdmin,
       {
         method: "PATCH",
@@ -194,17 +186,17 @@ describe("PATCH /api/v1/tenants/:tenantId/memberships/:id", () => {
   });
 
   it("404s a membership from a different tenant", async () => {
-    const tenantA = await seedTenant("PATCH Tenant A");
-    const tenantB = await seedTenant("PATCH Tenant B");
+    const tenantA = await seedTenant(env.DB, { displayName: "PATCH Tenant A" });
+    const tenantB = await seedTenant(env.DB, { displayName: "PATCH Tenant B" });
     const invited = (await (
-      await call(`/api/v1/tenants/${tenantA.id}/memberships`, staffAdmin, {
+      await call(`/api/v1/tenants/${tenantA.tenantId}/memberships`, staffAdmin, {
         method: "POST",
         body: JSON.stringify({ email: "cross-tenant@example.test", standing: "user" }),
       })
     ).json()) as Membership;
 
     const response = await call(
-      `/api/v1/tenants/${tenantB.id}/memberships/${invited.id}`,
+      `/api/v1/tenants/${tenantB.tenantId}/memberships/${invited.id}`,
       staffAdmin,
       {
         method: "PATCH",
@@ -217,16 +209,16 @@ describe("PATCH /api/v1/tenants/:tenantId/memberships/:id", () => {
 
 describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
   it("revokes, keeps the row, and audits USER_REMOVED", async () => {
-    const tenant = await seedTenant("Revoke Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Revoke Org" });
     const invited = (await (
-      await call(`/api/v1/tenants/${tenant.id}/memberships`, staffAdmin, {
+      await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
         method: "POST",
         body: JSON.stringify({ email: "revoke-me@example.test", standing: "user" }),
       })
     ).json()) as Membership;
 
     const response = await call(
-      `/api/v1/tenants/${tenant.id}/memberships/${invited.id}`,
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${invited.id}`,
       staffAdmin,
       {
         method: "DELETE",
@@ -244,9 +236,13 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
     expect(events.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);
 
     // Revoking again is a no-op, not a second audit event.
-    const again = await call(`/api/v1/tenants/${tenant.id}/memberships/${invited.id}`, staffAdmin, {
-      method: "DELETE",
-    });
+    const again = await call(
+      `/api/v1/tenants/${tenant.tenantId}/memberships/${invited.id}`,
+      staffAdmin,
+      {
+        method: "DELETE",
+      },
+    );
     expect(again.status).toBe(200);
     const eventsAfter = await auditFor("membership", invited.id);
     expect(eventsAfter.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);

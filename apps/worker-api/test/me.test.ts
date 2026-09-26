@@ -1,14 +1,8 @@
 import { env } from "cloudflare:test";
-import type { MyTenant, SessionResponse, Tenant } from "@cloudbox/contracts";
-import { beforeAll, describe, expect, it } from "vitest";
+import type { MyTenant, SessionResponse } from "@cloudbox/contracts";
+import { describe, expect, it } from "vitest";
 import app from "../src/index";
-import { type SignedIn, signInAs } from "./auth-fixtures";
-
-let staffAdmin: SignedIn;
-
-beforeAll(async () => {
-  staffAdmin = await signInAs(env, { email: "me-staff-admin@example.test", staffRole: "admin" });
-});
+import { type SignedIn, seedMembership, seedTenant, signInAs } from "./fixtures";
 
 const call = (path: string, who: SignedIn | null, init: RequestInit = {}) =>
   app.request(
@@ -23,37 +17,29 @@ const call = (path: string, who: SignedIn | null, init: RequestInit = {}) =>
     env,
   );
 
-async function seedTenant(displayName: string): Promise<Tenant> {
-  const response = await call("/api/v1/tenants", staffAdmin, {
-    method: "POST",
-    body: JSON.stringify({ displayName }),
-  });
-  return (await response.json()) as Tenant;
-}
-
-async function seedMembership(tenantId: string, userId: string, standing: string) {
-  await env.DB.prepare(
-    "INSERT INTO tenant_memberships (id, tenant_id, user_id, standing) VALUES (?, ?, ?, ?)",
-  )
-    .bind(`mem_${crypto.randomUUID()}`, tenantId, userId, standing)
-    .run();
-}
-
 describe("GET /api/v1/me/tenants", () => {
   it("lists only the caller's active memberships", async () => {
-    const tenantA = await seedTenant("Me Tenant A");
-    const tenantB = await seedTenant("Me Tenant B");
-    const tenantC = await seedTenant("Me Tenant C (not a member)");
+    const tenantA = await seedTenant(env.DB, { displayName: "Me Tenant A" });
+    const tenantB = await seedTenant(env.DB, { displayName: "Me Tenant B" });
+    const tenantC = await seedTenant(env.DB, { displayName: "Me Tenant C (not a member)" });
     const person = await signInAs(env, { email: "multi-tenant-person@example.test" });
-    await seedMembership(tenantA.id, person.userId, "owner");
-    await seedMembership(tenantB.id, person.userId, "user");
+    await seedMembership(env.DB, {
+      tenantId: tenantA.tenantId,
+      userId: person.userId,
+      standing: "owner",
+    });
+    await seedMembership(env.DB, {
+      tenantId: tenantB.tenantId,
+      userId: person.userId,
+      standing: "user",
+    });
 
     const response = await call("/api/v1/me/tenants", person);
     expect(response.status).toBe(200);
     const rows = (await response.json()) as MyTenant[];
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.tenantId).sort()).toEqual([tenantA.id, tenantB.id].sort());
-    expect(rows.map((r) => r.tenantId)).not.toContain(tenantC.id);
+    expect(rows.map((r) => r.tenantId).sort()).toEqual([tenantA.tenantId, tenantB.tenantId].sort());
+    expect(rows.map((r) => r.tenantId)).not.toContain(tenantC.tenantId);
   });
 
   it("401s anonymous", async () => {
@@ -63,29 +49,33 @@ describe("GET /api/v1/me/tenants", () => {
 
 describe("POST /api/v1/me/active-tenant", () => {
   it("sets the active tenant when the caller is an active member, and it round-trips via the session", async () => {
-    const tenant = await seedTenant("Active Tenant Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Active Tenant Org" });
     const person = await signInAs(env, { email: "active-tenant-person@example.test" });
-    await seedMembership(tenant.id, person.userId, "user");
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: person.userId,
+      standing: "user",
+    });
 
     const set = await call("/api/v1/me/active-tenant", person, {
       method: "POST",
-      body: JSON.stringify({ tenantId: tenant.id }),
+      body: JSON.stringify({ tenantId: tenant.tenantId }),
     });
     expect(set.status).toBe(200);
     expect(((await set.json()) as { standing: string }).standing).toBe("user");
 
     const session = await call("/api/v1/auth/session", person);
     const body = (await session.json()) as SessionResponse;
-    expect(body.activeTenantId).toBe(tenant.id);
+    expect(body.activeTenantId).toBe(tenant.tenantId);
   });
 
   it("never trusts a tenant id the caller does not belong to (403, and the session stays unset)", async () => {
-    const tenant = await seedTenant("Not My Tenant");
+    const tenant = await seedTenant(env.DB, { displayName: "Not My Tenant" });
     const person = await signInAs(env, { email: "outsider-person@example.test" });
 
     const set = await call("/api/v1/me/active-tenant", person, {
       method: "POST",
-      body: JSON.stringify({ tenantId: tenant.id }),
+      body: JSON.stringify({ tenantId: tenant.tenantId }),
     });
     expect(set.status).toBe(403);
 
@@ -95,23 +85,27 @@ describe("POST /api/v1/me/active-tenant", () => {
   });
 
   it("re-resolves membership on every read: a later revoke clears the active tenant", async () => {
-    const tenant = await seedTenant("Revoked Active Org");
+    const tenant = await seedTenant(env.DB, { displayName: "Revoked Active Org" });
     const person = await signInAs(env, { email: "revoked-active-person@example.test" });
-    await seedMembership(tenant.id, person.userId, "user");
+    await seedMembership(env.DB, {
+      tenantId: tenant.tenantId,
+      userId: person.userId,
+      standing: "user",
+    });
 
     await call("/api/v1/me/active-tenant", person, {
       method: "POST",
-      body: JSON.stringify({ tenantId: tenant.id }),
+      body: JSON.stringify({ tenantId: tenant.tenantId }),
     });
     expect(
       ((await (await call("/api/v1/auth/session", person)).json()) as SessionResponse)
         .activeTenantId,
-    ).toBe(tenant.id);
+    ).toBe(tenant.tenantId);
 
     await env.DB.prepare(
       "UPDATE tenant_memberships SET status = 'revoked' WHERE tenant_id = ? AND user_id = ?",
     )
-      .bind(tenant.id, person.userId)
+      .bind(tenant.tenantId, person.userId)
       .run();
 
     const body = (await (await call("/api/v1/auth/session", person)).json()) as SessionResponse;

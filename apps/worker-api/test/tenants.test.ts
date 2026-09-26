@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import type { Tenant, TenantDetailScreen, TenantsScreen } from "@cloudbox/contracts";
 import { beforeAll, describe, expect, it } from "vitest";
 import app from "../src/index";
-import { type SignedIn, signInAs } from "./auth-fixtures";
 import { countingD1 } from "./counting-d1";
+import { type SignedIn, seedDevice, seedSubscription, signInAs } from "./fixtures";
 
 let admin: SignedIn;
 let reader: SignedIn;
@@ -120,22 +120,8 @@ describe("POST /api/v1/tenants", () => {
     });
     expect(invited.status).toBe(201);
 
-    await env.DB.prepare(
-      `INSERT INTO devices
-         (id, tenant_id, name, status, device_public_key_jwk, device_key_thumbprint, key_protection, hostname)
-       VALUES (?, ?, 'PC-1', 'enrolled', '{}', ?, 'tpm', 'PC-1')`,
-    )
-      .bind(`dev_${crypto.randomUUID()}`, tenant.id, `thumb_${crypto.randomUUID()}`)
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO subscriptions
-         (id, tenant_id, plan_code, status, valid_from, valid_until, max_managed_users, features_json,
-          offline_grace_days, renewal_warning_days)
-       VALUES (?, ?, 'cloudbox-6', 'active', '2026-01-01T00:00:00.000Z', '2027-06-01T00:00:00.000Z', 6, '[]', 7, 30)`,
-    )
-      .bind(`sub_${crypto.randomUUID()}`, tenant.id)
-      .run();
+    await seedDevice(env.DB, { tenantId: tenant.id });
+    await seedSubscription(env.DB, { tenantId: tenant.id, validUntil: "2027-06-01T00:00:00.000Z" });
 
     const body = (await (await call("/api/v1/screens/tenants", admin)).json()) as TenantsScreen;
     const row = body.items.find((item) => item.id === tenant.id);
@@ -195,7 +181,7 @@ describe("PATCH /api/v1/tenants/:tenantId", () => {
 });
 
 describe("POST /api/v1/tenants/:tenantId/archive", () => {
-  async function seedTenant() {
+  async function seedArchiveCandidate() {
     const created = (await (
       await createTenant(admin, { displayName: "Archive Candidate" })
     ).json()) as Tenant;
@@ -208,14 +194,8 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
   }
 
   it("refuses with a reason when a device is still enrolled", async () => {
-    const tenant = await seedTenant();
-    await env.DB.prepare(
-      `INSERT INTO devices
-         (id, tenant_id, name, status, device_public_key_jwk, device_key_thumbprint, key_protection, hostname)
-       VALUES (?, ?, 'PC-1', 'enrolled', '{}', ?, 'tpm', 'PC-1')`,
-    )
-      .bind(`dev_${crypto.randomUUID()}`, tenant.id, `thumb_${crypto.randomUUID()}`)
-      .run();
+    const tenant = await seedArchiveCandidate();
+    await seedDevice(env.DB, { tenantId: tenant.id });
 
     const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
     expect(response.status).toBe(409);
@@ -225,15 +205,8 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
   });
 
   it("refuses with a reason when an open subscription exists", async () => {
-    const tenant = await seedTenant();
-    await env.DB.prepare(
-      `INSERT INTO subscriptions
-         (id, tenant_id, plan_code, status, valid_from, valid_until, max_managed_users, features_json,
-          offline_grace_days, renewal_warning_days)
-       VALUES (?, ?, 'cloudbox-6', 'active', '2026-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z', 6, '[]', 7, 30)`,
-    )
-      .bind(`sub_${crypto.randomUUID()}`, tenant.id)
-      .run();
+    const tenant = await seedArchiveCandidate();
+    await seedSubscription(env.DB, { tenantId: tenant.id, validUntil: "2027-01-01T00:00:00.000Z" });
 
     const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
     expect(response.status).toBe(409);
@@ -242,7 +215,7 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
   });
 
   it("archives cleanly and audits TENANT_ARCHIVED when nothing blocks it", async () => {
-    const tenant = await seedTenant();
+    const tenant = await seedArchiveCandidate();
     const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
     expect(response.status).toBe(200);
     const archived = (await response.json()) as Tenant;

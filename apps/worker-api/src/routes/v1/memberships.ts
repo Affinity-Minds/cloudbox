@@ -15,11 +15,11 @@ import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { audit } from "../../audit";
-import { authFor } from "../../auth";
 import { guard } from "../../auth/middleware";
+import { ensureUserByEmail } from "../../auth/users";
 import { getTenantStanding } from "../../authz/permissions";
 import { createDb } from "../../db/client";
-import { tenantMemberships, tenants } from "../../db/schema";
+import { tenantMemberships, tenants, user } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
@@ -51,28 +51,17 @@ router.post(
     const tenant = await db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
     if (!tenant) return c.json({ error: "not_found" }, 404);
 
-    // Server API, never a raw insert into `user` (agent-notes / brief): resolve-or-create
-    // through Better Auth's own internal adapter so hooks and id generation stay in one place.
-    const ctx = await authFor(c).$context;
-    const existing = await ctx.internalAdapter.findUserByEmail(input.email);
-    const authUser =
-      existing?.user ??
-      (await ctx.internalAdapter.createUser(
-        {
-          email: input.email,
-          name: input.email.split("@")[0] ?? input.email,
-          emailVerified: false,
-        },
-        // Provisioned by a staff/tenant-admin invite, not any sign-in flow.
-        { method: "admin" },
-      ));
+    // Server API, never a raw insert into `user` (agent-notes / brief, and per WT-1's ADR
+    // 0002/0009: sign-in never creates a user row, so this invite is the only way one comes to
+    // exist for a tenant member).
+    const userId = await ensureUserByEmail(c.env, input.email, {
+      correlationId: c.var.correlationId,
+    });
 
     const before = await db
       .select()
       .from(tenantMemberships)
-      .where(
-        and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.userId, authUser.id)),
-      )
+      .where(and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.userId, userId)))
       .get();
 
     if (before?.status === "active") {
@@ -98,7 +87,7 @@ router.post(
           .returning()
       : db
           .insert(tenantMemberships)
-          .values({ id: membershipId, tenantId, userId: authUser.id, createdAt: now, ...values })
+          .values({ id: membershipId, tenantId, userId, createdAt: now, ...values })
           .returning();
     const auditWrite = audit(db, {
       eventType: "USER_INVITED",
@@ -109,17 +98,21 @@ router.post(
       after: {
         id: membershipId,
         tenantId,
-        userId: authUser.id,
+        userId,
         createdAt: before?.createdAt ?? now,
         ...values,
       },
       correlationId: c.var.correlationId,
       source: "api",
     });
+    const userRow = db
+      .select({ email: user.email, name: user.name })
+      .from(user)
+      .where(eq(user.id, userId));
 
-    const [[row]] = await db.batch([mutation, auditWrite]);
+    const [[row], , [invitedUser]] = await db.batch([mutation, auditWrite, userRow]);
 
-    return c.json({ ...row, email: authUser.email, name: authUser.name }, 201);
+    return c.json({ ...row, email: invitedUser?.email, name: invitedUser?.name }, 201);
   },
 );
 
