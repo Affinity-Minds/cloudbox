@@ -2,6 +2,7 @@ export * from "./agent";
 export * from "./auth";
 export * from "./common";
 export * from "./devices";
+export * from "./email-providers";
 export * from "./enrollment";
 export * from "./entitlement";
 export * from "./memberships";
