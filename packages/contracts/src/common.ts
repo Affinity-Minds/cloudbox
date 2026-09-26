@@ -13,6 +13,7 @@ export const ID_PREFIX = {
   enrollmentToken: "tok_",
   membership: "mem_",
   deviceCredential: "cred_",
+  emailProvider: "eprv_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

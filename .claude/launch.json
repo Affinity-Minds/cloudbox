@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cloudbox-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@cloudbox/admin-web", "dev"],
+      "port": 5173
+    }
+  ]
+}
