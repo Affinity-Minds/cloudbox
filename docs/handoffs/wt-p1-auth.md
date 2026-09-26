@@ -16,8 +16,8 @@ from D1 rows per request; every auth state change is audited.
 ## Current status
 
 - Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
-  PR #6. This round: **draft PR #9** https://github.com/Affinity-Minds/cloudbox/pull/9 (never merge
-  it myself).
+  PR #6, closed sign-in + staff 2FA + first review merged as PR #9 (`a3fc5f0`). Second-pass review
+  fixes: **draft PR #10** https://github.com/Affinity-Minds/cloudbox/pull/10 (never merged by me).
 - `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
   314/314, build ok).
 
@@ -231,7 +231,8 @@ The QR, key and backup codes in the screenshots belong to a local database that 
 ## Requests to other worktrees
 
 - [ ] WT-0: move `rateLimit` (`src/auth/rate-limit-table.ts`) into `db/schema.ts` and regenerate the
-  Drizzle snapshot including 0004; add `.dev.vars.example` with the keys above.
+  Drizzle snapshot including 0004; add `ENVIRONMENT=development` to `.dev.vars.example` (wrangler.jsonc
+  now defaults to production, and `OTP_DEV_ECHO=1` with production makes `createAuth` throw).
 - [ ] WT-0: a Staff nav entry and screen on `/api/v1/staff` (create with initial password, reset).
 - [ ] WT-2: create membership users with `ensureUserByEmail`; fill `activeTenantId` in the session.
 - [ ] WT-12: `sendOtpEmail(env, {to, code}, {correlationId, client})` must keep writing the
@@ -240,5 +241,5 @@ The QR, key and backup codes in the screenshots belong to a local database that 
 
 ## Safe next action
 
-Review and merge PR #9 into `phase-1/identity`, set the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` environment
+Review and merge PR #10 into `phase-1/identity`, set the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` environment
 secret before the next deploy, then sign in as the owner and complete the forced setup.
