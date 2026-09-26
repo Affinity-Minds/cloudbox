@@ -19,9 +19,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +54,9 @@ jobs:
           NODE
 
       - name: Ensure Cloudflare resources exist and pin their ids
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         shell: bash
         run: |
@@ -101,10 +101,16 @@ jobs:
           grep -n -E 'database_id|bucket_name' wrangler.jsonc || true
 
       - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         run: pnpm wrangler d1 migrations apply cloudbox-db --remote
 
       - name: Ensure BETTER_AUTH_SECRET exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         shell: bash
         run: |
@@ -115,11 +121,29 @@ jobs:
             openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put BETTER_AUTH_SECRET
           fi
 
+      - name: Sync ENTITLEMENT_SIGNING_JWK (when set)
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENTITLEMENT_SIGNING_JWK: ${{ secrets.ENTITLEMENT_SIGNING_JWK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ENTITLEMENT_SIGNING_JWK}" ]; then echo "not set; issuance stays 503"; exit 0; fi
+          printf '%s' "$ENTITLEMENT_SIGNING_JWK" | pnpm wrangler secret put ENTITLEMENT_SIGNING_JWK
+
       - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         run: pnpm wrangler deploy
 
       - name: Create temporary Phase 0 deploy credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         id: phase0-key
         shell: bash
         run: |
@@ -146,6 +170,13 @@ jobs:
             echo "attempt $attempt: HTTP $code (waiting for the new Worker version)"; sleep 5
           done
           echo "::error::Audited release change never returned 200"; cat /tmp/audited-change.json || true; exit 1
+
+      - name: Retire the temporary Phase 0 deploy credential
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm wrangler secret delete PHASE0_ADMIN_KEY --force || true
 
       - name: Verify production health, version, D1 and audit
         shell: bash
