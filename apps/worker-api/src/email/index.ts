@@ -36,7 +36,7 @@ type SendOutcome = {
 export async function sendOtpEmail(
   env: Bindings,
   message: OtpEmail,
-  context: { correlationId?: string | null } = {},
+  context: { correlationId?: string | null; client?: string } = {},
 ): Promise<SendOutcome> {
   const to = message.to.toLowerCase();
   let outcome: SendOutcome;
@@ -75,7 +75,8 @@ export async function sendOtpEmail(
       entityId: to,
       actor: { type: "system", id: "email-otp" },
       before: null,
-      after: outcome,
+      // `client` (IP or IPv6 /64) keys the per-(email, client) send cap in src/auth/index.ts.
+      after: context.client ? { ...outcome, client: context.client } : outcome,
       correlationId: context.correlationId ?? null,
       source: "api",
     });

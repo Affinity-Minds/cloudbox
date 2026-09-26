@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authContextFor, createAuth, HONEYPOT_HEADER } from "./auth";
-import { requireUser } from "./auth/middleware";
+import { isSameOriginWrite, requireUser } from "./auth/middleware";
 import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
@@ -47,11 +47,29 @@ app.get("/api/version", (c) =>
   }),
 );
 
-// Better Auth. Sign-out goes through the audited v1 logout so there is one way out.
-app.post("/api/auth/sign-out", requireUser(), logout);
-app.on(["GET", "POST"], "/api/auth/*", async (c): Promise<Response> => {
+// Better Auth. Only the endpoints the product uses answer (review H-2, ADR 0009: no passwords);
+// every other Better Auth or plugin path is 404, so a hidden endpoint cannot be a second way in.
+// Exact match: a trailing-slash or case variant is not on the list either.
+const AUTH_ROUTES = new Set([
+  "POST /api/auth/email-otp/send-verification-otp", // login form, email step (type "sign-in")
+  "POST /api/auth/sign-in/email-otp", // login form, code step
+  "POST /api/auth/sign-out", // routed to the audited v1 logout below
+  "GET /api/auth/get-session", // Better Auth's session read (no state change beyond sliding expiry)
+]);
+
+app.use("/api/auth/*", async (c, next) => {
+  if (!AUTH_ROUTES.has(`${c.req.method} ${new URL(c.req.url).pathname}`)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  // Login CSRF: auth writes must prove they come from our pages, with or without a cookie (L-2).
+  if (!isSameOriginWrite(c)) return c.json({ error: "forbidden" }, 403);
   // Honeypot enforced server-side: a plain 400 that names nothing (agent-notes ux-patterns).
   if (c.req.header(HONEYPOT_HEADER)) return c.json({ error: "invalid_request" }, 400);
+  await next();
+});
+// Sign-out goes through the audited v1 logout so there is one way out.
+app.post("/api/auth/sign-out", requireUser(), logout);
+app.on(["GET", "POST"], "/api/auth/*", async (c): Promise<Response> => {
   const request = authContextFor(c);
   // Until a super admin exists, the bootstrap address needs a user row to be able to sign in.
   await ensureBootstrapSuperAdmin(c.env, request);

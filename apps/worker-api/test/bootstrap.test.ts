@@ -78,7 +78,14 @@ describe("bootstrap super admin", () => {
       ),
     ).toBe(1);
 
-    // The address can now sign in with the code it was sent, and is super admin.
+    // The address can now sign in and is super admin. (Two concurrent sends can each store a code;
+    // a later resend re-sends the one that verifies.)
+    await post(
+      "/api/auth/email-otp/send-verification-otp",
+      { email: "owner@example.test", type: "sign-in" },
+      box.env,
+      "192.0.2.13",
+    );
     const code = box.sent.at(-1)?.text.match(/\b(\d{6})\b/)?.[1] ?? "";
     const verified = await post(
       "/api/auth/sign-in/email-otp",

@@ -10,6 +10,11 @@ describe("safeRedirect", () => {
     expect(safeRedirect("https://evil.example")).toBe("/");
     expect(safeRedirect("/login?redirect=/")).toBe("/");
     expect(safeRedirect(undefined)).toBe("/");
+    expect(safeRedirect("/\\evil.example")).toBe("/");
+    expect(safeRedirect("/\t/evil.example")).toBe("/");
+    expect(safeRedirect("/%5Cevil.example", "https://box.affinityminds.in")).toBe(
+      "/%5Cevil.example",
+    );
   });
 });
 

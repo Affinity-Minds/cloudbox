@@ -88,6 +88,44 @@ describe("requireUser / session", () => {
   });
 });
 
+describe("review L-1 / L-3", () => {
+  it("L-1: the Vite dev origin is not trusted in production", async () => {
+    const signedIn = await signInAs(env, { email: "vite-origin@example.test" });
+    const prod = { ...env, ENVIRONMENT: "production" as const };
+    const fromVite = await app.request(
+      "/api/v1/auth/logout",
+      { method: "POST", headers: { cookie: signedIn.cookie, origin: "http://localhost:5173" } },
+      prod,
+    );
+    expect(fromVite.status).toBe(403);
+    const inDev = await app.request(
+      "/api/v1/auth/logout",
+      { method: "POST", headers: { cookie: signedIn.cookie, origin: "http://localhost:5173" } },
+      env,
+    );
+    expect(inDev.status).toBe(204);
+  });
+
+  it("L-3: a client X-Correlation-Id is echoed but never written to audit rows", async () => {
+    const signedIn = await signInAs(env, { email: "corr@example.test" });
+    const out = await app.request(
+      "/api/v1/auth/logout",
+      { method: "POST", headers: { ...signedIn.headers, "x-correlation-id": "planted-corr-0001" } },
+      env,
+    );
+    expect(out.status).toBe(204);
+    expect(out.headers.get("x-correlation-id")).toBe("planted-corr-0001");
+    const serverId = out.headers.get("x-request-id");
+    expect(serverId).toMatch(/^[0-9a-f-]{36}$/);
+    const row = await env.DB.prepare(
+      "SELECT correlation_id FROM audit_log WHERE event_type = 'AUTH_LOGOUT' AND entity_id = ?",
+    )
+      .bind(signedIn.userId)
+      .first<{ correlation_id: string }>();
+    expect(row?.correlation_id).toBe(serverId);
+  });
+});
+
 describe("requirePermission", () => {
   const probe = new Hono<AppEnv>();
   probe.get("/staff-only", requireStaff(), (c) => c.json({ ok: true, user: c.var.user }));

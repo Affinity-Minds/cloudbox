@@ -7,7 +7,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createDb } from "../db/client";
 import { rolePermissions, staffMembers } from "../db/schema";
 import type { AppEnv, AppUser } from "../env";
-import { authFor, TRUSTED_ORIGINS } from "./index";
+import { authFor, trustedOrigins } from "./index";
 
 export type Principal = {
   user: AppUser;
@@ -62,11 +62,27 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * POST/PATCH/DELETE; a foreign one (or a cross-site fetch-metadata hint) is refused. Requests with
  * neither (server-to-server, tests) are not browsers and carry no ambient cookie risk.
  */
+function isTrustedOrigin(c: Context<AppEnv>, origin: string): boolean {
+  return origin === new URL(c.req.url).origin || trustedOrigins(c.env).includes(origin);
+}
+
 function isCrossSiteWrite(c: Context<AppEnv>): boolean {
   if (SAFE_METHODS.has(c.req.method)) return false;
   const origin = c.req.header("origin");
-  if (origin) return origin !== new URL(c.req.url).origin && !TRUSTED_ORIGINS.includes(origin);
+  if (origin) return !isTrustedOrigin(c, origin);
   return c.req.header("sec-fetch-site") === "cross-site";
+}
+
+/**
+ * Strict form for unauthenticated auth writes (sign-in is a login-CSRF target, review L-2): the
+ * request must positively prove it comes from our pages, with a trusted `Origin` or
+ * `Sec-Fetch-Site: same-origin`, cookie or not.
+ */
+export function isSameOriginWrite(c: Context<AppEnv>): boolean {
+  if (SAFE_METHODS.has(c.req.method)) return true;
+  const origin = c.req.header("origin");
+  if (origin) return isTrustedOrigin(c, origin);
+  return c.req.header("sec-fetch-site") === "same-origin";
 }
 
 export const unauthenticated = (c: Context<AppEnv>) =>

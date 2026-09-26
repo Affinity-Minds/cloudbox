@@ -2,12 +2,12 @@
 // The plugin list is shared with the schema generator (src/auth/cli.ts) so the generated tables
 // cannot drift from the running app (agent-notes cloudflare-workers #17). Change the plugin list
 // only together with a regenerated schema (`pnpm auth:generate`).
-import { OtpSendRequest } from "@cloudbox/contracts";
+import { Email, OtpSendRequest } from "@cloudbox/contracts";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getIP } from "better-auth/api";
 import { emailOTP } from "better-auth/plugins";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { audit } from "../audit";
 import { createDb, type Db } from "../db/client";
@@ -17,14 +17,35 @@ import type { AppEnv, Bindings } from "../env";
 import { rateLimit } from "./rate-limit-table";
 
 export const PRODUCTION_ORIGIN = "https://box.affinityminds.in";
-/** Origins allowed to post to `/api/auth/*` with a cookie. The request's own origin is added by Better Auth. */
-export const TRUSTED_ORIGINS = [PRODUCTION_ORIGIN, "http://localhost:5173"];
+const VITE_DEV_ORIGIN = "http://localhost:5173";
+
+/**
+ * Origins allowed to write with a cookie, besides the request's own origin. The Vite dev server is
+ * trusted only outside production (review L-1).
+ */
+export function trustedOrigins(env: Pick<Bindings, "ENVIRONMENT">): string[] {
+  return env.ENVIRONMENT === "production"
+    ? [PRODUCTION_ORIGIN]
+    : [PRODUCTION_ORIGIN, VITE_DEV_ORIGIN];
+}
 
 /** Honeypot: the login form copies its hidden field here; any non-empty value is a bot. */
 export const HONEYPOT_HEADER = "x-cloudbox-hp";
 
-/** OTP sends per email address (on top of Better Auth's per-IP limits), counted from the audit log. */
-export const OTP_SENDS_PER_EMAIL = { windowSeconds: 15 * 60, max: 5 };
+/**
+ * OTP send caps on top of Better Auth's per-IP limit (3 / 60 s per IP or IPv6 /64), counted from
+ * `AUTH_OTP_SENT` audit rows. The tight cap is per (email, client /64), so a third party cannot
+ * spend the owner's quota (review H-1); the per-email ceiling only stops mail bombing. Over either
+ * cap the caller gets the same 200 and nothing is generated, sent or recorded, for known and
+ * unknown addresses alike, so the cap is neither a lockout nor an existence oracle.
+ */
+export const OTP_SEND_CAPS = {
+  perEmailAndClient: { windowSeconds: 15 * 60, max: 5 },
+  perEmail: { windowSeconds: 60 * 60, max: 30 },
+};
+
+/** Failed verifies for an address with no user row: at most one audit row per window (review M-3). */
+export const UNKNOWN_EMAIL_FAILURE_WINDOW_SECONDS = 15 * 60;
 
 /** Audit entity for events keyed by an email address rather than a user id (anti-enumeration). */
 export const AUTH_EMAIL_ENTITY = "auth_email";
@@ -41,29 +62,67 @@ export type AuthRequestContext = {
 };
 
 /**
- * OTP echo is for local development only. A production deploy that carries `OTP_DEV_ECHO=1` is
- * misconfigured: refuse to build the auth instance at all rather than risk leaking codes.
+ * Fail closed on configuration that would weaken auth: no secret (review L-10), or the OTP echo
+ * in production. Called by `createAuth`, so every auth request refuses to run misconfigured.
  */
-export function assertOtpEchoSafe(env: Pick<Bindings, "ENVIRONMENT" | "OTP_DEV_ECHO">): void {
+export function assertAuthConfig(
+  env: Pick<Bindings, "ENVIRONMENT" | "OTP_DEV_ECHO" | "BETTER_AUTH_SECRET">,
+): void {
+  if (!env.BETTER_AUTH_SECRET) throw new Error("BETTER_AUTH_SECRET is not set");
   if (env.ENVIRONMENT === "production" && env.OTP_DEV_ECHO === "1") {
     throw new Error("OTP_DEV_ECHO must not be set in production");
   }
 }
 
-async function otpSendsInWindow(db: Db, email: string): Promise<number> {
-  const since = new Date(Date.now() - OTP_SENDS_PER_EMAIL.windowSeconds * 1000).toISOString();
+/** The client key used for per-client caps: Better Auth's IP resolution (IPv6 masked to /64). */
+function clientKey(
+  source: Request | Headers | undefined,
+  options: Parameters<typeof getIP>[1],
+): string {
+  return (source && getIP(source, options)) || "unknown";
+}
+
+async function otpSendCounts(db: Db, email: string, client: string) {
+  const now = Date.now();
+  const tightSince = new Date(now - OTP_SEND_CAPS.perEmailAndClient.windowSeconds * 1000);
+  const wideSince = new Date(now - OTP_SEND_CAPS.perEmail.windowSeconds * 1000);
+  const { auditLog } = schema;
   const [row] = await db
-    .select({ n: count() })
-    .from(schema.auditLog)
+    .select({
+      total: count(),
+      fromClient:
+        sql<number>`coalesce(sum(case when ${auditLog.createdAt} > ${tightSince.toISOString()}
+        and json_extract(${auditLog.afterJson}, '$.client') = ${client} then 1 else 0 end), 0)`.mapWith(
+          Number,
+        ),
+    })
+    .from(auditLog)
     .where(
       and(
-        eq(schema.auditLog.entityType, AUTH_EMAIL_ENTITY),
-        eq(schema.auditLog.entityId, email),
-        eq(schema.auditLog.eventType, "AUTH_OTP_SENT"),
-        gt(schema.auditLog.createdAt, since),
+        eq(auditLog.entityType, AUTH_EMAIL_ENTITY),
+        eq(auditLog.entityId, email),
+        eq(auditLog.eventType, "AUTH_OTP_SENT"),
+        gt(auditLog.createdAt, wideSince.toISOString()),
       ),
     );
-  return row?.n ?? 0;
+  return { total: row?.total ?? 0, fromClient: row?.fromClient ?? 0 };
+}
+
+async function recentFailure(db: Db, email: string): Promise<boolean> {
+  const since = new Date(Date.now() - UNKNOWN_EMAIL_FAILURE_WINDOW_SECONDS * 1000).toISOString();
+  const { auditLog } = schema;
+  const [row] = await db
+    .select({ n: count() })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.entityType, AUTH_EMAIL_ENTITY),
+        eq(auditLog.entityId, email),
+        eq(auditLog.eventType, "AUTH_LOGIN_FAILED"),
+        gt(auditLog.createdAt, since),
+      ),
+    );
+  return (row?.n ?? 0) > 0;
 }
 
 function errorCode(returned: unknown): string {
@@ -81,11 +140,11 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
     baseURL: request.baseURL,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: TRUSTED_ORIGINS,
+    trustedOrigins: trustedOrigins(env),
     database: drizzleAdapter(db, { provider: "sqlite", schema: { ...schema, rateLimit } }),
     emailAndPassword: { enabled: false },
-    // Per-IP limits, stored in D1 so every isolate shares them. Better Auth's defaults apply per
-    // path (sign-in 3/10 s, OTP send 3/60 s); everything else under /api/auth is 60/min.
+    // Per-IP limits, stored in D1 so every isolate shares them. The emailOTP plugin's rules apply
+    // to its paths (OTP send and sign-in: 3 / 60 s each); everything else under /api/auth is 60/min.
     rateLimit: { enabled: true, storage: "database", window: 60, max: 60 },
     advanced: {
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
@@ -103,14 +162,18 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
         const parsed = OtpSendRequest.safeParse(ctx.body);
         if (!parsed.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
         const email = parsed.data.email;
-        if ((await otpSendsInWindow(db, email)) >= OTP_SENDS_PER_EMAIL.max) {
-          throw new APIError("TOO_MANY_REQUESTS", {
-            message: "Too many requests. Please try again later.",
-          });
+        const client = clientKey(ctx.request ?? ctx.headers, ctx.context.options);
+        const sends = await otpSendCounts(db, email, client);
+        if (
+          sends.fromClient >= OTP_SEND_CAPS.perEmailAndClient.max ||
+          sends.total >= OTP_SEND_CAPS.perEmail.max
+        ) {
+          // Same answer as a send; any code already sent stays valid (resendStrategy "reuse").
+          return ctx.json({ success: true });
         }
         // Closed sign-in (ADR 0002): an address without a user row gets exactly the answer a known
-        // one gets, but no code is generated, stored or sent. Recorded like a send, so the
-        // per-email limit applies to unknown addresses too.
+        // one gets, but no code is generated, stored or sent. Recorded like a send (with the client),
+        // so the caps above bound these rows too.
         if (!(await ctx.context.internalAdapter.findUserByEmail(email))) {
           const record = audit(db, {
             eventType: "AUTH_OTP_SENT",
@@ -118,7 +181,7 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
             entityId: email,
             actor: { type: "system", id: "email-otp" },
             before: null,
-            after: { outcome: "unknown_email" },
+            after: { outcome: "unknown_email", client },
             correlationId,
             source: "api",
           }).then(() => undefined);
@@ -143,12 +206,21 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
           return;
         }
         const body = ctx.body as { email?: unknown } | undefined;
-        const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+        const parsedEmail = Email.safeParse(body?.email);
+        const email = parsedEmail.success ? parsedEmail.data : "invalid";
+        // An address with no user row can only ever fail; record it once per window, not per
+        // attempt, so anonymous callers cannot grow the append-only log without bound (M-3).
+        if (
+          (!parsedEmail.success || !(await ctx.context.internalAdapter.findUserByEmail(email))) &&
+          (await recentFailure(db, email))
+        ) {
+          return;
+        }
         // Never the submitted code; the reason is Better Auth's error code.
         await audit(db, {
           eventType: "AUTH_LOGIN_FAILED",
           entityType: AUTH_EMAIL_ENTITY,
-          entityId: email.slice(0, 254) || "unknown",
+          entityId: email,
           actor: { type: "system", id: "email-otp" },
           before: null,
           after: { reason: errorCode(ctx.context.returned) },
@@ -164,11 +236,15 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
         disableSignUp: true,
         expiresIn: 5 * 60,
         allowedAttempts: 3,
-        storeOTP: "hashed",
-        // A resend replaces the stored code, so only the newest code verifies.
-        resendStrategy: "rotate",
-        async sendVerificationOTP({ email, otp }) {
-          await sendOtpEmail(env, { to: email, code: otp }, { correlationId });
+        // A resend re-sends the code that is still valid (extending its expiry, keeping its attempt
+        // count) instead of replacing it, so nobody else's send request can invalidate the code in
+        // the owner's inbox (review H-1). Reuse needs a recoverable form: Better Auth's encryption
+        // with BETTER_AUTH_SECRET.
+        storeOTP: "encrypted",
+        resendStrategy: "reuse",
+        async sendVerificationOTP({ email, otp }, ctx) {
+          const client = clientKey(ctx?.request ?? ctx?.headers, ctx?.context.options ?? {});
+          await sendOtpEmail(env, { to: email, code: otp }, { correlationId, client });
         },
       }),
     ],
@@ -176,7 +252,7 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
 }
 
 export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
-  assertOtpEchoSafe(env);
+  assertAuthConfig(env);
   return betterAuth(authOptions(env, request));
 }
 

@@ -94,7 +94,11 @@ describe("staff management API", () => {
         path,
         {
           method: "POST",
-          headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" },
+          headers: {
+            "content-type": "application/json",
+            "cf-connecting-ip": "203.0.113.9",
+            origin: "http://localhost",
+          },
           body: JSON.stringify(body),
         },
         mailEnv,
