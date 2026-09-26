@@ -4,8 +4,8 @@ import { env } from "cloudflare:test";
 import type { SessionResponse } from "@cloudbox/contracts";
 import { betterAuth } from "better-auth";
 import { beforeAll, describe, expect, it } from "vitest";
-import { audit } from "../src/audit";
-import { authOptions } from "../src/auth";
+import { authOptions, PASSWORD_FAILURE_CAP } from "../src/auth";
+import { bumpCounter, counterKey } from "../src/auth/counters";
 import { ensureUserByEmail } from "../src/auth/users";
 import { createDb } from "../src/db/client";
 import type { Bindings } from "../src/env";
@@ -403,16 +403,8 @@ describe("password lockout (H-1 applied to passwords)", () => {
     await enrol("locked@example.test");
     const attacker = "198.18.200.1";
     const db = createDb(env.DB);
-    for (let i = 0; i < 5; i += 1) {
-      await audit(db, {
-        eventType: "AUTH_LOGIN_FAILED",
-        entityType: "auth_email",
-        entityId: "locked@example.test",
-        actor: { type: "system", id: "sign-in" },
-        before: null,
-        after: { method: "password", reason: "INVALID_EMAIL_OR_PASSWORD", client: attacker },
-      });
-    }
+    const key = await counterKey("pw-fail", "locked@example.test", attacker);
+    for (let i = 0; i < 5; i += 1) await bumpCounter(db, key, PASSWORD_FAILURE_CAP.windowSeconds);
     const wrong = await authPost("/api/auth/sign-in/email", {
       email: "locked@example.test",
       password: "wrong-password-000",
@@ -442,5 +434,86 @@ describe("password lockout (H-1 applied to passwords)", () => {
     });
     expect(owner.status).toBe(200);
     await expect(owner.json()).resolves.toMatchObject({ twoFactorRedirect: true });
+  });
+});
+
+describe("second-pass review (S-1, S-8, M-3)", () => {
+  it("non-staff password failures: one audit row per window, and the same per-client lockout as staff", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const r = await authPost("/api/auth/sign-in/email", {
+        email: "not-staff-pw@example.test",
+        password: `guess-number-${i}-xyz`,
+      });
+      expect(r.status).toBe(401);
+    }
+    expect(await auditEvents("not-staff-pw@example.test")).toHaveLength(1);
+
+    // Lockout is uniform: a locked (email, client) answers 429 whether or not the address is staff.
+    const db = createDb(env.DB);
+    await createStaff("staff-pw-lock@example.test");
+    const client = "198.18.201.1";
+    const bodies: string[] = [];
+    for (const email of ["not-staff-pw@example.test", "staff-pw-lock@example.test"]) {
+      const key = await counterKey("pw-fail", email, client);
+      for (let i = 0; i < 5; i += 1) await bumpCounter(db, key, PASSWORD_FAILURE_CAP.windowSeconds);
+      const r = await app.request(
+        "/api/auth/sign-in/email",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "cf-connecting-ip": client,
+            origin: TEST_ORIGIN,
+          },
+          body: JSON.stringify({ email, password: INITIAL }),
+        },
+        env,
+      );
+      expect(r.status).toBe(429);
+      bodies.push(await r.text());
+    }
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  it("a password change ends every other session even when the client asks to keep them", async () => {
+    await createStaff("revoke-others@example.test");
+    const a = jar();
+    const b = jar();
+    for (const cookies of [a, b]) {
+      await authPost(
+        "/api/auth/sign-in/email",
+        { email: "revoke-others@example.test", password: INITIAL },
+        cookies,
+      );
+    }
+    expect((await get("/api/v1/auth/session", b)).status).toBe(200);
+    const changed = await authPost(
+      "/api/auth/change-password",
+      { currentPassword: INITIAL, newPassword: CHOSEN, revokeOtherSessions: false },
+      a,
+    );
+    expect(changed.status).toBe(200);
+    expect((await get("/api/v1/auth/session", b)).status).toBe(401);
+    expect((await get("/api/v1/auth/session", a)).status).toBe(200);
+  });
+
+  it("the fresh code for turning the authenticator off cannot be replayed at sign-in", async () => {
+    const { cookies, totpURI } = await enrol("disable-replay@example.test");
+    const code = await totpFor(totpURI);
+    // First sign-in use of the current code…
+    const other = jar();
+    await authPost(
+      "/api/auth/sign-in/email",
+      { email: "disable-replay@example.test", password: CHOSEN },
+      other,
+    );
+    expect((await authPost("/api/auth/two-factor/verify-totp", { code }, other)).status).toBe(200);
+    // …then the same code to disable is refused.
+    const replay = await authPost(
+      "/api/auth/two-factor/disable",
+      { password: CHOSEN, code },
+      cookies,
+    );
+    expect(replay.status).toBe(401);
   });
 });

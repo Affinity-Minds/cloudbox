@@ -15,6 +15,8 @@ import type { AppEnv } from "../../env";
 
 const staff = new Hono<AppEnv>();
 
+const ROLE_RANK: Record<StaffRole, number> = { read_only: 1, support: 2, admin: 3, super_admin: 4 };
+
 function listStaff(db: Db, userId?: string) {
   return db
     .select({
@@ -67,6 +69,21 @@ staff.post(
     // initial password here and hands it over out of band.
     if (!existing && !initialPassword) {
       return c.json({ error: "invalid_request", detail: "initial_password_required" }, 400);
+    }
+    // Role ranking (review S-5): nobody grants a role above their own, and only accounts strictly
+    // below the caller can have their role changed or password reset. A super admin cannot reset
+    // another super admin (and so cannot take over a peer); everyone changes their own password
+    // with /api/auth/change-password.
+    const actorRank = actor.staffRole ? ROLE_RANK[actor.staffRole] : 0;
+    if (ROLE_RANK[role] > actorRank) {
+      return c.json({ error: "forbidden", detail: "role_above_own" }, 403);
+    }
+    if (
+      existing &&
+      (existing.role !== role || initialPassword) &&
+      ROLE_RANK[existing.role] >= actorRank
+    ) {
+      return c.json({ error: "forbidden", detail: "target_not_below_caller" }, 403);
     }
 
     // The user may never have signed in: create the row (admin action). Sign-in itself never

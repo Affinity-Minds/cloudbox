@@ -1,3 +1,4 @@
+ENVIRONMENT=development
 # Local development only. Copy to .dev.vars (gitignored). Never put production values here.
 BETTER_AUTH_SECRET=dev-only-change-me-0123456789abcdef0123456789
 OTP_DEV_ECHO=1

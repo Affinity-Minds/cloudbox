@@ -14,6 +14,13 @@ import { createDb, type Db } from "../db/client";
 import * as schema from "../db/schema";
 import { sendOtpEmail } from "../email";
 import type { AppEnv, Bindings } from "../env";
+import {
+  bumpCounter,
+  COUNTER_HORIZON_SECONDS,
+  claimOnce,
+  counterKey,
+  readCounter,
+} from "./counters";
 import { rateLimit } from "./rate-limit-table";
 
 export const PRODUCTION_ORIGIN = "https://box.affinityminds.in";
@@ -36,16 +43,21 @@ export const MIN_PASSWORD_LENGTH = 12;
 export const HONEYPOT_HEADER = "x-cloudbox-hp";
 
 /**
- * OTP send caps on top of Better Auth's per-IP limit (3 / 60 s per IP or IPv6 /64), counted from
- * `AUTH_OTP_SENT` audit rows. The tight cap is per (email, client /64), so a third party cannot
- * spend the owner's quota (review H-1); the per-email ceiling only stops mail bombing. Over either
+ * OTP send cap on top of Better Auth's per-IP limit (3 / 60 s per IP or IPv6 /64), counted from
+ * `AUTH_OTP_SENT` audit rows: 5 per (email, client /64) in 15 min, so a caller can neither mail-bomb
+ * an address from one client nor spend anyone else's quota. There is deliberately no per-email
+ * ceiling: any ceiling that other clients can fill locks the owner out (reviews H-1, S-2). Over the
  * cap the caller gets the same 200 and nothing is generated, sent or recorded, for known and
  * unknown addresses alike, so the cap is neither a lockout nor an existence oracle.
  */
-export const OTP_SEND_CAPS = {
-  perEmailAndClient: { windowSeconds: 15 * 60, max: 5 },
-  perEmail: { windowSeconds: 60 * 60, max: 30 },
-};
+export const OTP_SEND_CAP = { windowSeconds: 15 * 60, max: 5 };
+
+/**
+ * Failed code sign-ins per (email, client /64) across codes (review S-6): above it every attempt
+ * fails like a wrong code without being checked, which bounds slow guessing to 10 per hour per
+ * client on top of the 3 attempts per code.
+ */
+export const OTP_FAILURE_CAP = { windowSeconds: 60 * 60, max: 10 };
 
 /** Failed verifies for an address with no user row: at most one audit row per window (review M-3). */
 export const UNKNOWN_EMAIL_FAILURE_WINDOW_SECONDS = 15 * 60;
@@ -85,33 +97,25 @@ function clientKey(
   return (source && getIP(source, options)) || "unknown";
 }
 
-async function otpSendCounts(db: Db, email: string, client: string) {
-  const now = Date.now();
-  const tightSince = new Date(now - OTP_SEND_CAPS.perEmailAndClient.windowSeconds * 1000);
-  const wideSince = new Date(now - OTP_SEND_CAPS.perEmail.windowSeconds * 1000);
+async function otpSendsFromClient(db: Db, email: string, client: string): Promise<number> {
+  const since = new Date(Date.now() - OTP_SEND_CAP.windowSeconds * 1000).toISOString();
   const { auditLog } = schema;
   const [row] = await db
-    .select({
-      total: count(),
-      fromClient:
-        sql<number>`coalesce(sum(case when ${auditLog.createdAt} > ${tightSince.toISOString()}
-        and json_extract(${auditLog.afterJson}, '$.client') = ${client} then 1 else 0 end), 0)`.mapWith(
-          Number,
-        ),
-    })
+    .select({ n: count() })
     .from(auditLog)
     .where(
       and(
         eq(auditLog.entityType, AUTH_EMAIL_ENTITY),
         eq(auditLog.entityId, email),
         eq(auditLog.eventType, "AUTH_OTP_SENT"),
-        gt(auditLog.createdAt, wideSince.toISOString()),
+        gt(auditLog.createdAt, since),
+        sql`json_extract(${auditLog.afterJson}, '$.client') = ${client}`,
       ),
     );
-  return { total: row?.total ?? 0, fromClient: row?.fromClient ?? 0 };
+  return row?.n ?? 0;
 }
 
-async function recentFailure(db: Db, email: string): Promise<boolean> {
+async function recentFailure(db: Db, email: string, method: string): Promise<boolean> {
   const since = new Date(Date.now() - UNKNOWN_EMAIL_FAILURE_WINDOW_SECONDS * 1000).toISOString();
   const { auditLog } = schema;
   const [row] = await db
@@ -123,6 +127,7 @@ async function recentFailure(db: Db, email: string): Promise<boolean> {
         eq(auditLog.entityId, email),
         eq(auditLog.eventType, "AUTH_LOGIN_FAILED"),
         gt(auditLog.createdAt, since),
+        sql`json_extract(${auditLog.afterJson}, '$.method') = ${method}`,
       ),
     );
   return (row?.n ?? 0) > 0;
@@ -143,6 +148,10 @@ const SESSION_SETUP_PATHS = new Set([
   "/two-factor/generate-backup-codes",
 ]);
 
+/** Better Auth's wrong-code answers, reused so our refusals are indistinguishable from its own. */
+const INVALID_OTP = { code: "INVALID_OTP", message: "Invalid OTP" };
+const INVALID_CODE = { code: "INVALID_CODE", message: "Invalid code" };
+
 /** Better Auth's wrong-password answer; every refused password sign-in answers with this body. */
 const INVALID_EMAIL_OR_PASSWORD = {
   code: "INVALID_EMAIL_OR_PASSWORD",
@@ -150,15 +159,16 @@ const INVALID_EMAIL_OR_PASSWORD = {
 };
 
 /**
- * Failed password sign-ins (review H-1 applied to passwords): 5 per (email, client /64) in 15 min
- * locks that client out with a 429 carrying the same body as a wrong password; the per-account
- * ceiling is abuse protection only, high enough that nobody else can lock an account out cheaply.
- * Counted from `AUTH_LOGIN_FAILED` rows; refused attempts write nothing.
+ * Failed password sign-ins per (email, client /64): 5 in 15 min locks that client out with a 429
+ * carrying the same body as a wrong password. There is no per-account ceiling: any ceiling other
+ * clients can fill would refuse the owner's correct password (review S-1). The account itself is
+ * protected by the authenticator step (Better Auth's challenge limit and account lockout) and by
+ * Better Auth's per-IP limit. Counted uniformly for every address in `counters.ts`.
  */
-export const PASSWORD_FAILURE_CAPS = {
-  perEmailAndClient: { windowSeconds: 15 * 60, max: 5 },
-  perEmail: { windowSeconds: 60 * 60, max: 100 },
-};
+export const PASSWORD_FAILURE_CAP = { windowSeconds: 15 * 60, max: 5 };
+
+/** A sign-in authenticator code is refused if already accepted within this time (review S-3). */
+const TOTP_REUSE_WINDOW_SECONDS = 120;
 
 type Actor = {
   userId: string;
@@ -169,6 +179,13 @@ type Actor = {
   /** True on the second step of a password sign-in (no session yet). */
   viaChallenge?: boolean;
 };
+
+/** Deletes every trusted-device record of a user (Better Auth keeps them as verification rows). */
+export function deleteTrustedDevices(db: Db, userId: string) {
+  return db.run(
+    sql`DELETE FROM verification WHERE identifier LIKE 'trust-device-%' AND value = ${userId}`,
+  );
+}
 
 /** Lets hooks call the instance's own endpoints (the fresh-TOTP check on disable). */
 type AuthSelf = {
@@ -190,33 +207,6 @@ async function accountByEmail(db: Db, email: string) {
     .where(eq(schema.user.email, email.toLowerCase()))
     .limit(1);
   return row ?? null;
-}
-
-async function passwordFailureCounts(db: Db, email: string, client: string) {
-  const now = Date.now();
-  const tightSince = new Date(now - PASSWORD_FAILURE_CAPS.perEmailAndClient.windowSeconds * 1000);
-  const wideSince = new Date(now - PASSWORD_FAILURE_CAPS.perEmail.windowSeconds * 1000);
-  const { auditLog } = schema;
-  const [row] = await db
-    .select({
-      total: count(),
-      fromClient:
-        sql<number>`coalesce(sum(case when ${auditLog.createdAt} > ${tightSince.toISOString()}
-        and json_extract(${auditLog.afterJson}, '$.client') = ${client} then 1 else 0 end), 0)`.mapWith(
-          Number,
-        ),
-    })
-    .from(auditLog)
-    .where(
-      and(
-        eq(auditLog.entityType, AUTH_EMAIL_ENTITY),
-        eq(auditLog.entityId, email),
-        eq(auditLog.eventType, "AUTH_LOGIN_FAILED"),
-        sql`json_extract(${auditLog.afterJson}, '$.method') = 'password'`,
-        gt(auditLog.createdAt, wideSince.toISOString()),
-      ),
-    );
-  return { total: row?.total ?? 0, fromClient: row?.fromClient ?? 0 };
 }
 
 function auditLoginFailure(
@@ -289,6 +279,8 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
   // Who is acting on a session or two-factor endpoint; set by the before hook, read by the after
   // hook. One auth instance serves one request, so this closure is per request.
   let actor: Actor | null = null;
+  // True while the disable pre-check runs its nested authenticator verification.
+  let disabling = false;
   return {
     baseURL: request.baseURL,
     basePath: "/api/auth",
@@ -306,7 +298,15 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
     },
     // Per-IP limits, stored in D1 so every isolate shares them. The emailOTP plugin's rules apply
     // to its paths (OTP send and sign-in: 3 / 60 s each); everything else under /api/auth is 60/min.
-    rateLimit: { enabled: true, storage: "database", window: 60, max: 60 },
+    rateLimit: {
+      enabled: true,
+      storage: "database",
+      window: 60,
+      max: 60,
+      // Never matches a request: it only makes Better Auth keep idle rows for an hour, so the
+      // counters in counters.ts (same table) outlive their 15/60-minute windows.
+      customRules: { "/cloudbox-counter-horizon": { window: COUNTER_HORIZON_SECONDS, max: 1 } },
+    },
     advanced: {
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
       // Session + user in one D1 round trip (the relations are in db/schema.ts).
@@ -325,11 +325,7 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             const parsed = OtpSendRequest.safeParse(ctx.body);
             if (!parsed.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
             const email = parsed.data.email;
-            const sends = await otpSendCounts(db, email, client);
-            if (
-              sends.fromClient >= OTP_SEND_CAPS.perEmailAndClient.max ||
-              sends.total >= OTP_SEND_CAPS.perEmail.max
-            ) {
+            if ((await otpSendsFromClient(db, email, client)) >= OTP_SEND_CAP.max) {
               // Same answer as a send; any code already sent stays valid (resendStrategy "reuse").
               return ctx.json({ success: true });
             }
@@ -355,16 +351,27 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             return;
           }
           case SIGN_IN_OTP_PATH: {
-            // A staff address never holds a code; refuse it exactly like a wrong code.
             const email = Email.safeParse((ctx.body as { email?: unknown } | undefined)?.email);
-            if (email.success && (await accountByEmail(db, email.data))?.staffRole) {
+            if (!email.success) return;
+            // Too many failed codes from this client for this address (S-6): fail like a wrong
+            // code, without checking it and without consuming an attempt.
+            const failures = await counterKey("otp-fail", email.data, client);
+            if (
+              (await readCounter(db, failures, OTP_FAILURE_CAP.windowSeconds)) >=
+              OTP_FAILURE_CAP.max
+            ) {
+              throw APIError.from("BAD_REQUEST", INVALID_OTP);
+            }
+            // A staff address never holds a code; refuse it exactly like a wrong code.
+            if ((await accountByEmail(db, email.data))?.staffRole) {
+              await bumpCounter(db, failures, OTP_FAILURE_CAP.windowSeconds);
               await auditLoginFailure(
                 db,
                 email.data,
                 { method: "email_otp", reason: "INVALID_OTP", client },
                 correlationId,
               );
-              throw APIError.from("BAD_REQUEST", { code: "INVALID_OTP", message: "Invalid OTP" });
+              throw APIError.from("BAD_REQUEST", INVALID_OTP);
             }
             return;
           }
@@ -372,25 +379,31 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             const body = ctx.body as { email?: unknown; password?: unknown } | undefined;
             const email = Email.safeParse(body?.email);
             if (!email.success) return; // Better Auth answers INVALID_EMAIL.
-            const failures = await passwordFailureCounts(db, email.data, client);
+            const failures = await counterKey("pw-fail", email.data, client);
             if (
-              failures.fromClient >= PASSWORD_FAILURE_CAPS.perEmailAndClient.max ||
-              failures.total >= PASSWORD_FAILURE_CAPS.perEmail.max
+              (await readCounter(db, failures, PASSWORD_FAILURE_CAP.windowSeconds)) >=
+              PASSWORD_FAILURE_CAP.max
             ) {
+              // Locked for this client only; nothing is hashed or recorded beyond the limit.
               throw APIError.from("TOO_MANY_REQUESTS", INVALID_EMAIL_OR_PASSWORD);
             }
             // Passwords are for staff only: anyone else fails exactly like a wrong password, after
-            // the same hashing work Better Auth does for an unknown user.
+            // the same hashing work Better Auth does for an unknown user (so timing does not tell
+            // staff addresses apart), and counts toward the same per-client limit.
             if (!(await accountByEmail(db, email.data))?.staffRole) {
               await ctx.context.password.hash(
                 typeof body?.password === "string" ? body.password : "",
               );
-              await auditLoginFailure(
-                db,
-                email.data,
-                { method: "password", reason: "INVALID_EMAIL_OR_PASSWORD", client },
-                correlationId,
-              );
+              await bumpCounter(db, failures, PASSWORD_FAILURE_CAP.windowSeconds);
+              // Not an account anyone can sign in to: one audit row per window, not per attempt.
+              if (!(await recentFailure(db, email.data, "password"))) {
+                await auditLoginFailure(
+                  db,
+                  email.data,
+                  { method: "password", reason: "INVALID_EMAIL_OR_PASSWORD", client },
+                  correlationId,
+                );
+              }
               throw APIError.from("UNAUTHORIZED", INVALID_EMAIL_OR_PASSWORD);
             }
             return;
@@ -428,6 +441,8 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
               message: "Choose a password different from the current one",
             });
           }
+          // A password change always ends every other session (review S-8), whatever the client sent.
+          return { context: { body: { ...(ctx.body as object), revokeOtherSessions: true } } };
         }
         if (ctx.path === TWO_FACTOR_ENABLE_PATH) {
           // Authenticators are for staff, and only after the initial password was replaced.
@@ -444,9 +459,37 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
           // Turning the second factor off needs a fresh authenticator code, not only the password.
           const code = (ctx.body as { code?: unknown } | undefined)?.code;
           if (typeof code !== "string" || !self.auth) {
-            throw APIError.from("UNAUTHORIZED", { code: "INVALID_CODE", message: "Invalid code" });
+            throw APIError.from("UNAUTHORIZED", INVALID_CODE);
           }
-          await self.auth.api.verifyTOTP({ headers: ctx.headers ?? new Headers(), body: { code } });
+          // The nested verification goes through these hooks too, including the replay claim.
+          disabling = true;
+          try {
+            await self.auth.api.verifyTOTP({
+              headers: ctx.headers ?? new Headers(),
+              body: { code },
+            });
+          } finally {
+            disabling = false;
+          }
+        }
+        if (ctx.path === TOTP_VERIFY_PATH || ctx.path === BACKUP_CODE_VERIFY_PATH) {
+          const body = (ctx.body ?? {}) as { code?: unknown };
+          // A sign-in or step-up code that was already accepted is refused like a wrong one (S-3).
+          if (
+            ctx.path === TOTP_VERIFY_PATH &&
+            actor &&
+            (actor.viaChallenge || disabling) &&
+            typeof body.code === "string" &&
+            (await readCounter(
+              db,
+              await counterKey("totp-used", actor.userId, body.code),
+              TOTP_REUSE_WINDOW_SECONDS,
+            )) > 0
+          ) {
+            throw APIError.from("UNAUTHORIZED", INVALID_CODE);
+          }
+          // CloudBox never trusts a device to skip the authenticator (review S-4).
+          return { context: { body: { ...body, trustDevice: false } } };
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
@@ -468,19 +511,26 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             const body = ctx.body as { email?: unknown } | undefined;
             const parsedEmail = Email.safeParse(body?.email);
             const email = parsedEmail.success ? parsedEmail.data : "invalid";
+            if (parsedEmail.success) {
+              await bumpCounter(
+                db,
+                await counterKey("otp-fail", email, client),
+                OTP_FAILURE_CAP.windowSeconds,
+              );
+            }
             // An address with no user row can only ever fail; record it once per window, not per
             // attempt, so anonymous callers cannot grow the append-only log without bound (M-3).
             if (
               (!parsedEmail.success ||
                 !(await ctx.context.internalAdapter.findUserByEmail(email))) &&
-              (await recentFailure(db, email))
+              (await recentFailure(db, email, "email_otp"))
             ) {
               return;
             }
             await auditLoginFailure(
               db,
               email,
-              { method: "email_otp", reason: errorCode(returned) },
+              { method: "email_otp", reason: errorCode(returned), client },
               correlationId,
             );
             return;
@@ -499,6 +549,13 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             if (failed) {
               const email = Email.safeParse((ctx.body as { email?: unknown } | undefined)?.email);
               if (email.success) {
+                await bumpCounter(
+                  db,
+                  await counterKey("pw-fail", email.data, client),
+                  PASSWORD_FAILURE_CAP.windowSeconds,
+                );
+                // Only staff reach this point (everyone else is refused before the check), so a
+                // failure is for an account that exists: audited per attempt.
                 await auditLoginFailure(
                   db,
                   email.data,
@@ -527,6 +584,21 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
               });
               return;
             }
+            const code = (ctx.body as { code?: unknown } | undefined)?.code;
+            if (
+              method === "totp" &&
+              (actor.viaChallenge || disabling) &&
+              typeof code === "string" &&
+              !(await claimOnce(
+                db,
+                await counterKey("totp-used", actor.userId, code),
+                TOTP_REUSE_WINDOW_SECONDS,
+              ))
+            ) {
+              // Lost a race with a concurrent use of the same code: undo the session it created.
+              if (signedIn) await ctx.context.internalAdapter.deleteSession(signedIn.session.token);
+              throw APIError.from("UNAUTHORIZED", INVALID_CODE);
+            }
             if (actor.viaChallenge) {
               await auditLoginSuccess(
                 db,
@@ -552,6 +624,7 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             .update(schema.staffMembers)
             .set({ mustChangePassword: false })
             .where(eq(schema.staffMembers.userId, actor.userId));
+          await deleteTrustedDevices(db, actor.userId);
           await auditUserEvent(db, "AUTH_PASSWORD_CHANGED", actor.userId, null, correlationId);
         } else if (ctx.path === TWO_FACTOR_ENABLE_PATH) {
           await auditUserEvent(
