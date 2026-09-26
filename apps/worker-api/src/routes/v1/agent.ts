@@ -31,6 +31,8 @@ import { bearerToken, requireDevice, resolveDevice } from "../../devices/require
 import { currentEntitlementForDevice } from "../../entitlement/service";
 import type { AppDevice, AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
+import { activateLicense } from "../../onboarding/activation";
 
 const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
 
@@ -216,7 +218,26 @@ agent.post(
 
     const outcome = await enrollDevice(db, c.req.valid("json"));
     if (!outcome.ok) return c.json({ error: outcome.error }, outcome.status);
-    return c.json(outcome.response, 201);
+    // Activation: redeem the tenant's pending plan (first server only) and issue this device's
+    // entitlement. The device is enrolled whatever the licence outcome.
+    const { deviceId, tenantId } = outcome.response;
+    const licence = await activateLicense(
+      c.env,
+      db,
+      { id: deviceId, tenantId },
+      { source: "activation", correlationId: c.var.correlationId },
+    ).catch((error: unknown) => {
+      console.error("enroll: activation failed", deviceId, error);
+      return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
+    });
+    return c.json(
+      {
+        ...outcome.response,
+        ...(licence.licenseState ? { licenseState: licence.licenseState } : {}),
+        ...(licence.message ? { message: licence.message } : {}),
+      },
+      201,
+    );
   },
 );
 
@@ -228,8 +249,25 @@ agent.post(
   }),
   async (c) => {
     const { health } = c.req.valid("json");
-    const response = await recordHeartbeat(createDb(c.env.DB), c.var.device, health);
-    return c.json(response);
+    const db = createDb(c.env.DB);
+    const response = await recordHeartbeat(db, c.var.device, health);
+    if (response.entitlementGeneration !== null) {
+      return c.json({ ...response, licenseState: "licensed" as const });
+    }
+    // No live entitlement: redeem/issue if the tenant's plan allows it (WT-14 auto-issuance).
+    const licence = await activateLicense(c.env, db, c.var.device, {
+      source: "auto",
+      correlationId: c.var.correlationId,
+    }).catch((error: unknown) => {
+      console.error("heartbeat: auto-issuance failed", c.var.device.id, error);
+      return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
+    });
+    return c.json({
+      ...response,
+      entitlementGeneration: licence.generation,
+      ...(licence.licenseState ? { licenseState: licence.licenseState } : {}),
+      ...(licence.message ? { message: licence.message } : {}),
+    });
   },
 );
 

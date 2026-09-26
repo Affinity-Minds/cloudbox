@@ -46,6 +46,11 @@ function uniqueCode(): string {
   return `wt13-plan-${Date.now().toString(36)}${seq}`;
 }
 
+function uniqueEmail(): string {
+  seq += 1;
+  return `wt13-tenant-${Date.now().toString(36)}${seq}@example.test`;
+}
+
 async function createPlan(overrides: Record<string, unknown> = {}) {
   const body = {
     code: uniqueCode(),
@@ -185,6 +190,7 @@ describe("plan lifecycle: retire and reactivate", () => {
 
     const response = await call("POST", "/tenants", {
       displayName: "Retired Plan Tenant",
+      primaryContactEmail: uniqueEmail(),
       planCode: plan.code,
     });
     expect(response.status).toBe(409);
@@ -251,6 +257,7 @@ describe("plan lifecycle: retire and reactivate", () => {
 
     const createResponse = await call("POST", "/tenants", {
       displayName: "Reactivated Plan Tenant",
+      primaryContactEmail: uniqueEmail(),
       planCode: plan.code,
     });
     expect(createResponse.status).toBe(201);
@@ -344,6 +351,7 @@ describe("invalid timezone (server-side IANA validation)", () => {
   it("rejects an invalid timezone on tenant create with 400 invalid_timezone", async () => {
     const response = await call("POST", "/tenants", {
       displayName: "Bad TZ Tenant",
+      primaryContactEmail: uniqueEmail(),
       timezone: "Not/A_Real_Zone",
     });
     expect(response.status).toBe(400);
@@ -353,6 +361,7 @@ describe("invalid timezone (server-side IANA validation)", () => {
   it("accepts a real IANA zone on create", async () => {
     const response = await call("POST", "/tenants", {
       displayName: "Good TZ Tenant",
+      primaryContactEmail: uniqueEmail(),
       timezone: "Asia/Kolkata",
     });
     expect(response.status).toBe(201);

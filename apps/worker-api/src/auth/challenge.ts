@@ -31,7 +31,7 @@ const cooldownKey = (email: string) => counterKey("otp-cooldown", email);
  * single use; the hostname the challenge was solved on must be ours; pre-clearance stays off).
  */
 export async function verifyTurnstile(
-  env: Pick<Bindings, "TURNSTILE_SECRET_KEY">,
+  env: Pick<Bindings, "TURNSTILE_SECRET_KEY" | "ENVIRONMENT">,
   token: string | undefined,
   request: { host: string; ip: string | null },
 ): Promise<boolean> {
@@ -42,8 +42,17 @@ export async function verifyTurnstile(
   if (request.ip) form.append("remoteip", request.ip);
   try {
     const response = await fetch(SITEVERIFY, { method: "POST", body: form });
-    const outcome = (await response.json()) as { success?: boolean; hostname?: string };
-    return outcome.success === true && outcome.hostname === request.host;
+    const outcome = (await response.json()) as {
+      success?: boolean;
+      hostname?: string;
+      metadata?: { result_with_testing_key?: boolean };
+    };
+    // Cloudflare's published testing keys always answer hostname "example.com"; outside
+    // production they stand in for a solved challenge (local demos, WT-14). Production never
+    // accepts them: there the hostname must be ours.
+    const testingKey =
+      env.ENVIRONMENT !== "production" && outcome.metadata?.result_with_testing_key === true;
+    return outcome.success === true && (outcome.hostname === request.host || testingKey);
   } catch (error) {
     console.error("turnstile siteverify failed", error);
     return false;

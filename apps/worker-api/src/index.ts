@@ -11,6 +11,7 @@ import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
 import { apiVersion, correlationId } from "./http";
+import { onboardingAuth } from "./onboarding/auth-routes";
 import { serveAsset } from "./ops-shell";
 import v1 from "./routes/v1";
 import { logoutFor } from "./routes/v1/auth";
@@ -59,6 +60,11 @@ const CUSTOMER_AUTH_ROUTES = new Set([
   "POST /api/auth/sign-in/email-otp", // /login, code step
   "POST /api/auth/sign-out", // routed to the audited logout below
   "GET /api/auth/get-session",
+  // WT-14 (ADR 0011), served by src/onboarding/auth-routes.ts through the same customer instance:
+  "POST /api/auth/start/send-code", // /start: self-service, Turnstile always
+  "POST /api/auth/start/verify",
+  "POST /api/auth/connect/send-code", // CloudBox Connect: Tenant ID + email + code
+  "POST /api/auth/connect/verify",
 ]);
 const STAFF_AUTH_ROUTES = new Set([
   "POST /api/ops/auth/sign-in/email", // <ops>/login, password step
@@ -76,10 +82,18 @@ const EMAIL_BODY_PATHS = new Set([
   "/api/auth/email-otp/send-verification-otp",
   "/api/auth/sign-in/email-otp",
   "/api/ops/auth/sign-in/email",
+  "/api/auth/start/send-code",
+  "/api/auth/start/verify",
+  "/api/auth/connect/send-code",
+  "/api/auth/connect/verify",
 ]);
+// The start paths are not here: they require a Turnstile token on every call (a stronger rule),
+// and a token is single use, so the step-up must not spend it first.
 const CUSTOMER_CODE_PATHS = new Set([
   "/api/auth/email-otp/send-verification-otp",
   "/api/auth/sign-in/email-otp",
+  "/api/auth/connect/send-code",
+  "/api/auth/connect/verify",
 ]);
 
 /** The request Better Auth sees: the original, or one whose `email` was normalised (U-1). */
@@ -135,6 +149,8 @@ app.post(
   guardFor("staff", () => true, { allowSetupPending: true }),
   logoutFor("staff"),
 );
+// Self-service start and Connect sign-in (WT-14): exact paths, before the Better Auth catch-all.
+app.route("/api/auth", onboardingAuth);
 app.on(
   ["GET", "POST"],
   "/api/auth/*",

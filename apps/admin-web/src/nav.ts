@@ -9,6 +9,7 @@ import {
   Server,
   Settings,
   Tag,
+  Ticket,
 } from "lucide-react";
 
 export type NavKey =
@@ -18,6 +19,7 @@ export type NavKey =
   | "enrollment"
   | "subscriptions"
   | "plans"
+  | "licences"
   | "audit"
   | "settings";
 
@@ -31,6 +33,7 @@ export type NavItem = {
     | "/enrollment"
     | "/subscriptions"
     | "/plans"
+    | "/licences"
     | "/audit"
     | "/settings";
   icon: LucideIcon;
@@ -45,6 +48,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: "fleet", title: "Fleet", to: "/fleet", icon: Server },
       { key: "enrollment", title: "Enrollment", to: "/enrollment", icon: KeyRound },
       { key: "subscriptions", title: "Subscriptions", to: "/subscriptions", icon: CreditCard },
+      { key: "licences", title: "Licence keys", to: "/licences", icon: Ticket }, // WT-14
     ],
   },
   {

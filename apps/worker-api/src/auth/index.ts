@@ -75,6 +75,15 @@ export type AuthRequestContext = {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Origin of the incoming request. Better Auth would infer the same; passing it is explicit. */
   baseURL?: string;
+  /**
+   * Customer instance only (WT-14, ADR 0011). `start`: the self-service start path
+   * (`/api/auth/start/*`), the one flow in which a verified code creates a customer identity for an
+   * address that has none (audited `CUSTOMER_SIGNUP`); always behind Turnstile. `connect`: CloudBox
+   * Connect sign-in (`/api/auth/connect/*`) for `connectTenantId`, after the membership check.
+   * Absent: the closed `/login` flow, unchanged.
+   */
+  flow?: "start" | "connect";
+  connectTenantId?: string;
 };
 
 /**
@@ -348,6 +357,9 @@ function surfaceOptions(
   let actor: Actor | null = null;
   // True while the disable pre-check runs its nested authenticator verification.
   let disabling = false;
+  // Start flow (WT-14): whether the address already had a customer identity before this sign-in.
+  let startExisting = true;
+  const flow = surface === "customer" ? request.flow : undefined;
 
   /**
    * A failed customer code check: counts against the client (S-6) and the account budget (T-1),
@@ -421,7 +433,8 @@ function surfaceOptions(
             // send (with the client), so the caps above bound these rows too. Staff identities are
             // a separate system and are never consulted here.
             const account = await customerByEmail(db, email);
-            if (!account) {
+            // The start flow (WT-14) is the one exception: behind Turnstile, it sends the code.
+            if (!account && flow !== "start") {
               const record = audit(db, {
                 eventType: "AUTH_OTP_SENT",
                 entityType: AUTH_EMAIL_ENTITY,
@@ -456,6 +469,7 @@ function surfaceOptions(
             ) {
               throw APIError.from("BAD_REQUEST", INVALID_OTP);
             }
+            if (flow === "start") startExisting = Boolean(await customerByEmail(db, email.data));
             const refuse = async (): Promise<never> => {
               await recordOtpFailure(email.data, "INVALID_OTP", client);
               throw APIError.from("BAD_REQUEST", INVALID_OTP);
@@ -611,9 +625,30 @@ function surfaceOptions(
               await auditLoginSuccess(
                 db,
                 signedIn.user.id,
-                { method: "email_otp", sessionId: signedIn.session.id },
+                {
+                  method: "email_otp",
+                  sessionId: signedIn.session.id,
+                  ...(flow === "connect"
+                    ? { surface: "connect", tenantId: request.connectTenantId ?? null }
+                    : flow === "start"
+                      ? { surface: "start" }
+                      : {}),
+                },
                 correlationId,
               );
+              if (flow === "start" && !startExisting) {
+                // The only customer identity not created by an admin (ADR 0011).
+                await audit(db, {
+                  eventType: "CUSTOMER_SIGNUP",
+                  entityType: "user",
+                  entityId: signedIn.user.id,
+                  actor: { type: "user", id: signedIn.user.id },
+                  before: null,
+                  after: { email: signedIn.user.email, client, source: "self_onboarding" },
+                  correlationId,
+                  source: "self_onboarding",
+                });
+              }
               return;
             }
             const parsedEmail = Email.safeParse(
@@ -776,8 +811,9 @@ export function customerAuthOptions(env: Bindings, request: AuthRequestContext =
     plugins: [
       emailOTP({
         otpLength: 6,
-        // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts).
-        disableSignUp: true,
+        // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts),
+        // except on the Turnstile-gated start path (WT-14, ADR 0011: `flow: "start"`).
+        disableSignUp: request.flow !== "start",
         expiresIn: 5 * 60,
         // Only clients that requested the code can spend these (T-2): anyone else's wrong guess is
         // checked without consuming an attempt (before hook).

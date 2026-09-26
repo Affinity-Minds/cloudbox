@@ -1,5 +1,6 @@
 // Owner: WT-1. The customer surface's own router (owner decision: staff and customer surfaces are
-// completely separate). Routes: /login (email → code), /portal (WT-2's tenant switch), / → /portal.
+// completely separate). Routes: /login (email → code), /start (WT-14 self-service onboarding),
+// /portal (WT-2's tenant switch + WT-14's tenant cards), / → /portal.
 // The staff console is a different router, mounted only on documents the Worker marks as the ops
 // shell (apps/worker-api/src/ops-shell.ts); nothing here links to it.
 import type { QueryClient } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import { myTenantsQuery } from "@/api/tenants";
 import { requireCustomerSession } from "@/auth/session";
 import { CustomerLoginPage } from "./customer-login";
 import { PortalPage } from "./portal-page";
+import { StartPage } from "./start-page";
 
 function NotFound() {
   return (
@@ -45,6 +47,13 @@ const login = createRoute({
   component: CustomerLoginPage,
 });
 
+// WT-14 (ADR 0011): self-service onboarding. Public; the page itself asks for email + code.
+const start = createRoute({
+  getParentRoute: () => root,
+  path: "/start",
+  component: StartPage,
+});
+
 const portal = createRoute({
   getParentRoute: () => root,
   path: "/portal",
@@ -59,7 +68,7 @@ const portal = createRoute({
 
 export function createCustomerRouter(queryClient: QueryClient) {
   return createRouter({
-    routeTree: root.addChildren([index, login, portal]),
+    routeTree: root.addChildren([index, login, start, portal]),
     context: { queryClient },
     defaultPreload: "intent",
     scrollRestoration: true,

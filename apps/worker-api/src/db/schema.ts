@@ -519,11 +519,12 @@ export const subscriptions = sqliteTable(
     planCode: text("plan_code")
       .notNull()
       .references(() => plans.code),
+    // `pending` (migration 0010, WT-14): plan assigned, no dates until the first server activates.
     status: text("status", {
-      enum: ["trial", "active", "past_due", "suspended", "cancelled"],
+      enum: ["pending", "trial", "active", "past_due", "suspended", "cancelled"],
     }).notNull(),
-    validFrom: text("valid_from").notNull(),
-    validUntil: text("valid_until").notNull(),
+    validFrom: text("valid_from"),
+    validUntil: text("valid_until"),
     maxManagedUsers: integer("max_managed_users").notNull(),
     featuresJson: text("features_json").notNull(),
     offlineGraceDays: integer("offline_grace_days").notNull(),
@@ -535,7 +536,11 @@ export const subscriptions = sqliteTable(
     index("subscriptions_tenant_status_idx").on(table.tenantId, table.status),
     check(
       "subscriptions_status_check",
-      sql`${table.status} IN ('trial', 'active', 'past_due', 'suspended', 'cancelled')`,
+      sql`${table.status} IN ('pending', 'trial', 'active', 'past_due', 'suspended', 'cancelled')`,
+    ),
+    check(
+      "subscriptions_dates_check",
+      sql`${table.status} = 'pending' OR (${table.validFrom} IS NOT NULL AND ${table.validUntil} IS NOT NULL)`,
     ),
   ],
 );

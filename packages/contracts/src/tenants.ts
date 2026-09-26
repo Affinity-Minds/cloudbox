@@ -82,7 +82,8 @@ export type TenantsScreen = z.infer<typeof TenantsScreen>;
 export const CreateTenantRequest = z.object({
   displayName: z.string().trim().min(1).max(120),
   legalName: z.string().trim().max(200).optional(),
-  primaryContactEmail: Email.optional(),
+  /** Required: becomes tenant member 1 (standing `owner`) atomically with tenant creation. */
+  primaryContactEmail: Email,
   supportContactEmail: Email.optional(),
   billingContactEmail: Email.optional(),
   timezone: z.string().min(1).max(64).optional(),

@@ -111,8 +111,8 @@ const LEGACY_ALIAS_PAIRS: [string, string][] = [
 /** Every other name this zone is also known by (either direction of the pairs above). */
 const ZONE_SYNONYMS: Record<string, string[]> = {};
 for (const [a, b] of LEGACY_ALIAS_PAIRS) {
-  (ZONE_SYNONYMS[a] ??= []).push(b);
-  (ZONE_SYNONYMS[b] ??= []).push(a);
+  ZONE_SYNONYMS[a] = [...(ZONE_SYNONYMS[a] ?? []), b];
+  ZONE_SYNONYMS[b] = [...(ZONE_SYNONYMS[b] ?? []), a];
 }
 
 /**
@@ -126,9 +126,7 @@ export function timezoneMatches(zone: string, query: string): boolean {
   if (zone.toLowerCase().includes(q)) return true;
   if (ZONE_SYNONYMS[zone]?.some((synonym) => synonym.toLowerCase().includes(q))) return true;
   const aliasKeys = [zone, ...(ZONE_SYNONYMS[zone] ?? [])];
-  return aliasKeys.some((key) =>
-    TIMEZONE_ABBREVIATIONS[key]?.some((alias) => alias.includes(q)),
-  );
+  return aliasKeys.some((key) => TIMEZONE_ABBREVIATIONS[key]?.some((alias) => alias.includes(q)));
 }
 
 /** e.g. "GMT+5:30", from the runtime's own IANA database — never hand-maintained. */
