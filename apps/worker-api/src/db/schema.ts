@@ -346,15 +346,30 @@ export const rolePermissions = sqliteTable(
 
 // ─── Plans ────────────────────────────────────────────────────────────────────────────────────
 
-export const plans = sqliteTable("plans", {
-  code: text("code").primaryKey(),
-  name: text("name").notNull(),
-  maxDevices: integer("max_devices").notNull(),
-  maxManagedUsers: integer("max_managed_users").notNull(),
-  featuresJson: text("features_json").notNull(),
-  offlineGraceDays: integer("offline_grace_days").notNull(),
-  renewalWarningDays: integer("renewal_warning_days").notNull(),
-});
+export const PLAN_STATUSES = ["active", "retired"] as const;
+
+export const plans = sqliteTable(
+  "plans",
+  {
+    code: text("code").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    maxDevices: integer("max_devices").notNull(),
+    maxManagedUsers: integer("max_managed_users").notNull(),
+    featuresJson: text("features_json").notNull(),
+    offlineGraceDays: integer("offline_grace_days").notNull(),
+    renewalWarningDays: integer("renewal_warning_days").notNull(),
+    status: text("status").notNull().default("active"),
+    /** Days a redeemed subscription runs (owner addition; redemption semantics are WT-14's). */
+    termDays: integer("term_days").notNull().default(365),
+    createdAt: createdAt(),
+    updatedAt: text("updated_at").notNull().default(isoNow),
+  },
+  (table) => [
+    check("plans_status_check", sql`${table.status} IN ('active', 'retired')`),
+    check("plans_term_days_check", sql`${table.termDays} BETWEEN 1 AND 3650`),
+  ],
+);
 
 // ─── Tenancy ──────────────────────────────────────────────────────────────────────────────────
 

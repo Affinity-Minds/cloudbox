@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AuditEntry } from "./screens";
+import { AuditEntry } from "./common";
 
 export const DeviceStatus = z.enum(["enrolled", "revoked", "transferred"]);
 export type DeviceStatus = z.infer<typeof DeviceStatus>;

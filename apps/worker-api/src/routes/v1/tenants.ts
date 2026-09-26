@@ -8,11 +8,44 @@ import { Hono } from "hono";
 import { audit } from "../../audit";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
-import { devices, subscriptions, tenants } from "../../db/schema";
+import { devices, plans, subscriptions, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
 const router = new Hono<AppEnv>();
+
+/**
+ * A plan retired by the plan designer (WT-13) cannot be chosen for a new tenant, or set on an
+ * existing one by PATCH — existing subscriptions on a retired plan are untouched (see
+ * `subscriptions.ts`'s own `plan_retired` check on new subscriptions).
+ */
+async function isPlanRetired(db: Db, planCode: string): Promise<boolean> {
+  const [row] = await db
+    .select({ status: plans.status })
+    .from(plans)
+    .where(eq(plans.code, planCode));
+  return row?.status === "retired";
+}
+
+/**
+ * `Intl.supportedValuesOf` is available in Workers (workerd ships full ICU); guarded anyway with a
+ * `DateTimeFormat` probe (throws `RangeError` on an unknown zone) in case a runtime lacks it.
+ */
+function isValidTimezone(timezone: string): boolean {
+  try {
+    if (typeof Intl.supportedValuesOf === "function") {
+      if (Intl.supportedValuesOf("timeZone").includes(timezone)) return true;
+    }
+  } catch {
+    // fall through to the probe below
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Atomically allocates the next `CBX-00001`-style code from the `settings.tenants.next_code`
@@ -45,6 +78,14 @@ router.post(
   async (c) => {
     const input = c.req.valid("json");
     const db = createDb(c.env.DB);
+
+    if (input.timezone && !isValidTimezone(input.timezone)) {
+      return c.json({ error: "invalid_timezone" }, 400);
+    }
+    if (input.planCode && (await isPlanRetired(db, input.planCode))) {
+      return c.json({ error: "plan_retired" }, 409);
+    }
+
     const now = nowIso();
     const id = newId("tenant");
     const publicCode = await allocateNextTenantCode(db, now);
@@ -97,6 +138,13 @@ router.patch(
 
     const before = await db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
     if (!before) return c.json({ error: "not_found" }, 404);
+
+    if (input.timezone !== undefined && !isValidTimezone(input.timezone)) {
+      return c.json({ error: "invalid_timezone" }, 400);
+    }
+    if (input.planCode !== undefined && (await isPlanRetired(db, input.planCode))) {
+      return c.json({ error: "plan_retired" }, 409);
+    }
 
     const now = nowIso();
     const patch: Partial<typeof tenants.$inferInsert> = { updatedAt: now };

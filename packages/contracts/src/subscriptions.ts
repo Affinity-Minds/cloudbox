@@ -6,16 +6,83 @@ export type Feature = z.infer<typeof Feature>;
 export const SubscriptionStatus = z.enum(["trial", "active", "past_due", "suspended", "cancelled"]);
 export type SubscriptionStatus = z.infer<typeof SubscriptionStatus>;
 
+/** Plan lifecycle (WT-13, migration 0009). A plan is never deleted, only retired. */
+export const PlanStatus = z.enum(["active", "retired"]);
+export type PlanStatus = z.infer<typeof PlanStatus>;
+
+/** Immutable once created; a lowercase slug. */
+export const PlanCode = z.string().regex(/^[a-z0-9-]{3,32}$/);
+
 export const Plan = z.object({
   code: z.string(),
   name: z.string(),
+  description: z.string().nullable(),
   maxDevices: z.number().int(),
   maxManagedUsers: z.number().int(),
   features: z.array(Feature),
   offlineGraceDays: z.number().int(),
   renewalWarningDays: z.number().int(),
+  status: PlanStatus,
+  /**
+   * Days a redeemed subscription runs (owner addition, mid-slice). Redemption semantics — a
+   * subscription is `pending` until the tenant's server is activated, at which point
+   * `valid_from = now`, `valid_until = now + term_days`, and the device licence is issued — are
+   * WT-14's, in a sibling worktree. This slice only carries the column and its UI.
+   */
+  termDays: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 export type Plan = z.infer<typeof Plan>;
+
+const PlanFields = {
+  name: z.string().min(1).max(120),
+  description: z.string().max(2000).nullable().optional(),
+  maxDevices: z.number().int().min(1),
+  maxManagedUsers: z.number().int().min(1),
+  features: z.array(Feature),
+  offlineGraceDays: z.number().int().min(0).max(90),
+  renewalWarningDays: z.number().int().min(1).max(365),
+  termDays: z.number().int().min(1).max(3650),
+};
+
+/** `POST /api/v1/plans`. `code` is immutable — never accepted again after create. */
+export const CreatePlanRequest = z.object({
+  code: PlanCode,
+  ...PlanFields,
+});
+export type CreatePlanRequest = z.infer<typeof CreatePlanRequest>;
+
+/** `PATCH /api/v1/plans/:code`. Every field but `code` and `status` (retire/reactivate own that). */
+export const UpdatePlanRequest = z
+  .object({
+    name: PlanFields.name.optional(),
+    description: PlanFields.description,
+    maxDevices: PlanFields.maxDevices.optional(),
+    maxManagedUsers: PlanFields.maxManagedUsers.optional(),
+    features: PlanFields.features.optional(),
+    offlineGraceDays: PlanFields.offlineGraceDays.optional(),
+    renewalWarningDays: PlanFields.renewalWarningDays.optional(),
+    termDays: PlanFields.termDays.optional(),
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: "at least one field",
+  });
+export type UpdatePlanRequest = z.infer<typeof UpdatePlanRequest>;
+
+/** Row on `GET /api/v1/screens/plans`. */
+export const PlanListItem = Plan.extend({
+  /** Subscriptions (any status) currently on this plan. */
+  subscriptionCount: z.number().int(),
+});
+export type PlanListItem = z.infer<typeof PlanListItem>;
+
+/** `GET /api/v1/screens/plans`. */
+export const PlansScreen = z.object({
+  serverTime: z.string(),
+  items: z.array(PlanListItem),
+});
+export type PlansScreen = z.infer<typeof PlansScreen>;
 
 export const Subscription = z.object({
   id: z.string(),

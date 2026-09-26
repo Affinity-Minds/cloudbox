@@ -5,11 +5,13 @@ import { CreateTenantRequest, type Tenant, TenantStatus } from "@cloudbox/contra
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { describeError } from "@/api/client";
 import { createTenant, updateTenant } from "@/api/tenants";
+import { PlanSelect } from "@/components/plan-select";
+import { TimezoneSelect } from "@/components/timezone-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +33,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { browserTimezone } from "@/lib/timezones";
 
 // A blank optional field posts as "" from an uncontrolled input, not undefined; CreateTenantRequest's
 // `.optional()` only accepts undefined, so an empty (never-touched) field would otherwise fail
@@ -54,7 +57,7 @@ type FormValues = z.input<typeof FormSchema>;
 const EDITABLE_STATUSES = TenantStatus.exclude(["archived"]).options;
 
 function toFormValues(tenant?: Tenant): FormValues {
-  if (!tenant) return { displayName: "" };
+  if (!tenant) return { displayName: "", timezone: browserTimezone() };
   return {
     displayName: tenant.displayName,
     legalName: tenant.legalName ?? undefined,
@@ -171,13 +174,34 @@ export function TenantFormSheet({
                 />
               </Field>
               <div className="grid grid-cols-2 gap-3">
-                <Field>
+                <Field data-invalid={form.formState.errors.timezone ? true : undefined}>
                   <FieldLabel htmlFor="timezone">Timezone</FieldLabel>
-                  <Input id="timezone" placeholder="UTC" {...form.register("timezone")} />
+                  <Controller
+                    control={form.control}
+                    name="timezone"
+                    render={({ field }) => (
+                      <TimezoneSelect
+                        id="timezone"
+                        value={(field.value as string | undefined) ?? ""}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
+                  <FieldError errors={[form.formState.errors.timezone]} />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="planCode">Plan code</FieldLabel>
-                  <Input id="planCode" placeholder="cloudbox-6" {...form.register("planCode")} />
+                  <FieldLabel htmlFor="planCode">Plan</FieldLabel>
+                  <Controller
+                    control={form.control}
+                    name="planCode"
+                    render={({ field }) => (
+                      <PlanSelect
+                        id="planCode"
+                        value={field.value as string | null | undefined}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">

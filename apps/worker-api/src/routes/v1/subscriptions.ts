@@ -1,18 +1,23 @@
-// Owner: WT-5. Module `subscriptions`: three routers because its paths span three prefixes.
-// GET /plans, GET|POST /tenants/:tenantId/subscriptions, PATCH /subscriptions/:id.
-// Screens live in routes/v1/screens/subscriptions.ts. Prefixes nest: middleware per route only.
+// Owner: WT-5 (plans/subscriptions/entitlement screens), plan lifecycle owner: WT-13.
+// Module `subscriptions`: three routers because its paths span three prefixes.
+// GET|POST /plans, PATCH|POST retire|reactivate /plans/:code, GET|POST /tenants/:tenantId/subscriptions,
+// PATCH /subscriptions/:id. Screens live in routes/v1/screens/{subscriptions,plans}.ts.
+// Prefixes nest: middleware per route only.
 import {
+  CreatePlanRequest,
   CreateSubscriptionRequest,
   type Feature,
   type Plan,
   type Subscription,
+  UpdatePlanRequest,
   UpdateSubscriptionRequest,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, ne } from "drizzle-orm";
-import { Hono } from "hono";
-import type { ZodType } from "zod";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { type Context, Hono } from "hono";
+import { type ZodType, z } from "zod";
 import { audit } from "../../audit";
+import { forbidden, getStaffPrincipal } from "../../auth/middleware";
 import { requirePermission } from "../../authz/permissions";
 import { createDb } from "../../db/client";
 import { plans as plansTable, subscriptions as subscriptionsTable, tenants } from "../../db/schema";
@@ -42,11 +47,16 @@ type SubscriptionRow = typeof subscriptionsTable.$inferSelect;
 export const toPlan = (row: PlanRow): Plan => ({
   code: row.code,
   name: row.name,
+  description: row.description ?? null,
   maxDevices: row.maxDevices,
   maxManagedUsers: row.maxManagedUsers,
   features: JSON.parse(row.featuresJson) as Feature[],
   offlineGraceDays: row.offlineGraceDays,
   renewalWarningDays: row.renewalWarningDays,
+  status: row.status as Plan["status"],
+  termDays: row.termDays,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
 });
 
 export const toSubscription = (row: SubscriptionRow): Subscription => ({
@@ -70,10 +80,180 @@ const isoOrder = (from: string, until: string) => Date.parse(from) < Date.parse(
 
 export const plans = new Hono<AppEnv>();
 
-plans.get("/", requirePermission("subscription.view"), async (c) => {
-  const rows = await createDb(c.env.DB).select().from(plansTable).orderBy(plansTable.code);
+const PlansQuery = z.object({ include: z.enum(["retired"]).optional() });
+
+// GET /: active plans only, subscription.view (unchanged). ?include=retired additionally lists
+// retired plans, and needs subscription.manage — a plan designer decision, not just a viewer one.
+plans.get("/", requirePermission("subscription.view"), validate("query", PlansQuery), async (c) => {
+  const { include } = c.req.valid("query");
+  const db = createDb(c.env.DB);
+  if (include === "retired") {
+    const principal = await getStaffPrincipal(c);
+    if (!principal?.permissions.has("subscription.manage")) return forbidden(c);
+    const rows = await db.select().from(plansTable).orderBy(plansTable.code);
+    return c.json({ items: rows.map(toPlan) });
+  }
+  const rows = await db
+    .select()
+    .from(plansTable)
+    .where(eq(plansTable.status, "active"))
+    .orderBy(plansTable.code);
   return c.json({ items: rows.map(toPlan) });
 });
+
+plans.post(
+  "/",
+  requirePermission("subscription.manage"),
+  validate("json", CreatePlanRequest),
+  async (c) => {
+    const input = c.req.valid("json");
+    const db = createDb(c.env.DB);
+
+    const [existing] = await db
+      .select({ code: plansTable.code })
+      .from(plansTable)
+      .where(eq(plansTable.code, input.code));
+    if (existing) return c.json({ error: "conflict", detail: "code already in use" }, 409);
+
+    const now = nowIso();
+    const row: PlanRow = {
+      code: input.code,
+      name: input.name,
+      description: input.description ?? null,
+      maxDevices: input.maxDevices,
+      maxManagedUsers: input.maxManagedUsers,
+      featuresJson: JSON.stringify(input.features),
+      offlineGraceDays: input.offlineGraceDays,
+      renewalWarningDays: input.renewalWarningDays,
+      status: "active",
+      termDays: input.termDays,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const created = toPlan(row);
+
+    await db.batch([
+      db.insert(plansTable).values(row),
+      audit(db, {
+        eventType: "PLAN_CREATED",
+        entityType: "plan",
+        entityId: row.code,
+        actor: { type: "user", id: c.var.user.id },
+        before: null,
+        after: created,
+        correlationId: c.var.correlationId,
+        source: "api",
+      }),
+    ]);
+    return c.json({ plan: created }, 201);
+  },
+);
+
+plans.patch(
+  "/:code",
+  requirePermission("subscription.manage"),
+  validate("json", UpdatePlanRequest),
+  async (c) => {
+    const code = c.req.param("code");
+    const input = c.req.valid("json");
+    const db = createDb(c.env.DB);
+
+    const [current] = await db.select().from(plansTable).where(eq(plansTable.code, code));
+    if (!current) return c.json({ error: "not_found" }, 404);
+
+    const now = nowIso();
+    const next: PlanRow = {
+      ...current,
+      name: input.name ?? current.name,
+      description: input.description !== undefined ? input.description : current.description,
+      maxDevices: input.maxDevices ?? current.maxDevices,
+      maxManagedUsers: input.maxManagedUsers ?? current.maxManagedUsers,
+      featuresJson: input.features ? JSON.stringify(input.features) : current.featuresJson,
+      offlineGraceDays: input.offlineGraceDays ?? current.offlineGraceDays,
+      renewalWarningDays: input.renewalWarningDays ?? current.renewalWarningDays,
+      termDays: input.termDays ?? current.termDays,
+      updatedAt: now,
+    };
+
+    const before = toPlan(current);
+    const after = toPlan(next);
+    await db.batch([
+      db
+        .update(plansTable)
+        .set({
+          name: next.name,
+          description: next.description,
+          maxDevices: next.maxDevices,
+          maxManagedUsers: next.maxManagedUsers,
+          featuresJson: next.featuresJson,
+          offlineGraceDays: next.offlineGraceDays,
+          renewalWarningDays: next.renewalWarningDays,
+          termDays: next.termDays,
+          updatedAt: next.updatedAt,
+        })
+        .where(eq(plansTable.code, code)),
+      audit(db, {
+        eventType: "PLAN_UPDATED",
+        entityType: "plan",
+        entityId: code,
+        actor: { type: "user", id: c.var.user.id },
+        before,
+        after,
+        correlationId: c.var.correlationId,
+        source: "api",
+      }),
+    ]);
+    return c.json({ plan: after });
+  },
+);
+
+async function setPlanStatus(
+  c: Context<AppEnv>,
+  code: string,
+  target: "active" | "retired",
+  eventType: "PLAN_RETIRED" | "PLAN_REACTIVATED",
+) {
+  const db = createDb(c.env.DB);
+  const [current] = await db.select().from(plansTable).where(eq(plansTable.code, code));
+  if (!current) return c.json({ error: "not_found" }, 404);
+  if (current.status === target) {
+    return c.json({ error: target === "retired" ? "already_retired" : "already_active" }, 409);
+  }
+
+  const [countRow] = await db
+    .select({ n: sql<number>`count(*)`.mapWith(Number) })
+    .from(subscriptionsTable)
+    .where(eq(subscriptionsTable.planCode, code));
+  const subscriptionCount = countRow?.n ?? 0;
+
+  const now = nowIso();
+  const next: PlanRow = { ...current, status: target, updatedAt: now };
+  const before = toPlan(current);
+  const after = toPlan(next);
+
+  await db.batch([
+    db.update(plansTable).set({ status: target, updatedAt: now }).where(eq(plansTable.code, code)),
+    audit(db, {
+      eventType,
+      entityType: "plan",
+      entityId: code,
+      actor: { type: "user", id: c.var.user.id },
+      before,
+      after,
+      correlationId: c.var.correlationId,
+      source: "api",
+    }),
+  ]);
+  return c.json({ plan: after, subscriptionCount });
+}
+
+plans.post("/:code/retire", requirePermission("subscription.manage"), (c) =>
+  setPlanStatus(c, c.req.param("code"), "retired", "PLAN_RETIRED"),
+);
+
+plans.post("/:code/reactivate", requirePermission("subscription.manage"), (c) =>
+  setPlanStatus(c, c.req.param("code"), "active", "PLAN_REACTIVATED"),
+);
 
 // ─── /api/v1/tenants/:tenantId/subscriptions ─────────────────────────────────────────────────
 
@@ -125,6 +305,9 @@ tenantSubscriptions.post(
     if (tenant.status === "archived") return c.json({ error: "tenant_archived" }, 409);
     const plan = planRows[0];
     if (!plan) return c.json({ error: "invalid_request", detail: "unknown_plan" }, 400);
+    // A retired plan cannot be chosen for a new subscription; an existing subscription on a plan
+    // that gets retired later keeps working (nothing here touches existing subscriptions).
+    if (plan.status === "retired") return c.json({ error: "plan_retired" }, 409);
     if (!isoOrder(body.validFrom, body.validUntil)) {
       return c.json({ error: "invalid_request", detail: "valid_until_not_after_valid_from" }, 400);
     }

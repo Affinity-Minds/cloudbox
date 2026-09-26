@@ -121,19 +121,23 @@ async function auditFor(entityId: string): Promise<AuditEntry[]> {
 }
 
 describe("GET /api/v1/plans", () => {
-  it("lists the seeded cloudbox-6 plan", async () => {
+  it("lists the seeded cloudbox-6 plan (extended with the WT-13 lifecycle fields)", async () => {
     const response = await call("GET", "/plans");
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { items: unknown[] };
-    expect(body.items).toContainEqual({
-      code: "cloudbox-6",
-      name: "CloudBox 6",
-      maxDevices: 1,
-      maxManagedUsers: 6,
-      features: ["remote_access", "managed_backup", "fleet"],
-      offlineGraceDays: 7,
-      renewalWarningDays: 30,
-    });
+    const body = (await response.json()) as { items: Array<Record<string, unknown>> };
+    expect(body.items).toContainEqual(
+      expect.objectContaining({
+        code: "cloudbox-6",
+        name: "CloudBox 6",
+        maxDevices: 1,
+        maxManagedUsers: 6,
+        features: ["remote_access", "managed_backup", "fleet"],
+        offlineGraceDays: 7,
+        renewalWarningDays: 30,
+        status: "active",
+        termDays: 365,
+      }),
+    );
   });
 });
 

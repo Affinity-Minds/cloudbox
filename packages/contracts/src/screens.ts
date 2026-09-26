@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AuditEntry } from "./common";
 import { Device } from "./devices";
 import { Membership } from "./memberships";
 import { Subscription } from "./subscriptions";
@@ -12,23 +13,6 @@ export const OverviewScreen = z.object({
   audit: z.object({ total: z.number().int(), lastEventAt: z.string().nullable() }),
 });
 export type OverviewScreen = z.infer<typeof OverviewScreen>;
-
-export const AuditEntry = z.object({
-  id: z.string(),
-  eventType: z.string(),
-  entityType: z.string(),
-  entityId: z.string(),
-  actorType: z.string(),
-  actorId: z.string(),
-  actorTenantId: z.string().nullable(),
-  action: z.string(),
-  before: z.unknown().nullable(),
-  after: z.unknown().nullable(),
-  correlationId: z.string().nullable(),
-  source: z.string().nullable(),
-  createdAt: z.string(),
-});
-export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /** `GET /api/v1/screens/audit?cursor&limit`: newest first, keyset-paginated. */
 export const AuditScreen = z.object({

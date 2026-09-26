@@ -8,6 +8,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  Tag,
 } from "lucide-react";
 
 export type NavKey =
@@ -16,13 +17,22 @@ export type NavKey =
   | "fleet"
   | "enrollment"
   | "subscriptions"
+  | "plans"
   | "audit"
   | "settings";
 
 export type NavItem = {
   key: NavKey;
   title: string;
-  to: "/" | "/tenants" | "/fleet" | "/enrollment" | "/subscriptions" | "/audit" | "/settings";
+  to:
+    | "/"
+    | "/tenants"
+    | "/fleet"
+    | "/enrollment"
+    | "/subscriptions"
+    | "/plans"
+    | "/audit"
+    | "/settings";
   icon: LucideIcon;
 };
 
@@ -40,6 +50,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Govern",
     items: [
+      { key: "plans", title: "Plans", to: "/plans", icon: Tag },
       { key: "audit", title: "Audit log", to: "/audit", icon: ScrollText },
       { key: "settings", title: "Settings", to: "/settings", icon: Settings },
     ],

@@ -17,6 +17,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppEnrollmentRouteImport } from './routes/_app/enrollment'
 import { Route as AppFleetRouteImport } from './routes/_app/fleet'
+import { Route as AppPlansRouteImport } from './routes/_app/plans'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSubscriptionsRouteImport } from './routes/_app/subscriptions'
 import { Route as AppTenantsRouteImport } from './routes/_app/tenants'
@@ -63,6 +64,11 @@ const AppFleetRoute = AppFleetRouteImport.update({
   path: '/fleet',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPlansRoute = AppPlansRouteImport.update({
+  id: '/plans',
+  path: '/plans',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -102,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
+  '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
+  '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/_app/audit': typeof AppAuditRoute
   '/_app/enrollment': typeof AppEnrollmentRoute
   '/_app/fleet': typeof AppFleetRouteWithChildren
+  '/_app/plans': typeof AppPlansRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/_app/tenants': typeof AppTenantsRouteWithChildren
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/enrollment'
     | '/fleet'
+    | '/plans'
     | '/settings'
     | '/subscriptions'
     | '/tenants'
@@ -165,6 +175,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/enrollment'
     | '/fleet'
+    | '/plans'
     | '/settings'
     | '/subscriptions'
     | '/tenants'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/_app/audit'
     | '/_app/enrollment'
     | '/_app/fleet'
+    | '/_app/plans'
     | '/_app/settings'
     | '/_app/subscriptions'
     | '/_app/tenants'
@@ -253,6 +265,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet'
       fullPath: '/fleet'
       preLoaderRoute: typeof AppFleetRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/plans': {
+      id: '/_app/plans'
+      path: '/plans'
+      fullPath: '/plans'
+      preLoaderRoute: typeof AppPlansRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings': {
@@ -339,6 +358,7 @@ interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
   AppEnrollmentRoute: typeof AppEnrollmentRoute
   AppFleetRoute: typeof AppFleetRouteWithChildren
+  AppPlansRoute: typeof AppPlansRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppSubscriptionsRoute: typeof AppSubscriptionsRouteWithChildren
   AppTenantsRoute: typeof AppTenantsRouteWithChildren
@@ -349,6 +369,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
   AppEnrollmentRoute: AppEnrollmentRoute,
   AppFleetRoute: AppFleetRouteWithChildren,
+  AppPlansRoute: AppPlansRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppSubscriptionsRoute: AppSubscriptionsRouteWithChildren,
   AppTenantsRoute: AppTenantsRouteWithChildren,
