@@ -152,7 +152,7 @@ Every earlier review test now passes, including P2-1…P2-4 and W-1. The single 
 | **P2-6** tenant sprawl | Closed: at most 5 self-created tenants without a plan per customer. The sequential-code leak remains and is accepted. | V2-4: the 6th creation gets 409 |
 | **P2-8** typed keys | Closed: the key is canonicalised (case, spaces and dashes) before the pattern check and the hash. | V2-4: a lower-case, space-separated key redeems (201) |
 | **W-1** (Phase 1) `OPS_BASE_PATH` | Closed: `/api`, `/assets`, `/login`, `/portal` and `/start` are reserved. | fifth-pass V-2 passes |
-| **P2-7** Drizzle metadata | Not re-checked in this pass. |  |
+| **P2-7** Drizzle metadata | **Still open (Low).** `drizzle-kit generate` still emits a `subscriptions` rebuild (from 0010) and now also a `plans` rebuild (from 0009, whose CHECKs are triggers in SQL but `check()` in `db/schema.ts`). The SQL migrations are correct; only `meta/` lags, so the next `db:generate` would emit a spurious migration. Probe files deleted, nothing committed. | `drizzle-kit generate` probe |
 
 ## WT-13 plan routes: spot check (holds)
 V2-5 checks the following:
@@ -176,5 +176,5 @@ Note: a plan's `maxDevices` is read live through the join in `issueForDevice`. L
 ## Verdict
 **Phase 2 may merge to main. No Critical or High findings are open.** P2-1, the only blocker, is closed and holds at 8-way concurrency on both 1- and 3-device plans. Follow-ups, none blocking:
 - V2-L1 timezone validation.
-- Regenerating the P2-7 Drizzle metadata, if not already done.
+- Regenerating the P2-7 Drizzle metadata (still lagging, now for 0009 as well).
 - Connect timing parity.
