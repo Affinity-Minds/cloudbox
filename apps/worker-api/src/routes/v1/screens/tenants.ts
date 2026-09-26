@@ -2,6 +2,7 @@
 // GET /api/v1/screens/tenants/:tenantId (detail). One `db.batch` each, so each loader is a
 // single D1 round trip (fast-data-hydration "ceiling: three D1 round trips per request").
 import {
+  type Subscription,
   type TenantDetailScreen,
   TenantsScreenQuery,
   type TenantsScreen,
@@ -124,9 +125,40 @@ export async function loadTenantDetailScreen(db: Db, tenantId: string): Promise<
       .innerJoin(user, eq(tenantMemberships.userId, user.id))
       .where(eq(tenantMemberships.tenantId, tenantId))
       .orderBy(desc(tenantMemberships.createdAt)),
-    db.select().from(devices).where(eq(devices.tenantId, tenantId)).orderBy(desc(devices.enrolledAt)),
     db
-      .select()
+      .select({
+        id: devices.id,
+        tenantId: devices.tenantId,
+        name: devices.name,
+        status: devices.status,
+        deviceKeyThumbprint: devices.deviceKeyThumbprint,
+        keyProtection: devices.keyProtection,
+        hostname: devices.hostname,
+        windowsBuild: devices.windowsBuild,
+        agentVersion: devices.agentVersion,
+        lastSeenAt: devices.lastSeenAt,
+        lastHealthJson: devices.lastHealthJson,
+        enrolledAt: devices.enrolledAt,
+        revokedAt: devices.revokedAt,
+      })
+      .from(devices)
+      .where(eq(devices.tenantId, tenantId))
+      .orderBy(desc(devices.enrolledAt)),
+    db
+      .select({
+        id: subscriptions.id,
+        tenantId: subscriptions.tenantId,
+        planCode: subscriptions.planCode,
+        status: subscriptions.status,
+        validFrom: subscriptions.validFrom,
+        validUntil: subscriptions.validUntil,
+        maxManagedUsers: subscriptions.maxManagedUsers,
+        featuresJson: subscriptions.featuresJson,
+        offlineGraceDays: subscriptions.offlineGraceDays,
+        renewalWarningDays: subscriptions.renewalWarningDays,
+        createdAt: subscriptions.createdAt,
+        updatedAt: subscriptions.updatedAt,
+      })
       .from(subscriptions)
       .where(eq(subscriptions.tenantId, tenantId))
       .orderBy(desc(subscriptions.createdAt)),
@@ -159,14 +191,25 @@ export async function loadTenantDetailScreen(db: Db, tenantId: string): Promise<
       .limit(20),
   ]);
 
-  const tenant = tenantRows[0];
-  if (!tenant) return null;
+  const tenantRow = tenantRows[0];
+  if (!tenantRow) return null;
+  const { maintenanceWindowJson, backupPolicyJson, ...tenant } = tenantRow;
 
   return {
-    tenant,
+    tenant: {
+      ...tenant,
+      maintenanceWindow: parseJson(maintenanceWindowJson),
+      backupPolicy: parseJson(backupPolicyJson),
+    },
     memberships: membershipRows,
-    devices: deviceRows,
-    subscriptions: subscriptionRows,
+    devices: deviceRows.map(({ lastHealthJson, ...device }) => ({
+      ...device,
+      lastHealth: parseJson(lastHealthJson),
+    })),
+    subscriptions: subscriptionRows.map(({ featuresJson, ...subscription }) => ({
+      ...subscription,
+      features: (parseJson(featuresJson) ?? []) as Subscription["features"],
+    })),
     auditEvents: auditRows.map(({ beforeJson, afterJson, ...row }) => ({
       ...row,
       before: parseJson(beforeJson),

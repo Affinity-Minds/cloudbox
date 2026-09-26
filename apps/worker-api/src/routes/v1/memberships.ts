@@ -1,43 +1,40 @@
 // Owner: WT-2. Module `memberships`, mounted at `/api/v1/tenants/:tenantId/memberships` in
 // routes/v1/index.ts. Routes (docs/handoffs/foundation.md): POST /, PATCH /:id, DELETE /:id.
 //
-// Tenant Owner/Admin manage their own tenant's memberships (`requireTenantStanding('admin')`);
-// staff manage any tenant's via `tenant.manage`. Until WT-1 implements both middlewares they are
-// 501 stubs, so `eitherAuthorized` below simply forwards the first denial — once real logic
-// lands, either path granting access is enough (see docs/handoffs/wt-p1-tenants.md).
+// Tenant Owner/Admin manage their own tenant's memberships; staff manage any tenant's via
+// `tenant.manage`. `requireTenantManageOrAdmin` uses WT-1's exported `guard()` directly (its
+// handoff: a route open to both staff and tenant members needs `guard()`, since
+// `requireTenantStanding` alone does not let staff through).
+//
+// The Hono generic's third parameter declares this router's *mount* path, not its own routes, so
+// `c.req.param("tenantId")` resolves against the parent `:tenantId` segment (Hono does not
+// propagate a parent router's path params into a sub-router's own param-key typing otherwise).
 import { CreateMembershipRequest, UpdateMembershipRequest } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, eq } from "drizzle-orm";
-import type { Context, MiddlewareHandler } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { createAuth } from "../../auth";
-import { requirePermission, requireTenantStanding } from "../../authz/permissions";
+import { authFor } from "../../auth";
+import { guard } from "../../auth/middleware";
 import { audit } from "../../audit";
+import { getTenantStanding } from "../../authz/permissions";
 import { createDb } from "../../db/client";
 import { tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
-const router = new Hono<AppEnv>();
-
-/** Runs `mw` against `c` without letting it fall through to the real downstream handler. */
-async function probe(mw: MiddlewareHandler<AppEnv>, c: Context<AppEnv>): Promise<Response | null> {
-  let passed = false;
-  const response = await mw(c, async () => {
-    passed = true;
-  });
-  return passed ? null : response instanceof Response ? response : c.json({ error: "forbidden" }, 403);
-}
+// biome-ignore lint/complexity/noBannedTypes: Hono's Schema generic default, not our shape.
+const router = new Hono<AppEnv, {}, "/tenants/:tenantId/memberships">();
 
 /** Staff with `tenant.manage`, OR a member of this tenant standing at `admin` or above. */
 function requireTenantManageOrAdmin(): MiddlewareHandler<AppEnv> {
-  return async (c, next) => {
-    const staffDenied = await probe(requirePermission("tenant.manage"), c);
-    if (staffDenied === null) return next();
-    const memberDenied = await probe(requireTenantStanding("admin"), c);
-    if (memberDenied === null) return next();
-    return staffDenied;
-  };
+  return guard(async (principal, c) => {
+    if (principal.permissions.has("tenant.manage")) return true;
+    const tenantId = c.req.param("tenantId");
+    if (!tenantId) return false;
+    const standing = await getTenantStanding(c, tenantId);
+    return standing === "admin" || standing === "owner";
+  });
 }
 
 router.post(
@@ -56,15 +53,19 @@ router.post(
 
     // Server API, never a raw insert into `user` (agent-notes / brief): resolve-or-create
     // through Better Auth's own internal adapter so hooks and id generation stay in one place.
-    const ctx = await createAuth(c.env).$context;
+    const ctx = await authFor(c).$context;
     const existing = await ctx.internalAdapter.findUserByEmail(input.email);
     const authUser =
       existing?.user ??
-      (await ctx.internalAdapter.createUser({
-        email: input.email,
-        name: input.email.split("@")[0] ?? input.email,
-        emailVerified: false,
-      }));
+      (await ctx.internalAdapter.createUser(
+        {
+          email: input.email,
+          name: input.email.split("@")[0] ?? input.email,
+          emailVerified: false,
+        },
+        // Provisioned by a staff/tenant-admin invite, not any sign-in flow.
+        { method: "admin" },
+      ));
 
     const before = await db
       .select()
@@ -73,7 +74,10 @@ router.post(
       .get();
 
     if (before?.status === "active") {
-      return c.json({ error: "conflict", detail: "This person is already a member of this tenant." }, 409);
+      return c.json(
+        { error: "conflict", detail: "This person is already a member of this tenant." },
+        409,
+      );
     }
 
     const now = nowIso();
@@ -84,28 +88,30 @@ router.post(
       invitedBy: c.var.user.id,
     };
 
-    const [[row]] = await db.batch([
-      before
-        ? db
-            .update(tenantMemberships)
-            .set(values)
-            .where(eq(tenantMemberships.id, membershipId))
-            .returning()
-        : db
-            .insert(tenantMemberships)
-            .values({ id: membershipId, tenantId, userId: authUser.id, createdAt: now, ...values })
-            .returning(),
-      audit(db, {
-        eventType: "USER_INVITED",
-        entityType: "membership",
-        entityId: membershipId,
-        actor: { type: "user", id: c.var.user.id, tenantId },
-        before: before ?? null,
-        after: { id: membershipId, tenantId, userId: authUser.id, createdAt: before?.createdAt ?? now, ...values },
-        correlationId: c.var.correlationId,
-        source: "api",
-      }),
-    ]);
+    const mutation = before
+      ? db.update(tenantMemberships).set(values).where(eq(tenantMemberships.id, membershipId)).returning()
+      : db
+          .insert(tenantMemberships)
+          .values({ id: membershipId, tenantId, userId: authUser.id, createdAt: now, ...values })
+          .returning();
+    const auditWrite = audit(db, {
+      eventType: "USER_INVITED",
+      entityType: "membership",
+      entityId: membershipId,
+      actor: { type: "user", id: c.var.user.id, tenantId },
+      before: before ?? null,
+      after: {
+        id: membershipId,
+        tenantId,
+        userId: authUser.id,
+        createdAt: before?.createdAt ?? now,
+        ...values,
+      },
+      correlationId: c.var.correlationId,
+      source: "api",
+    });
+
+    const [[row]] = await db.batch([mutation, auditWrite]);
 
     return c.json({ ...row, email: authUser.email, name: authUser.name }, 201);
   },
@@ -166,11 +172,7 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
   if (before.status === "revoked") return c.json(before);
 
   const [[updated]] = await db.batch([
-    db
-      .update(tenantMemberships)
-      .set({ status: "revoked" })
-      .where(eq(tenantMemberships.id, membershipId))
-      .returning(),
+    db.update(tenantMemberships).set({ status: "revoked" }).where(eq(tenantMemberships.id, membershipId)).returning(),
     audit(db, {
       eventType: "USER_REMOVED",
       entityType: "membership",
