@@ -155,7 +155,9 @@ function DetailBody({
   onAction: (pending: Pending) => void;
 }) {
   const sub = data.subscription;
-  const warnFrom = new Date(Date.parse(sub.validUntil) - sub.renewalWarningDays * 86_400_000);
+  const warnFrom = sub.validUntil
+    ? new Date(Date.parse(sub.validUntil) - sub.renewalWarningDays * 86_400_000)
+    : null;
 
   return (
     <>
@@ -180,9 +182,11 @@ function DetailBody({
               <span key="u" className="flex items-center gap-2">
                 <Mono value={sub.validUntil} />
                 <span className="text-xs text-muted-foreground">
-                  {sub.daysRemaining >= 0
-                    ? `${sub.daysRemaining} days remaining`
-                    : `expired ${-sub.daysRemaining} days ago`}
+                  {sub.expiry === "pending"
+                    ? "starts when the first server activates"
+                    : sub.daysRemaining >= 0
+                      ? `${sub.daysRemaining} days remaining`
+                      : `expired ${-sub.daysRemaining} days ago`}
                 </span>
               </span>,
             ],
@@ -191,7 +195,7 @@ function DetailBody({
               <span key="w">
                 {sub.renewalWarningDays} days before expiry{" "}
                 <span className="text-xs text-muted-foreground">
-                  (from {toDateInput(warnFrom.toISOString())})
+                  {warnFrom ? `(from ${toDateInput(warnFrom.toISOString())})` : null}
                 </span>
               </span>,
             ],
@@ -320,7 +324,8 @@ function DetailBody({
   );
 }
 
-function Mono({ value }: { value: string }) {
+function Mono({ value }: { value: string | null }) {
+  if (!value) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <span className="font-mono text-xs tabular-nums" title={formatTimestamp(value)}>
       {toDateInput(value)}
@@ -410,7 +415,11 @@ function IssueDialog({
   const next = (device.currentGeneration ?? 0) + 1;
   const mutation = useMutation({
     mutationFn: () =>
-      issueEntitlement(device.id, action, { validUntil: fromDateInput(validUntil) }),
+      issueEntitlement(
+        device.id,
+        action,
+        validUntil ? { validUntil: fromDateInput(validUntil) } : {},
+      ),
     onSuccess: async (result) => {
       toast.success(
         `${action === "issue" ? "Issued" : "Renewed"} generation ${result.entitlement.generation} for ${device.name}`,
@@ -527,7 +536,14 @@ function RevokeDialog({
   );
 }
 
-const STATUSES: SubscriptionStatus[] = ["trial", "active", "past_due", "suspended", "cancelled"];
+const STATUSES: SubscriptionStatus[] = [
+  "pending",
+  "trial",
+  "active",
+  "past_due",
+  "suspended",
+  "cancelled",
+];
 
 function EditDialog({ data, onClose }: { data: SubscriptionDetailScreen; onClose: () => void }) {
   const invalidate = useInvalidate();
@@ -539,7 +555,8 @@ function EditDialog({ data, onClose }: { data: SubscriptionDetailScreen; onClose
     mutationFn: () =>
       updateSubscription(sub.id, {
         status,
-        validUntil: fromDateInput(validUntil),
+        // A pending subscription has no end date until it is redeemed (WT-14).
+        ...(validUntil ? { validUntil: fromDateInput(validUntil) } : {}),
         renewalWarningDays: Number(warningDays),
       }),
     onSuccess: async () => {

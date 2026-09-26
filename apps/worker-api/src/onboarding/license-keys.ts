@@ -2,8 +2,9 @@
 // buyer redeems one at onboarding, which creates their tenant with a `pending` subscription for the
 // key's plan (redeemed later, at the first server activation).
 //
-// Keys: `CBX-LIC-XXXX-XXXX-XXXX-XXXX`, 20 Crockford base32 symbols from crypto.getRandomValues
-// (100 bits, WT-3's `randomCrockfordBase32`). Only the SHA-256 is stored, plus the last four symbols
+// Keys: `CBX-LIC-XXXXX-XXXXX-XXXXX-XXXXX`: 20 Crockford base32 symbols from crypto.getRandomValues
+// (100 bits, WT-3's `randomCrockfordBase32`), four groups of five (the brief's four groups and its
+// 20 symbols / ~100 bits cannot both hold with groups of four; see the WT-14 handoff). Only the SHA-256 is stored, plus the last four symbols
 // for support lookups; the plaintext exists once, in the generation response.
 import type {
   GenerateLicenseKeysRequest,
@@ -22,11 +23,11 @@ import { newId } from "../ids";
 import { allocateTenantCode, ownedTenantStatements } from "./common";
 import { licenseKeys } from "./license-keys-table";
 
-export const LICENSE_KEY_PATTERN = /^CBX-LIC-[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/;
+export const LICENSE_KEY_PATTERN = /^CBX-LIC-[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}$/;
 
 export function formatLicenseKey(): string {
   const s = randomCrockfordBase32(20);
-  return `CBX-LIC-${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16)}`;
+  return `CBX-LIC-${s.slice(0, 5)}-${s.slice(5, 10)}-${s.slice(10, 15)}-${s.slice(15)}`;
 }
 
 /** Hash of the canonical form (upper-case, no spaces), so a key typed in lower case still matches. */
@@ -77,13 +78,12 @@ export async function generateLicenseKeys(
   const inserts = [];
   for (let i = 0; i < rows.length; i += ROWS_PER_INSERT) {
     const chunk = JSON.stringify(rows.slice(i, i + ROWS_PER_INSERT));
+    // Every column of `licenseKeys`, in declaration order (drizzle's INSERT … SELECT form).
     inserts.push(
-      db.run(sql`
-        INSERT INTO license_keys (id, batch_id, code_hash, code_last4, plan_code, batch_label,
-                                  status, created_by, created_at, expires_at)
+      db.insert(licenseKeys).select(sql`
         SELECT json_extract(value, '$.id'), ${batchId}, json_extract(value, '$.h'),
                json_extract(value, '$.l'), ${plan.code}, ${input.batchLabel}, 'unredeemed',
-               ${input.createdBy}, ${createdAt}, ${expiresAt}
+               ${input.createdBy}, ${createdAt}, ${expiresAt}, NULL, NULL, NULL, NULL, NULL
         FROM json_each(${chunk})`),
     );
   }

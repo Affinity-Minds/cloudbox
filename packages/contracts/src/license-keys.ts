@@ -19,7 +19,7 @@ export type GenerateLicenseKeysRequest = z.infer<typeof GenerateLicenseKeysReque
 
 export const GeneratedLicenseKey = z.object({
   id: z.string(),
-  /** Plaintext `CBX-LIC-XXXX-XXXX-XXXX-XXXX`: returned here only, never again. */
+  /** Plaintext `CBX-LIC-XXXXX-XXXXX-XXXXX-XXXXX`: returned here only, never again. */
   code: z.string(),
   last4: z.string(),
 });

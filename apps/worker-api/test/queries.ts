@@ -83,4 +83,45 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT "id", "name", "kind", "from_address", "config_json", "secret_ciphertext", "secret_iv" FROM "email_providers" WHERE "email_providers"."enabled" = ? ORDER BY "email_providers"."priority" ASC`,
     params: [1],
   },
+  // ─── WT-14 onboarding/plan.ts, self-service.ts, auth-routes.ts, license-keys.ts ─────────────
+  {
+    name: "onboarding.plan: newest non-cancelled subscription per tenant (portal, Connect, Fleet, activation)",
+    sql: `select "subscriptions"."tenant_id", "subscriptions"."id", "subscriptions"."status", "subscriptions"."valid_from", "subscriptions"."valid_until", "subscriptions"."plan_code", "plans"."name", "plans"."max_devices" from "subscriptions" left join "plans" on "plans"."code" = "subscriptions"."plan_code" where ("subscriptions"."tenant_id" in (?) and "subscriptions"."status" <> ?) order by "subscriptions"."created_at" desc`,
+    params: ["ten_test", "cancelled"],
+  },
+  {
+    name: "onboarding.overview: the caller's active memberships with enrolled-device counts",
+    sql: `select "tenants"."id", "tenants"."public_code", "tenants"."display_name", "tenants"."status", "tenant_memberships"."standing", (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled') from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?) order by "tenants"."created_at"`,
+    params: ["u_test", "active"],
+  },
+  {
+    name: "auth.connect: active membership of an email in a tenant, by tenant public code",
+    sql: `select "tenants"."id", "tenants"."public_code" from "tenants" inner join "tenant_memberships" on ("tenant_memberships"."tenant_id" = "tenants"."id" and "tenant_memberships"."status" = ?) inner join "customer_users" on ("customer_users"."id" = "tenant_memberships"."user_id" and "customer_users"."email" = ?) where "tenants"."public_code" = ? limit ?`,
+    params: ["active", "e@example.test", "CBX-00001", 1],
+  },
+  {
+    name: "connect.devices: the caller's active membership of one tenant",
+    sql: `select "tenants"."public_code", "tenants"."display_name" from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."tenant_id" = ? and "tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?)`,
+    params: ["ten_test", "u_test", "active"],
+  },
+  {
+    name: "activation: redeem a pending subscription (conditional update by id)",
+    sql: `update "subscriptions" set "status" = ?, "valid_from" = ?, "valid_until" = ?, "updated_at" = ? where ("subscriptions"."id" = ? and "subscriptions"."status" = ?) returning "id"`,
+    params: ["active", "2026-01-01", "2027-01-01", "2026-01-01", "sub_test", "pending"],
+  },
+  {
+    name: "license_keys: redeem claim by code hash",
+    sql: `update "license_keys" set "status" = ?, "redeemed_at" = ?, "redeemed_by_email" = ? where ("license_keys"."code_hash" = ? and "license_keys"."status" = ? and "license_keys"."revoked_at" is null and ("license_keys"."expires_at" IS NULL OR "license_keys"."expires_at" > ?)) returning "id", "plan_code"`,
+    params: ["redeemed", "2026-01-01", "e", "hash", "unredeemed", "2026-01-01"],
+  },
+  {
+    name: "license_keys: list one batch with the redeeming tenant's code",
+    sql: `select "license_keys"."id", "license_keys"."batch_id", "license_keys"."code_last4", "tenants"."public_code" from "license_keys" left join "tenants" on "tenants"."id" = "license_keys"."redeemed_tenant_id" where "license_keys"."batch_id" = ? order by "license_keys"."created_at" desc, "license_keys"."id" limit ?`,
+    params: ["lkb_test", 1000],
+  },
+  {
+    name: "license_keys: support lookup by last four symbols",
+    sql: `select "license_keys"."id", "tenants"."public_code" from "license_keys" left join "tenants" on "tenants"."id" = "license_keys"."redeemed_tenant_id" where "license_keys"."code_last4" = ? order by "license_keys"."created_at" desc, "license_keys"."id" limit ?`,
+    params: ["ABCD", 1000],
+  },
 ];

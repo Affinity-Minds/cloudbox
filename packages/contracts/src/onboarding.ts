@@ -43,7 +43,7 @@ export const CreateOwnTenantResponse = z.object({
 });
 export type CreateOwnTenantResponse = z.infer<typeof CreateOwnTenantResponse>;
 
-/** Server licence key as printed on a reseller's card: `CBX-LIC-XXXX-XXXX-XXXX-XXXX`. */
+/** Server licence key as printed on a reseller's card: `CBX-LIC-XXXXX-XXXXX-XXXXX-XXXXX`. */
 export const LicenseKeyCode = z
   .string()
   .trim()
