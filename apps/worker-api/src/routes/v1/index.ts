@@ -28,8 +28,6 @@ for (const stub of [
   "/tenants", // WT-2
   "/tenants/:tenantId/memberships", // WT-2
   "/me", // WT-2
-  "/tenants/:tenantId/enrollment-tokens", // WT-3
-  "/devices", // WT-3
   "/audit", // WT-0
 ]) {
   v1.use(stub, requireStaff());
