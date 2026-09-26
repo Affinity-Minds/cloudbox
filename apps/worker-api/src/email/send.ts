@@ -242,7 +242,7 @@ export async function testEmailProvider(
     entityId: row.id,
     actor: { type: "user", id: actorId },
     before: null,
-    after: { kind: row.kind, ...outcome },
+    after: outcome,
     source: "api",
   });
   return outcome;

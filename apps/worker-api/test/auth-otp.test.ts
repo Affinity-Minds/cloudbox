@@ -117,7 +117,13 @@ describe("email OTP sign-in", () => {
     expect(box.sent[0]?.text).toMatch(/expires in 5 minutes/);
     expect(box.sent[0]?.text).toMatch(/did not request/);
     expect(await auditRows("AUTH_OTP_SENT", "flow@example.test")).toEqual([
-      { outcome: "sent", messageId: "msg-1", client: expect.any(String) },
+      {
+        outcome: "sent",
+        messageId: "msg-1",
+        providerId: "binding-fallback",
+        kind: "cloudflare_binding",
+        client: expect.any(String),
+      },
     ]);
 
     const verified = await verifyCode(
@@ -210,7 +216,13 @@ describe("email OTP sign-in", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(await auditRows("AUTH_OTP_SENT", "bounce@example.test")).toEqual([
-      { outcome: "send_failed", errorCode: "E_SENDER_NOT_VERIFIED", client: expect.any(String) },
+      {
+        outcome: "send_failed",
+        errorCode: "E_SENDER_NOT_VERIFIED",
+        providerId: "binding-fallback",
+        kind: "cloudflare_binding",
+        client: expect.any(String),
+      },
     ]);
   });
 
@@ -497,6 +509,8 @@ describe("OTP dev echo", () => {
       expect(outcome).toEqual({
         outcome: "send_failed",
         errorCode: "E_NO_EMAIL_BINDING",
+        providerId: "binding-fallback",
+        kind: "cloudflare_binding",
         echoed: true,
       });
     } finally {

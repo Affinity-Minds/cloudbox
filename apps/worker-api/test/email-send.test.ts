@@ -112,7 +112,11 @@ describe("sendEmail: ordering, fallback, audit", () => {
       { to: "fallback@example.test", subject: "Hi", text: "Hello" },
       { purpose: "test-fallback" },
     );
-    expect(outcome).toEqual({ messageId: "bound-1" });
+    expect(outcome).toEqual({
+      messageId: "bound-1",
+      providerId: "binding-fallback",
+      kind: "cloudflare_binding",
+    });
     expect(sent).toHaveLength(1);
 
     const events = await auditAfter("email_send", "fallback@example.test");
