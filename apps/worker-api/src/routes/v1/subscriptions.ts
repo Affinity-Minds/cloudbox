@@ -66,6 +66,16 @@ export const toSubscription = (row: SubscriptionRow): Subscription => ({
 
 const isoOrder = (from: string, until: string) => Date.parse(from) < Date.parse(until);
 
+/** A PATCH result is valid when dated in order, or `pending` with no dates (WT-14). */
+const datesValid = (row: {
+  status: string;
+  validFrom: string | null;
+  validUntil: string | null;
+}) =>
+  row.validFrom !== null && row.validUntil !== null
+    ? isoOrder(row.validFrom, row.validUntil)
+    : row.status === "pending" && row.validFrom === null && row.validUntil === null;
+
 // ─── /api/v1/plans ────────────────────────────────────────────────────────────────────────────
 
 export const plans = new Hono<AppEnv>();
@@ -125,7 +135,10 @@ tenantSubscriptions.post(
     if (tenant.status === "archived") return c.json({ error: "tenant_archived" }, 409);
     const plan = planRows[0];
     if (!plan) return c.json({ error: "invalid_request", detail: "unknown_plan" }, 400);
-    if (!isoOrder(body.validFrom, body.validUntil)) {
+    // No dates: a plan assignment, `pending` until the tenant's first server activates (WT-14,
+    // ADR 0011). Both dates: the staff override, which starts immediately (the original behaviour).
+    const dated = body.validFrom !== undefined && body.validUntil !== undefined;
+    if (dated && !isoOrder(body.validFrom as string, body.validUntil as string)) {
       return c.json({ error: "invalid_request", detail: "valid_until_not_after_valid_from" }, 400);
     }
     // One commercial subscription per tenant at a time: renew by PATCHing dates, change plan by
@@ -139,9 +152,9 @@ tenantSubscriptions.post(
       id: newId("subscription"),
       tenantId,
       planCode: plan.code,
-      status: body.status,
-      validFrom: new Date(body.validFrom).toISOString(),
-      validUntil: new Date(body.validUntil).toISOString(),
+      status: dated ? (body.status ?? "active") : "pending",
+      validFrom: dated ? new Date(body.validFrom as string).toISOString() : null,
+      validUntil: dated ? new Date(body.validUntil as string).toISOString() : null,
       maxManagedUsers: body.maxManagedUsers ?? plan.maxManagedUsers,
       featuresJson: JSON.stringify(body.features ?? JSON.parse(plan.featuresJson)),
       offlineGraceDays: body.offlineGraceDays ?? plan.offlineGraceDays,
@@ -200,8 +213,17 @@ subscriptions.patch(
       offlineGraceDays: body.offlineGraceDays ?? current.offlineGraceDays,
       renewalWarningDays: body.renewalWarningDays ?? current.renewalWarningDays,
     };
-    if (!isoOrder(next.validFrom, next.validUntil)) {
-      return c.json({ error: "invalid_request", detail: "valid_until_not_after_valid_from" }, 400);
+    if (!datesValid(next)) {
+      return c.json(
+        {
+          error: "invalid_request",
+          detail:
+            next.validFrom === null || next.validUntil === null
+              ? "dates_required"
+              : "valid_until_not_after_valid_from",
+        },
+        400,
+      );
     }
 
     const before = toSubscription(current);

@@ -48,6 +48,7 @@ describe("F-4: every /api/v1 route outside the allowlist requires a session", ()
     "GET /api/v1",
     "GET /api/v1/foundation",
     "PATCH /api/v1/foundation/release",
+    "GET /api/v1/onboarding/config", // WT-14: the /start page's Turnstile site key, public by design
   ]);
   const routes = v1.routes
     .filter((r) => r.method !== "ALL")

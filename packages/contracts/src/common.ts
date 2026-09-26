@@ -14,6 +14,8 @@ export const ID_PREFIX = {
   membership: "mem_",
   deviceCredential: "cred_",
   emailProvider: "eprv_",
+  licenseKey: "lkey_",
+  licenseKeyBatch: "lkb_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

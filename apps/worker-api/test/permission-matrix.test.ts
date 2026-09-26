@@ -17,6 +17,8 @@ import { signInAs } from "./fixtures";
  */
 function isAllowlisted(path: string): boolean {
   if (path === "/api/v1" || path === "/api/v1/") return true;
+  // WT-14: `/api/v1/onboarding/config` is public by design (the /start page's Turnstile site key).
+  if (path === "/api/v1/onboarding/config") return true;
   return ["/api/health", "/api/version", "/api/auth", "/api/v1/agent"].some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );
@@ -31,7 +33,16 @@ function isAllowlisted(path: string): boolean {
  * (re-resolved server-side every call, WT-2), never by a staff permission or tenant standing.
  * Extend this list only with the same justification, never to silence a real gap.
  */
-const SELF_SERVICE_ROUTES = new Set(["POST /api/v1/auth/logout", "POST /api/v1/me/active-tenant"]);
+const SELF_SERVICE_ROUTES = new Set([
+  "POST /api/v1/auth/logout",
+  "POST /api/v1/me/active-tenant",
+  // WT-14 (ADR 0011): customer self-service onboarding. Customer session only (a staff session,
+  // read_only included, is 401 by the two-identity-systems rule); the activation grant is further
+  // gated by Owner/Admin standing on the body's tenant, re-resolved server-side.
+  "POST /api/v1/onboarding/tenants",
+  "POST /api/v1/onboarding/redeem",
+  "POST /api/v1/onboarding/activation-grants",
+]);
 
 type RouteUnderTest = { method: string; path: string };
 

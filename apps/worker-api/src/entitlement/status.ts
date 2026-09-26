@@ -6,8 +6,9 @@ const DAY_MS = 86_400_000;
 
 type Lifecycle = {
   status: SubscriptionStatus;
-  validFrom: string;
-  validUntil: string;
+  /** Null while `pending` (WT-14): no dates until the first server activation redeems it. */
+  validFrom: string | null;
+  validUntil: string | null;
   renewalWarningDays: number;
 };
 
@@ -15,6 +16,9 @@ export function subscriptionLifecycle(
   sub: Lifecycle,
   now: Date,
 ): { expiry: SubscriptionExpiry; daysRemaining: number; issuable: boolean } {
+  if (sub.status === "pending" || sub.validFrom === null || sub.validUntil === null) {
+    return { expiry: "pending", daysRemaining: 0, issuable: false };
+  }
   const from = Date.parse(sub.validFrom);
   const until = Date.parse(sub.validUntil);
   const at = now.getTime();
