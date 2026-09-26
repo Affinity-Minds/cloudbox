@@ -3,9 +3,11 @@
   "compilerOptions": {
     "module": "ESNext",
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
     "paths": {
-      "@cloudbox/contracts": ["../../packages/contracts/src/index.ts"]
+      "@cloudbox/contracts": ["../../packages/contracts/src/index.ts"],
+      "@cloudbox/licensing-contracts": ["../../packages/licensing-contracts/src/index.ts"]
     }
   },
   "include": ["src", "test"]

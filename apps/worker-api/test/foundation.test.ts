@@ -70,8 +70,6 @@ describe("CloudBox API foundation", () => {
       tenants: "/api/v1/tenants",
       memberships: "/api/v1/tenants/ten_x/memberships",
       me: "/api/v1/me",
-      subscriptions: "/api/v1/subscriptions",
-      entitlements: "/api/v1/devices/dev_x/entitlements",
       audit: "/api/v1/audit",
     };
     for (const [module, path] of Object.entries(paths)) {

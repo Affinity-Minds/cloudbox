@@ -272,6 +272,9 @@ importers:
       '@cloudbox/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@cloudbox/licensing-contracts':
+        specifier: workspace:*
+        version: link:../../packages/licensing-contracts
       '@hono/zod-validator':
         specifier: 0.9.1
         version: 0.9.1(hono@4.13.9)(zod@4.6.5)
@@ -325,6 +328,22 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+
+  packages/licensing-contracts:
+    dependencies:
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.2
+        version: 26.6.2
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.2
+        version: 5.0.2(@types/node@26.6.2)(vite@8.3.1(@types/node@26.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.15))
 
 packages:
 

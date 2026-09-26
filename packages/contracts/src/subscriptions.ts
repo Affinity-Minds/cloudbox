@@ -33,21 +33,96 @@ export const Subscription = z.object({
 });
 export type Subscription = z.infer<typeof Subscription>;
 
-/** `POST /api/v1/tenants/:tenantId/subscriptions`. Omitted limits default from the plan. */
-export const CreateSubscriptionRequest = z.object({
-  planCode: z.string().min(1).max(64),
-  status: SubscriptionStatus.default("active"),
-  validFrom: z.iso.datetime(),
-  validUntil: z.iso.datetime(),
+const SubscriptionOverrides = {
   maxManagedUsers: z.number().int().min(1).max(1000).optional(),
   features: z.array(Feature).optional(),
   offlineGraceDays: z.number().int().min(0).max(90).optional(),
   renewalWarningDays: z.number().int().min(1).max(365).optional(),
+};
+
+/**
+ * `POST /api/v1/tenants/:tenantId/subscriptions`. Omitted limits default from the plan. A new
+ * subscription starts `trial` or `active`; `validUntil` must be after `validFrom`.
+ */
+export const CreateSubscriptionRequest = z.object({
+  planCode: z.string().min(1).max(64),
+  status: z.enum(["trial", "active"]).default("active"),
+  validFrom: z.iso.datetime(),
+  validUntil: z.iso.datetime(),
+  ...SubscriptionOverrides,
 });
 export type CreateSubscriptionRequest = z.infer<typeof CreateSubscriptionRequest>;
 
-/** `PATCH /api/v1/subscriptions/:id`. */
-export const UpdateSubscriptionRequest = CreateSubscriptionRequest.omit({
-  planCode: true,
-}).partial();
+/**
+ * `PATCH /api/v1/subscriptions/:id`. Spelled out rather than `.partial()` of the create schema:
+ * `partial()` keeps the `status` default, so an empty PATCH would silently re-activate.
+ */
+export const UpdateSubscriptionRequest = z
+  .object({
+    status: SubscriptionStatus.optional(),
+    validFrom: z.iso.datetime().optional(),
+    validUntil: z.iso.datetime().optional(),
+    ...SubscriptionOverrides,
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: "at least one field",
+  });
 export type UpdateSubscriptionRequest = z.infer<typeof UpdateSubscriptionRequest>;
+
+/**
+ * Read-time lifecycle of a subscription against "now". Derived, never stored (the stored `status`
+ * is the commercial state; this adds the calendar): `scheduled` before `validFrom`, `expired` after
+ * `validUntil`, `expiring` within `renewalWarningDays`, `inactive` when the status is not
+ * trial/active (past_due, suspended, cancelled), otherwise `active`.
+ */
+export const SubscriptionExpiry = z.enum([
+  "active",
+  "expiring",
+  "expired",
+  "scheduled",
+  "inactive",
+]);
+export type SubscriptionExpiry = z.infer<typeof SubscriptionExpiry>;
+
+const Derived = {
+  expiry: SubscriptionExpiry,
+  /** Whole days until `validUntil` (negative once expired). */
+  daysRemaining: z.number().int(),
+  /** Entitlements can be issued only when true (status trial/active and inside the dates). */
+  issuable: z.boolean(),
+};
+
+/** Device on a subscription screen with its current (highest) entitlement generation. */
+export const SubscriptionDevice = z.object({
+  id: z.string(),
+  name: z.string(),
+  hostname: z.string(),
+  status: z.enum(["enrolled", "revoked", "transferred"]),
+  keyProtection: z.enum(["tpm", "software"]),
+  lastSeenAt: z.string().nullable(),
+  /** Highest generation issued to this device, or null when none. */
+  currentGeneration: z.number().int().nullable(),
+  currentValidUntil: z.string().nullable(),
+  /** Whether the highest generation is revoked. */
+  currentRevoked: z.boolean(),
+});
+export type SubscriptionDevice = z.infer<typeof SubscriptionDevice>;
+
+/** Row on `GET /api/v1/screens/subscriptions`. */
+export const SubscriptionListItem = Subscription.extend({
+  tenantCode: z.string(),
+  tenantName: z.string(),
+  planName: z.string(),
+  ...Derived,
+  devices: z.array(SubscriptionDevice),
+});
+export type SubscriptionListItem = z.infer<typeof SubscriptionListItem>;
+
+/** `GET /api/v1/screens/subscriptions`: every subscription plus the pickers for "New". */
+export const SubscriptionsScreen = z.object({
+  serverTime: z.string(),
+  items: z.array(SubscriptionListItem),
+  plans: z.array(Plan),
+  tenants: z.array(z.object({ id: z.string(), publicCode: z.string(), displayName: z.string() })),
+});
+export type SubscriptionsScreen = z.infer<typeof SubscriptionsScreen>;
