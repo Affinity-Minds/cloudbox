@@ -4,6 +4,16 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Deployment to smoke-test"
+        required: false
+        default: "https://box.affinityminds.in"
+      expected_sha:
+        description: "Expected /api/version gitSha (blank skips that check)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -34,3 +44,29 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet build CloudBox.slnx --configuration Release
+
+  # Manual only (tests/e2e-cloud, owner WT-6): production/staging smoke against an already-running
+  # deployment. Never runs on pull_request/push — it hits a real URL, not this checkout's code.
+  e2e-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @cloudbox/e2e-cloud exec playwright install --with-deps chromium
+      - run: pnpm --filter @cloudbox/e2e-cloud e2e
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-smoke-evidence
+          path: docs/evidence/e2e/
