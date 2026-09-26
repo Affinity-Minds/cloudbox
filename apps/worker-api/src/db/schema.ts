@@ -398,3 +398,11 @@ export const signingKeys = sqliteTable(
   },
   (table) => [check("signing_keys_status_check", sql`${table.status} IN ('active', 'retired')`)],
 );
+
+// Better Auth `rateLimit` model (rateLimit.storage = "database"); migration 0004. Shape = `auth generate` 1.7.6.
+export const rateLimit = sqliteTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: integer("last_request").notNull(),
+});

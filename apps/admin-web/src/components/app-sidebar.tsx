@@ -59,7 +59,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">CloudBox</span>
-                  <span className="truncate text-xs text-muted-foreground">Super Admin</span>
+                  <span className="truncate text-xs text-muted-foreground">Control plane</span>
                 </div>
               </Link>
             </SidebarMenuButton>
