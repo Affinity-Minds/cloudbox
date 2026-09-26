@@ -19,34 +19,91 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 12.5.1
           run_install: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm ci
 
       - name: Stamp build
         shell: bash
         run: |
-          node -e 'const fs=require("fs"); const p="apps/worker-api/wrangler.jsonc"; let s=fs.readFileSync(p,"utf8"); s=s.replace('"'"'"BUILD_SHA": "development"'"'"', '"'"'"BUILD_SHA": "'"'"' + process.env.GITHUB_SHA + '"'"'"'"'"'); s=s.replace('"'"'"BUILD_TIME": "development"'"'"', '"'"'"BUILD_TIME": "'"'"' + new Date().toISOString() + '"'"'"'"'"'); fs.writeFileSync(p,s);'
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = "apps/worker-api/wrangler.jsonc";
+          let source = fs.readFileSync(path, "utf8");
+          source = source.replace('"BUILD_SHA": "development"', `"BUILD_SHA": "${process.env.GITHUB_SHA}"`);
+          source = source.replace('"BUILD_TIME": "development"', `"BUILD_TIME": "${new Date().toISOString()}"`);
+          fs.writeFileSync(path, source);
+          NODE
 
-      - name: Deploy Worker and static assets
+      - name: Deploy Worker and auto-provision bindings
         working-directory: apps/worker-api
         run: pnpm wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Verify production health
+      - name: Apply D1 migrations
+        working-directory: apps/worker-api
+        run: pnpm wrangler d1 migrations apply DB --remote
+
+      - name: Create temporary Phase 0 deploy credential
+        id: phase0-key
+        shell: bash
+        run: |
+          key="$(openssl rand -hex 32)"
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          printf '%s' "$key" | pnpm --dir apps/worker-api wrangler secret put PHASE0_ADMIN_KEY
+
+      - name: Prove audited administrative state change
+        shell: bash
+        env:
+          PHASE0_ADMIN_KEY: ${{ steps.phase0-key.outputs.key }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error             --retry 5 --retry-delay 2             -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release"             -H "content-type: application/json"             -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY"             --data "{"status":"deployed","sha":"$GITHUB_SHA"}"             | tee /tmp/audited-change.json
+
+      - name: Verify production health, version, D1 and audit
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error "$PRODUCTION_ORIGIN/api/health" | tee /tmp/health.json
-          curl --fail --silent --show-error "$PRODUCTION_ORIGIN/api/version" | tee /tmp/version.json
-          node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("/tmp/version.json","utf8")); if(v.gitSha!==process.env.GITHUB_SHA){console.error(`Expected ${process.env.GITHUB_SHA}, got ${v.gitSha}`); process.exit(1)}'
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/health" | tee /tmp/health.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/version" | tee /tmp/version.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/v1/foundation" | tee /tmp/foundation.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+          const version = JSON.parse(fs.readFileSync("/tmp/version.json", "utf8"));
+          const foundation = JSON.parse(fs.readFileSync("/tmp/foundation.json", "utf8"));
+          const sha = process.env.GITHUB_SHA;
+
+          if (version.gitSha !== sha) {
+            throw new Error(`Version mismatch: expected ${sha}, got ${version.gitSha}`);
+          }
+
+          if (foundation.release?.sha !== sha) {
+            throw new Error(`Audited release mismatch: expected ${sha}, got ${foundation.release?.sha}`);
+          }
+
+          const proved = foundation.audit?.some(
+            (event) =>
+              event.eventType === "foundation.release.changed" &&
+              event.actorId === "github-actions" &&
+              event.after?.sha === sha,
+          );
+
+          if (!proved) {
+            throw new Error("Foundation audit proof was not returned by the deployed API");
+          }
+          NODE
