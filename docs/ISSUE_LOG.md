@@ -2,6 +2,28 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — Enrollment redeem update failed its FK before the device existed (WT-3)
+**Symptom:** `POST /agent/enroll` answered 500 with `FOREIGN KEY constraint failed` on the very first successful-looking enrollment, inside the conditional token-redemption `UPDATE`.
+
+**Cause:** Following agent-notes' "run the conditional update alone, then batch the rest" rule literally, the redeem `UPDATE` set both `redeemed_at` and `redeemed_device_id` in the same statement — but `redeemed_device_id` references `devices.id`, and the device row is only created in the batch that comes *after* the conditional update. D1 enforces the FK immediately, not deferred to commit.
+
+**Fix:** Split the concerns: the standalone conditional update claims the token by setting `redeemed_at` only (still checked with `.returning()`, still run before anything else); `redeemed_device_id` is set by a third statement inside the same `db.batch` as the device insert, ordered after it so the FK is satisfied within the transaction.
+
+**Blast radius:** Any conditional-claim-then-link pattern where the linked-to row doesn't exist yet. Generalizes the existing "conditional update run alone" note: the *columns in that update* still can't reference a row created later in the batch.
+
+**Verification:** `apps/worker-api/test/agent.test.ts` — enroll happy path, reuse, duplicate-key-with-retry.
+
+## 2026-09-27 — `formatAgo` always said "ago", even for a future timestamp (admin-web)
+**Symptom:** The Enrollment page's "Expires" column read "expires 24 hours ago" for a token that expires in the future.
+
+**Cause:** `lib/time.ts`'s `formatAgo` hard-appended the literal string `" ago"` to `formatDistanceToNowStrict()`. Every caller before WT-3's enrollment tokens only ever passed a past timestamp (`lastSeenAt`, `createdAt`, audit rows), so the bug was latent until the first future-dated field.
+
+**Fix:** Pass `{ addSuffix: true }` instead, which date-fns renders as "X ago" for the past and "in X" for the future — no call-site changes needed.
+
+**Blast radius:** `apps/admin-web/src/lib/time.ts` is shared; every existing caller keeps its exact previous output (all past dates), so this is additive.
+
+**Verification:** Enrollment page screenshot (`docs/evidence/wt-p2-enrollment/04-enrollment-list-active-token.png`) reads "in 24 hours"; `apps/admin-web` test suite still green.
+
 ## 2026-09-27 — Drizzle `db.batch` on D1 silently shifted joined columns (WT-5)
 **Symptom:** Entitlement issuance answered `409 device_not_enrolled` for an enrolled device; a screen query failed with `ambiguous column name: generation`.
 

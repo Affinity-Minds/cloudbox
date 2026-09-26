@@ -12,10 +12,15 @@ export function formatTimestamp(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : format(date, "yyyy-MM-dd HH:mm:ss");
 }
 
+/** "3 minutes ago" for the past, "in 24 hours" for the future (e.g. an enrollment token's
+ * expiry) — `addSuffix` picks the direction; every prior caller only ever passed a past
+ * timestamp, so this is unchanged for them. */
 export function formatAgo(value: string | null | undefined): string {
   if (!value) return "never";
   const date = parseTimestamp(value);
-  return Number.isNaN(date.getTime()) ? value : `${formatDistanceToNowStrict(date)} ago`;
+  return Number.isNaN(date.getTime())
+    ? value
+    : formatDistanceToNowStrict(date, { addSuffix: true });
 }
 
 export function shortSha(value: string | undefined): string {
