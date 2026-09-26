@@ -11,14 +11,21 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@hono/zod-validator": "0.9.1",
+    "better-auth": "1.7.6",
     "drizzle-orm": "0.45.3",
     "hono": "4.13.9",
+    "jose": "6.2.12",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
     "@cloudflare/workers-types": "5.20260925.2",
+    "@vitest/runner": "4.1.11",
+    "@vitest/snapshot": "4.1.11",
+    "drizzle-kit": "0.31.11",
     "typescript": "7.0.2",
-    "vitest": "5.0.2",
-    "wrangler": "4.135.0"
+    "vitest": "4.1.11",
+    "wrangler": "4.140.0"
   }
 }
