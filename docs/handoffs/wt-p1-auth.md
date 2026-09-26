@@ -12,8 +12,9 @@ per request, staff roles are managed through an audited API, and logout invalida
 
 ## Current status
 
-- Branch: `wt/p1-auth`, parent `phase-1/identity`. Draft PR: https://github.com/Affinity-Minds/cloudbox/pull/4
-- Phase A (middleware spine) `dd29e12` is already merged into `phase-1/identity` (`9e59505`).
+- Branch: `wt/p1-auth`, parent `phase-1/identity`.
+- Phase A (middleware spine) `dd29e12`: PR #4, merged into `phase-1/identity` (`9e59505`).
+- Phase B: draft PR https://github.com/Affinity-Minds/cloudbox/pull/6
 - Phase B: staff API, login UI, route guard, user menu, evidence, this handoff.
 - `pnpm run verify`: green (see "Tests run" for the worktree-path caveat on `pnpm check`).
 
@@ -23,8 +24,9 @@ per request, staff roles are managed through an audited API, and logout invalida
 dd29e12 feat(auth): Better Auth email OTP + authz spine (WT-1 phase A)      [merged]
 688f8a0 feat(staff): GET/POST/DELETE /api/v1/staff gated by staff.manage, audited
 6c5d752 feat(admin-web): OTP login, route guard, sidebar user menu with sign-out
-<merge>  Merge origin/phase-1/identity into wt/p1-auth
-<this>   docs: WT-1 handoff, issue-log entries
+a27a703 Merge remote-tracking branch 'origin/phase-1/identity' into wt/p1-auth
+42a8cc9 docs: WT-1 handoff; issue log
+(+ this PR-link fix-up)
 ```
 
 ---
@@ -166,4 +168,4 @@ Not yet verified live on `box.affinityminds.in` (needs the merge + deploy and th
 
 ## Safe next action
 
-Merge PR #4 (Phase B) into `phase-1/identity`; WT-2/3/5 already build on the Phase A middleware, and nothing in Phase B changes those signatures.
+Merge PR #6 (Phase B) into `phase-1/identity`; WT-2/3/5 already build on the Phase A middleware, and nothing in Phase B changes those signatures.
