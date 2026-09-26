@@ -61,24 +61,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! pnpm wrangler d1 list --json | jq -e '.[] | select(.name=="cloudbox-db")' >/dev/null; then
-            pnpm wrangler d1 create cloudbox-db
+          # D1: create in APAC (users are in India). If an EMPTY database exists elsewhere, recreate it once.
+          if pnpm wrangler d1 list --json | jq -e '.[] | select(.name=="cloudbox-db")' >/dev/null; then
+            tables="$(pnpm wrangler d1 list --json | jq -r '.[] | select(.name=="cloudbox-db") | .num_tables')"
+            region="$(pnpm wrangler d1 info cloudbox-db --json | jq -r '.running_in_region // .region // ""')"
+            echo "cloudbox-db exists: tables=$tables region=$region"
+            if [ "${tables:-0}" = "0" ] && ! echo "$region" | grep -qi '^apac'; then
+              echo "::notice::Recreating empty cloudbox-db in APAC (was $region)"
+              pnpm wrangler d1 delete cloudbox-db --skip-confirmation
+              pnpm wrangler d1 create cloudbox-db --location apac
+            fi
+          else
+            pnpm wrangler d1 create cloudbox-db --location apac
           fi
           db_id="$(pnpm wrangler d1 list --json | jq -r '.[] | select(.name=="cloudbox-db") | .uuid')"
           test -n "$db_id"
-          pnpm wrangler r2 bucket create cloudbox-artifacts 2>/dev/null || true
-          pnpm wrangler r2 bucket info cloudbox-artifacts >/dev/null
-          node - "$db_id" <<'NODE'
+          # R2: needs to be enabled once in the dashboard. Until then, deploy without the binding and warn loudly.
+          r2_ok=1
+          if ! pnpm wrangler r2 bucket info cloudbox-artifacts >/dev/null 2>&1; then
+            if ! pnpm wrangler r2 bucket create cloudbox-artifacts --location apac 2>/tmp/r2.err; then
+              cat /tmp/r2.err
+              echo "::warning::R2 is not enabled on this Cloudflare account; deploying WITHOUT the ARTIFACTS binding. Enable R2 in the dashboard, then re-run."
+              r2_ok=0
+            fi
+          fi
+          node - "$db_id" "$r2_ok" <<'NODE'
           const fs = require("fs");
-          const id = process.argv[2];
+          const [id, r2ok] = process.argv.slice(2);
           const path = "wrangler.jsonc";
           let source = fs.readFileSync(path, "utf8");
           if (!source.includes('"database_id"')) {
             source = source.replace('"database_name": "cloudbox-db",', `"database_name": "cloudbox-db",\n      "database_id": "${id}",`);
           }
+          if (r2ok === "0") {
+            source = source.replace(/"r2_buckets":\s*\[[\s\S]*?\],?\n/, "");
+          }
           fs.writeFileSync(path, source);
           NODE
-          grep -n database_id wrangler.jsonc
+          grep -n -E 'database_id|bucket_name' wrangler.jsonc || true
 
       - name: Apply D1 migrations
         working-directory: apps/worker-api
