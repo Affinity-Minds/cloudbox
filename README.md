@@ -17,7 +17,7 @@ Production hostname: `https://box.affinityminds.in`
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-pnpm ci
+pnpm run verify
 ```
 
 Cloudflare deployment is performed by GitHub Actions after merge to `main`. Production credentials stay in GitHub/Cloudflare secret stores and never in this repository.

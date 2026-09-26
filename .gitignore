@@ -13,3 +13,6 @@ bin/
 obj/
 artifacts/
 .DS_Store
+.claude/worktrees/
+.worktrees/
+*.tsbuildinfo

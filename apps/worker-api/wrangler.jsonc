@@ -19,12 +19,14 @@
   "d1_databases": [
     {
       "binding": "DB",
+      "database_name": "cloudbox-db",
       "migrations_dir": "../../infra/cloudflare/migrations"
     }
   ],
   "r2_buckets": [
     {
-      "binding": "ARTIFACTS"
+      "binding": "ARTIFACTS",
+      "bucket_name": "cloudbox-artifacts"
     }
   ],
   "durable_objects": {

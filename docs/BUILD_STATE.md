@@ -11,7 +11,7 @@ in_progress
 1. Fresh clone.
 2. `corepack enable`.
 3. `pnpm install`.
-4. `pnpm ci`.
+4. `pnpm run verify`.
 5. Verify repository contains documented Cloud, Windows, infrastructure, package, test, and docs boundaries.
 
 # Evidence

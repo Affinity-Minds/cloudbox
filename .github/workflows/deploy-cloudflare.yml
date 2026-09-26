@@ -35,7 +35,7 @@ jobs:
           node-version: 22
 
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm ci
+      - run: pnpm run verify
 
       - name: Stamp build
         shell: bash
@@ -49,13 +49,37 @@ jobs:
           fs.writeFileSync(path, source);
           NODE
 
-      - name: Deploy Worker and auto-provision bindings
+      - name: Ensure Cloudflare resources exist and pin their ids
         working-directory: apps/worker-api
-        run: pnpm wrangler deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! pnpm wrangler d1 list --json | jq -e '.[] | select(.name=="cloudbox-db")' >/dev/null; then
+            pnpm wrangler d1 create cloudbox-db
+          fi
+          db_id="$(pnpm wrangler d1 list --json | jq -r '.[] | select(.name=="cloudbox-db") | .uuid')"
+          test -n "$db_id"
+          pnpm wrangler r2 bucket create cloudbox-artifacts 2>/dev/null || true
+          pnpm wrangler r2 bucket info cloudbox-artifacts >/dev/null
+          node - "$db_id" <<'NODE'
+          const fs = require("fs");
+          const id = process.argv[2];
+          const path = "wrangler.jsonc";
+          let source = fs.readFileSync(path, "utf8");
+          if (!source.includes('"database_id"')) {
+            source = source.replace('"database_name": "cloudbox-db",', `"database_name": "cloudbox-db",\n      "database_id": "${id}",`);
+          }
+          fs.writeFileSync(path, source);
+          NODE
+          grep -n database_id wrangler.jsonc
 
       - name: Apply D1 migrations
         working-directory: apps/worker-api
-        run: pnpm wrangler d1 migrations apply DB --remote
+        run: pnpm wrangler d1 migrations apply cloudbox-db --remote
+
+      - name: Deploy Worker
+        working-directory: apps/worker-api
+        run: pnpm wrangler deploy
 
       - name: Create temporary Phase 0 deploy credential
         id: phase0-key
@@ -72,7 +96,7 @@ jobs:
           PHASE0_ADMIN_KEY: ${{ steps.phase0-key.outputs.key }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error             --retry 5 --retry-delay 2             -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release"             -H "content-type: application/json"             -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY"             --data "{"status":"deployed","sha":"$GITHUB_SHA"}"             | tee /tmp/audited-change.json
+          curl --fail --silent --show-error             --retry 5 --retry-delay 2             -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release"             -H "content-type: application/json"             -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY"             --data "$(jq -cn --arg sha "$GITHUB_SHA" '{status:"deployed",sha:$sha}')"             | tee /tmp/audited-change.json
 
       - name: Verify production health, version, D1 and audit
         shell: bash

@@ -1,0 +1,18 @@
+# WT-2 — Tenant CRUD + memberships + active tenant (Slices 1.3, 1.4)
+Model: **Sonnet 5**. Branch: `wt/p1-tenants` from `phase-1/identity` (after foundation). Reserved migration: `0005` (should not be needed; tables exist).
+
+Load: agent-notes `platform/fast-data-hydration.md` (one loader per screen, ≤3 D1 round trips, `db.batch`), `design/ux-patterns.md` "Tables for operations", "Nothing is written until Save", "Honest empty states", `engineering/roles-vs-capabilities.md`.
+
+You own: `apps/worker-api/src/routes/v1/tenants.ts`, `memberships.ts`, `apps/worker-api/src/screens/tenants.ts`, `apps/admin-web/src/routes/_app/tenants.tsx`, `_app/tenants.$tenantId.tsx`, `apps/admin-web/src/api/tenants.ts`, `apps/admin-web/src/routes/portal/**` (minimal tenant-side membership switch only).
+
+Use the middleware from WT-1 as declared in `src/authz/permissions.ts` (`requirePermission('tenant.view'|'tenant.manage')`, `requireTenantStanding`). Until WT-1 lands, the foundation stubs return 501; write your handlers against the signatures and your tests against a fake session helper agreed in the foundation handoff.
+
+Deliver:
+1. `GET /api/v1/screens/tenants?status=&q=&plan=&page=` — one screen loader: rows (tenant, status, plan, device count, member count, next subscription expiry, health placeholder honest `unknown`) + facet counts, in one `db.batch`. `GET /api/v1/screens/tenants/:id` — detail: tenant, memberships, devices, subscriptions, last 20 audit events for the entity.
+2. `POST /api/v1/tenants` (create; generates `ten_` id and next `CBX-00001`-style `public_code` atomically via a counter row in `settings` inside one batch), `PATCH /api/v1/tenants/:id`, `POST /api/v1/tenants/:id/archive` with refusal rules: cannot archive with enrolled devices or an active subscription (409 with a reason a person can act on). All gated `tenant.manage`, all audited with full before/after rows: `TENANT_CREATED`, `TENANT_UPDATED`, `TENANT_ARCHIVED`.
+3. Memberships: `POST /api/v1/tenants/:id/memberships` (by email; creates the Better Auth `user` row if missing — via Better Auth's server API, not a raw insert — standing owner/admin/user), `PATCH` standing, `DELETE` (revoke, keep row with status). Audited `USER_INVITED`, `USER_STANDING_CHANGED`, `USER_REMOVED`. Tenant Owner/Admin can manage memberships of their own tenant via `requireTenantStanding('admin')`; staff via `tenant.manage`.
+4. Active tenant: `GET /api/v1/me/tenants`, `POST /api/v1/me/active-tenant` (stored on the session record's custom field or a `settings`-style per-user row; never a client-supplied tenant id on later requests — server re-resolves membership every time).
+5. UI: tenants table (TanStack Table, shadcn data-table block): search, status filter pills, plan filter, sortable, row click → detail drawer/page with tabs Overview / Members / Devices / Subscription / Audit. Create/edit in a sheet with React Hook Form + Zod from `packages/contracts/tenants.ts`; nothing written until Save; unsaved-changes guard. Archive uses a typed-name confirmation dialog, not `confirm()`. Empty state says what will appear and how.
+6. Tests: create → appears in loader; archive refusal; permission boundary (`read_only` staff cannot create → 403); tenant boundary (member of Tenant A requesting Tenant B detail → 403/404, never data). Loader query-count ceiling test (≤3 D1 calls) once WT-6's counting harness lands; else leave a TODO in handoff.
+
+Demo path: login → Tenants → New tenant "Example Org" → saved, code `CBX-00001` → open detail → Members → invite `x@example.com` as Owner → Audit tab shows `TENANT_CREATED` and `USER_INVITED` with before/after → attempt archive → refused with reason (if a device/subscription exists) → screenshot.

@@ -91,7 +91,7 @@ function App() {
               <span className="metric-label">API</span>
               <strong>/api/v1</strong>
             </div>
-          </div>
+          </section>
 
           <section className="panel" aria-labelledby="audit-heading">
             <div className="panel-header">
