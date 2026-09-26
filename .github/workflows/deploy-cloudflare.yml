@@ -37,6 +37,8 @@ jobs:
       - name: Stamp build
         shell: bash
         env:
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+        env:
           BOOTSTRAP_SUPER_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_SUPER_ADMIN_EMAIL }}
         run: |
           node - <<'NODE'
@@ -47,6 +49,7 @@ jobs:
           let source = fs.readFileSync(path, "utf8");
           source = source.replace('"BUILD_SHA": "development"', `"BUILD_SHA": "${process.env.GITHUB_SHA}"`);
           source = source.replace('"BUILD_TIME": "development"', `"BUILD_TIME": "${new Date().toISOString()}"`);
+          source = source.replace('"TURNSTILE_SITE_KEY": ""', `"TURNSTILE_SITE_KEY": "${process.env.TURNSTILE_SITE_KEY ?? ""}"`);
           source = source.replace('"ENVIRONMENT": "development"', '"ENVIRONMENT": "production"');
           source = source.replace('"BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"', `"BOOTSTRAP_SUPER_ADMIN_EMAIL": ${JSON.stringify(bootstrapEmail)}`);
           if (!source.includes('"ENVIRONMENT": "production"')) throw new Error("ENVIRONMENT stamp failed");
@@ -151,6 +154,18 @@ jobs:
           set -euo pipefail
           if [ -z "${ENTITLEMENT_SIGNING_JWK}" ]; then echo "not set; issuance stays 503"; exit 0; fi
           printf '%s' "$ENTITLEMENT_SIGNING_JWK" | pnpm wrangler secret put ENTITLEMENT_SIGNING_JWK
+
+      - name: Sync TURNSTILE_SECRET_KEY (when set)
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TURNSTILE_SECRET_KEY}" ]; then echo "not set; customer step-up uses the cooldown fallback"; exit 0; fi
+          printf '%s' "$TURNSTILE_SECRET_KEY" | pnpm wrangler secret put TURNSTILE_SECRET_KEY
 
       - name: Deploy Worker
         env:

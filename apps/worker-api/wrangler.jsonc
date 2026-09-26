@@ -52,6 +52,7 @@
     "BUILD_SHA": "development",
     "BUILD_TIME": "development",
     "ENVIRONMENT": "production",
+    "TURNSTILE_SITE_KEY": "",
     "EMAIL_FROM": "no-reply@em.affinity.ai.in",
     "BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"
   }
