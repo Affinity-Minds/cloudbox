@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm typecheck
       - run: pnpm test
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cloudbox/e2e-cloud exec playwright install --with-deps chromium
       - run: pnpm --filter @cloudbox/e2e-cloud e2e
         env:
