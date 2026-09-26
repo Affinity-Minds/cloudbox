@@ -1,15 +1,15 @@
 import { env } from "cloudflare:test";
 import type { CreateEnrollmentTokenResponse, EnrollmentToken } from "@cloudbox/contracts";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { createDb } from "../src/db/client";
+import { enrollmentTokens } from "../src/db/schema";
+import app from "../src/index";
 import {
   createEnrollmentToken,
   listEnrollmentTokens,
   revokeEnrollmentToken,
 } from "../src/routes/v1/enrollment";
-import { createDb } from "../src/db/client";
-import { enrollmentTokens } from "../src/db/schema";
-import { eq } from "drizzle-orm";
-import app from "../src/index";
 import { signInAs } from "./auth-fixtures";
 import { insertMembership, insertTenant } from "./wt3-fixtures";
 
@@ -25,12 +25,16 @@ describe("createEnrollmentToken (handler logic, bypassing the staff gate)", () =
     });
 
     expect(response.token).toMatch(/^CBX-ENROLL-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-    expect(response.token).not.toMatch(/[ILOU]/); // no ambiguous Crockford characters
+    const randomSuffix = response.token.replace("CBX-ENROLL-", "");
+    expect(randomSuffix).not.toMatch(/[ILOU]/); // no ambiguous Crockford characters
     expect(response.label).toBe("Front desk PC");
     expect(response.redeemedAt).toBeNull();
     expect(response.revokedAt).toBeNull();
 
-    const [row] = await db.select().from(enrollmentTokens).where(eq(enrollmentTokens.id, response.id));
+    const [row] = await db
+      .select()
+      .from(enrollmentTokens)
+      .where(eq(enrollmentTokens.id, response.id));
     expect(row?.tokenHash).toBeDefined();
     expect(row?.tokenHash).not.toBe(response.token);
     expect(JSON.stringify(row)).not.toContain(response.token);
@@ -71,7 +75,11 @@ describe("createEnrollmentToken (handler logic, bypassing the staff gate)", () =
     const first = await revokeEnrollmentToken(db, { tenantId, tokenId: created.id, actorId: "u1" });
     expect(first).toBe("revoked");
 
-    const second = await revokeEnrollmentToken(db, { tenantId, tokenId: created.id, actorId: "u1" });
+    const second = await revokeEnrollmentToken(db, {
+      tenantId,
+      tokenId: created.id,
+      actorId: "u1",
+    });
     expect(second).toBe("already_revoked");
 
     const other = await insertTenant(env);
@@ -97,7 +105,11 @@ describe("createEnrollmentToken (handler logic, bypassing the staff gate)", () =
       .set({ redeemedAt: new Date().toISOString() })
       .where(eq(enrollmentTokens.id, created.id));
 
-    const result = await revokeEnrollmentToken(db, { tenantId, tokenId: created.id, actorId: "u1" });
+    const result = await revokeEnrollmentToken(db, {
+      tenantId,
+      tokenId: created.id,
+      actorId: "u1",
+    });
     expect(result).toBe("already_redeemed");
   });
 });
@@ -194,7 +206,11 @@ describe("POST/GET/DELETE /api/v1/tenants/:tenantId/enrollment-tokens (staff gat
     );
     const { id } = (await created.json()) as CreateEnrollmentTokenResponse;
 
-    const list = await app.request(`/api/v1/tenants/${tenantId}/enrollment-tokens`, { headers }, env);
+    const list = await app.request(
+      `/api/v1/tenants/${tenantId}/enrollment-tokens`,
+      { headers },
+      env,
+    );
     expect(list.status).toBe(200);
     const tokens = (await list.json()) as EnrollmentToken[];
     expect(tokens.some((t) => t.id === id)).toBe(true);

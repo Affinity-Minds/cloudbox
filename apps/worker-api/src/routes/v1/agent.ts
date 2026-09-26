@@ -8,7 +8,6 @@
 // mean "the agent cannot determine this yet"; heartbeat stores the document as-is and callers must
 // render null as "unknown", never 0 or "Offline" (see apps/admin-web fleet detail health tab).
 import {
-  type AgentEntitlementResponse,
   type AgentHealth,
   EnrollRequest,
   type EnrollResponse,
@@ -16,16 +15,20 @@ import {
   type HeartbeatResponse,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { calculateJwkThumbprint } from "jose";
 import { audit } from "../../audit";
 import { isUniqueConstraintError, randomOpaqueToken, sha256Hex } from "../../crypto";
 import { createDb, type Db } from "../../db/client";
-import { deviceCredentials, devices, entitlements, enrollmentTokens, tenants } from "../../db/schema";
+import { deviceCredentials, devices, enrollmentTokens, tenants } from "../../db/schema";
 import { checkEnrollRateLimit } from "../../devices/enroll-rate-limit";
 import { nextDeviceName } from "../../devices/naming";
 import { bearerToken, requireDevice, resolveDevice } from "../../devices/require-device";
+// Owner: WT-5. The single source of "what entitlement does this device currently hold" — highest
+// generation, or null if there is none or the highest one is revoked (never falls back to an
+// older generation). Heartbeat and GET /entitlement both read through this, not the table directly.
+import { currentEntitlementForDevice } from "../../entitlement/service";
 import type { AppDevice, AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
@@ -66,10 +69,12 @@ export async function enrollDevice(db: Db, input: EnrollRequest): Promise<Enroll
 
   // Conditional update run alone, then checked, before anything else touches the database
   // (agent-notes cloudflare-workers "a transaction cannot be made conditional on one row changed"):
-  // `db.batch` would still commit even if this WHERE matched zero rows.
+  // `db.batch` would still commit even if this WHERE matched zero rows. It can't set
+  // `redeemed_device_id` yet — that column's FK requires the device row to already exist, and the
+  // device doesn't exist until the batch below.
   const [redeemed] = await db
     .update(enrollmentTokens)
-    .set({ redeemedAt: now, redeemedDeviceId: deviceId })
+    .set({ redeemedAt: now })
     .where(
       and(
         eq(enrollmentTokens.id, tokenRow.id),
@@ -106,6 +111,11 @@ export async function enrollDevice(db: Db, input: EnrollRequest): Promise<Enroll
         tokenHash: await sha256Hex(deviceToken),
         createdAt: now,
       }),
+      // Same transaction, runs after the device insert above, so the FK is satisfied.
+      db
+        .update(enrollmentTokens)
+        .set({ redeemedDeviceId: deviceId })
+        .where(eq(enrollmentTokens.id, tokenRow.id)),
       audit(db, {
         eventType: "DEVICE_ENROLLED",
         entityType: "device",
@@ -120,7 +130,7 @@ export async function enrollDevice(db: Db, input: EnrollRequest): Promise<Enroll
     // Compensate: give the token back so a genuine retry (not a duplicate key) can redeem it.
     await db
       .update(enrollmentTokens)
-      .set({ redeemedAt: null, redeemedDeviceId: null })
+      .set({ redeemedAt: null })
       .where(eq(enrollmentTokens.id, tokenRow.id));
 
     if (isUniqueConstraintError(error, "device_key_thumbprint")) {
@@ -147,41 +157,22 @@ export async function recordHeartbeat(
   health: AgentHealth,
 ): Promise<HeartbeatResponse> {
   const now = nowIso();
-  const [, entitlementRows] = await db.batch([
-    db
-      .update(devices)
-      .set({
-        lastSeenAt: now,
-        lastHealthJson: JSON.stringify(health),
-        agentVersion: health.agent.version,
-      })
-      .where(eq(devices.id, device.id)),
-    db
-      .select({ generation: entitlements.generation })
-      .from(entitlements)
-      .where(and(eq(entitlements.deviceId, device.id), isNull(entitlements.revokedAt)))
-      .orderBy(desc(entitlements.generation))
-      .limit(1),
-  ]);
+  await db
+    .update(devices)
+    .set({
+      lastSeenAt: now,
+      lastHealthJson: JSON.stringify(health),
+      agentVersion: health.agent.version,
+    })
+    .where(eq(devices.id, device.id));
+
+  const entitlement = await currentEntitlementForDevice(db, device.id);
 
   return {
     serverTime: now,
-    entitlementGeneration: entitlementRows[0]?.generation ?? null,
+    entitlementGeneration: entitlement?.generation ?? null,
     commands: [],
   };
-}
-
-export async function getLatestEntitlement(
-  db: Db,
-  deviceId: string,
-): Promise<AgentEntitlementResponse | null> {
-  const [row] = await db
-    .select({ entitlement: entitlements.token, generation: entitlements.generation })
-    .from(entitlements)
-    .where(and(eq(entitlements.deviceId, deviceId), isNull(entitlements.revokedAt)))
-    .orderBy(desc(entitlements.generation))
-    .limit(1);
-  return row ?? null;
 }
 
 export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> {
@@ -243,9 +234,10 @@ agent.post(
 );
 
 agent.get("/entitlement", requireDevice(), async (c) => {
-  const entitlement = await getLatestEntitlement(createDb(c.env.DB), c.var.device.id);
+  const entitlement = await currentEntitlementForDevice(createDb(c.env.DB), c.var.device.id);
+  c.header("Cache-Control", "no-store"); // the compact JWE is a confidential artefact
   if (!entitlement) return c.json({ error: "not_found" }, 404);
-  return c.json(entitlement);
+  return c.json({ entitlement: entitlement.token, generation: entitlement.generation });
 });
 
 // Not requireDevice(): a retried uninstall call must still 204 after the device (and its

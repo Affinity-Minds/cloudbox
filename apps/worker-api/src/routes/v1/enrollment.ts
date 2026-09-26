@@ -6,10 +6,14 @@
 // (docs/handoffs/foundation.md "Authorization dependency") — wired now per the brief so the gate is
 // real the moment WT-1 lands, at the cost of every mutation here 501ing until then. The handler
 // logic below is exported as plain functions and unit-tested directly, bypassing the gate.
-import { type CreateEnrollmentTokenResponse, CreateEnrollmentTokenRequest, type EnrollmentToken } from "@cloudbox/contracts";
+import {
+  CreateEnrollmentTokenRequest,
+  type CreateEnrollmentTokenResponse,
+  type EnrollmentToken,
+} from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { audit } from "../../audit";
 import { guard } from "../../auth/middleware";

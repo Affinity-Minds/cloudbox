@@ -12,20 +12,18 @@ import { desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { getPrincipal } from "../../../auth/middleware";
 import { createDb, type Db } from "../../../db/client";
-import {
-  auditLog,
-  devices,
-  entitlements,
-  tenantMemberships,
-  tenants,
-} from "../../../db/schema";
+import { auditLog, devices, entitlements, tenantMemberships, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
 
 const ONLINE_WINDOW_MS = 2 * 60_000;
 
 export type FleetAccess = { kind: "staff" } | { kind: "tenant"; tenantIds: string[] };
 
-async function resolveFleetAccess(db: Db, userId: string, hasDeviceView: boolean): Promise<FleetAccess | null> {
+async function resolveFleetAccess(
+  db: Db,
+  userId: string,
+  hasDeviceView: boolean,
+): Promise<FleetAccess | null> {
   if (hasDeviceView) return { kind: "staff" };
   const rows = await db
     .select({ tenantId: tenantMemberships.tenantId })
@@ -75,7 +73,11 @@ export async function loadFleet(
         : undefined;
   const search = filters.q?.trim();
   const searchScope = search
-    ? or(like(devices.name, `%${search}%`), like(devices.hostname, `%${search}%`), like(tenants.displayName, `%${search}%`))
+    ? or(
+        like(devices.name, `%${search}%`),
+        like(devices.hostname, `%${search}%`),
+        like(tenants.displayName, `%${search}%`),
+      )
     : undefined;
 
   const licenseValidUntil = sql<string | null>`(
@@ -103,7 +105,9 @@ export async function loadFleet(
     .from(devices)
     .innerJoin(tenants, eq(tenants.id, devices.tenantId))
     .where(
-      tenantScope && searchScope ? sql`${tenantScope} AND ${searchScope}` : tenantScope ?? searchScope,
+      tenantScope && searchScope
+        ? sql`${tenantScope} AND ${searchScope}`
+        : (tenantScope ?? searchScope),
     )
     .orderBy(desc(devices.enrolledAt))) as FleetRow[];
 
@@ -220,7 +224,11 @@ fleet.get("/", async (c) => {
   c.set("user", principal.user);
 
   const db = createDb(c.env.DB);
-  const access = await resolveFleetAccess(db, principal.user.id, principal.permissions.has("device.view"));
+  const access = await resolveFleetAccess(
+    db,
+    principal.user.id,
+    principal.permissions.has("device.view"),
+  );
   if (!access) return c.json({ error: "forbidden" }, 403);
 
   const tenant = c.req.query("tenant");
@@ -240,7 +248,11 @@ fleet.get("/:deviceId", async (c) => {
   c.set("user", principal.user);
 
   const db = createDb(c.env.DB);
-  const access = await resolveFleetAccess(db, principal.user.id, principal.permissions.has("device.view"));
+  const access = await resolveFleetAccess(
+    db,
+    principal.user.id,
+    principal.permissions.has("device.view"),
+  );
   if (!access) return c.json({ error: "forbidden" }, 403);
 
   const result = await loadFleetDetail(db, access, c.req.param("deviceId"));

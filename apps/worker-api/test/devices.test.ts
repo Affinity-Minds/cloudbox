@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import { createDb } from "../src/db/client";
 import { deviceCredentials, devices } from "../src/db/schema";
 import app from "../src/index";
-import { createEnrollmentToken } from "../src/routes/v1/enrollment";
 import { revokeDevice } from "../src/routes/v1/devices";
+import { createEnrollmentToken } from "../src/routes/v1/enrollment";
 import { signInAs } from "./auth-fixtures";
 import { insertTenant } from "./wt3-fixtures";
 

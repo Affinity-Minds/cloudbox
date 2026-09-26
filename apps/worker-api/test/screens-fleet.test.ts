@@ -87,7 +87,9 @@ describe("GET /api/v1/screens/fleet", () => {
           authorization: `Bearer ${enrolled.deviceToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ health: { device: "d", agent: { version: "0.1.0", healthy: true } } }),
+        body: JSON.stringify({
+          health: { device: "d", agent: { version: "0.1.0", healthy: true } },
+        }),
       },
       env,
     );

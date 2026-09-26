@@ -31,7 +31,12 @@ export async function resolveDevice(
 ): Promise<AppDevice | null> {
   const tokenHash = await sha256Hex(token);
   const [row] = await db
-    .select({ deviceId: devices.id, tenantId: devices.tenantId, status: devices.status, revokedAt: deviceCredentials.revokedAt })
+    .select({
+      deviceId: devices.id,
+      tenantId: devices.tenantId,
+      status: devices.status,
+      revokedAt: deviceCredentials.revokedAt,
+    })
     .from(deviceCredentials)
     .innerJoin(devices, eq(devices.id, deviceCredentials.deviceId))
     .where(eq(deviceCredentials.tokenHash, tokenHash))

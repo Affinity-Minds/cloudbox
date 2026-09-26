@@ -1,14 +1,72 @@
 import { env } from "cloudflare:test";
-import type { AgentEntitlementResponse, EnrollResponse, HeartbeatResponse } from "@cloudbox/contracts";
+import type {
+  AgentEntitlementResponse,
+  EnrollResponse,
+  HeartbeatResponse,
+} from "@cloudbox/contracts";
+import { generateServerSigningKey } from "@cloudbox/licensing-contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 import { createDb } from "../src/db/client";
-import { deviceCredentials, devices, entitlements, subscriptions } from "../src/db/schema";
-import { newId, nowIso } from "../src/ids";
+import { deviceCredentials, devices } from "../src/db/schema";
 import app from "../src/index";
 import { createEnrollmentToken, revokeEnrollmentToken } from "../src/routes/v1/enrollment";
+import { signInAs } from "./auth-fixtures";
 import { insertTenant } from "./wt3-fixtures";
+
+/** WT-5's issuance path needs `ENTITLEMENT_SIGNING_JWK` (test/subscriptions.test.ts's own pattern);
+ * generated once and reused, since it's only a signing key for this file's requests, not state. */
+let signingEnv: typeof env | undefined;
+async function envWithSigningKey(): Promise<typeof env> {
+  if (!signingEnv) {
+    const server = await generateServerSigningKey();
+    signingEnv = { ...env, ENTITLEMENT_SIGNING_JWK: JSON.stringify(server.privateJwk) };
+  }
+  return signingEnv;
+}
+
+/** Issues generation 1 for `deviceId` through WT-5's real HTTP route (super_admin holds every
+ * `license.*` permission, needed later to revoke), after creating the subscription it requires. */
+async function issueEntitlement(tenantId: string, deviceId: string) {
+  const { headers: staffHeaders } = await signInAs(env, {
+    email: `entitlement-issuer-${deviceId}@example.test`,
+    staffRole: "super_admin",
+  });
+  const jsonHeaders = { ...staffHeaders, "content-type": "application/json" };
+  const withKey = await envWithSigningKey();
+
+  const subscription = await app.request(
+    `/api/v1/tenants/${tenantId}/subscriptions`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        planCode: "cloudbox-6",
+        status: "active",
+        validFrom: new Date().toISOString(),
+        validUntil: new Date(Date.now() + 86_400_000).toISOString(),
+      }),
+    },
+    withKey,
+  );
+  if (subscription.status !== 201) {
+    throw new Error(
+      `could not create subscription: ${subscription.status} ${await subscription.text()}`,
+    );
+  }
+
+  const issue = await app.request(
+    `/api/v1/devices/${deviceId}/entitlements/issue`,
+    { method: "POST", headers: jsonHeaders, body: JSON.stringify({}) },
+    withKey,
+  );
+  if (issue.status !== 201) {
+    throw new Error(`could not issue entitlement: ${issue.status} ${await issue.text()}`);
+  }
+
+  return { staffHeaders, withKey };
+}
 
 type RsaPublicJwk = { kty: "RSA"; n: string; e: string };
 
@@ -29,7 +87,11 @@ async function issueToken(tenantId: string, expiresInHours = 24): Promise<string
   return created.token;
 }
 
-function enrollBody(token: string, jwk: RsaPublicJwk, overrides: Partial<{ hostname: string }> = {}) {
+function enrollBody(
+  token: string,
+  jwk: RsaPublicJwk,
+  overrides: Partial<{ hostname: string }> = {},
+) {
   return {
     token,
     device: {
@@ -106,7 +168,11 @@ describe("POST /api/v1/agent/enroll", () => {
       .update(enrollmentTokens)
       .set({ expiresAt: new Date(Date.now() - 60_000).toISOString() })
       .where(eq(enrollmentTokens.id, expiredCreated.id));
-    const expiredResponse = await enroll(expiredCreated.token, await freshDeviceJwk(), "enroll-expired");
+    const expiredResponse = await enroll(
+      expiredCreated.token,
+      await freshDeviceJwk(),
+      "enroll-expired",
+    );
     expect(expiredResponse.status).toBe(400);
     await expect(expiredResponse.json()).resolves.toEqual({ error: "invalid_enrollment_token" });
 
@@ -117,7 +183,11 @@ describe("POST /api/v1/agent/enroll", () => {
       createdBy: "user_test",
     });
     await revokeEnrollmentToken(db, { tenantId, tokenId: revokedCreated.id, actorId: "u1" });
-    const revokedResponse = await enroll(revokedCreated.token, await freshDeviceJwk(), "enroll-revoked");
+    const revokedResponse = await enroll(
+      revokedCreated.token,
+      await freshDeviceJwk(),
+      "enroll-revoked",
+    );
     expect(revokedResponse.status).toBe(400);
     await expect(revokedResponse.json()).resolves.toEqual({ error: "invalid_enrollment_token" });
   });
@@ -215,7 +285,9 @@ describe("POST /api/v1/agent/heartbeat", () => {
           authorization: `Bearer ${enrolled.deviceToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ health: { ...HEALTH_DOC, agent: { version: "0.1.2", healthy: true } } }),
+        body: JSON.stringify({
+          health: { ...HEALTH_DOC, agent: { version: "0.1.2", healthy: true } },
+        }),
       },
       env,
     );
@@ -232,32 +304,9 @@ describe("POST /api/v1/agent/heartbeat", () => {
     expect(JSON.parse(row?.lastHealthJson ?? "null")).toMatchObject({ rdp: { listener: null } });
   });
 
-  it("reports the latest non-revoked entitlement generation", async () => {
+  it("reports the current entitlement generation from WT-5's issuance service", async () => {
     const enrolled = await enrollFreshDevice("heartbeat-entitlement-1");
-    const db = createDb(env.DB);
-    const subscriptionId = newId("subscription");
-    await db.insert(subscriptions).values({
-      id: subscriptionId,
-      tenantId: enrolled.tenantId,
-      planCode: "cloudbox-6",
-      status: "active",
-      validFrom: nowIso(),
-      validUntil: new Date(Date.now() + 86_400_000).toISOString(),
-      maxManagedUsers: 6,
-      featuresJson: "[]",
-      offlineGraceDays: 7,
-      renewalWarningDays: 30,
-    });
-    await db.insert(entitlements).values({
-      id: newId("license"),
-      subscriptionId,
-      deviceId: enrolled.deviceId,
-      generation: 3,
-      claimsJson: "{}",
-      token: "fake.jwe.token",
-      issuedBy: "test",
-      validUntil: new Date(Date.now() + 86_400_000).toISOString(),
-    });
+    await issueEntitlement(enrolled.tenantId, enrolled.deviceId);
 
     const response = await app.request(
       "/api/v1/agent/heartbeat",
@@ -272,7 +321,7 @@ describe("POST /api/v1/agent/heartbeat", () => {
       env,
     );
     const body = (await response.json()) as HeartbeatResponse;
-    expect(body.entitlementGeneration).toBe(3);
+    expect(body.entitlementGeneration).toBe(1);
   });
 });
 
@@ -287,54 +336,38 @@ describe("GET /api/v1/agent/entitlement", () => {
     expect(response.status).toBe(404);
   });
 
-  it("returns the latest non-revoked entitlement's token and generation", async () => {
-    const enrolled = await enrollFreshDevice("entitlement-issued-1");
-    const db = createDb(env.DB);
-    const subscriptionId = newId("subscription");
-    await db.insert(subscriptions).values({
-      id: subscriptionId,
-      tenantId: enrolled.tenantId,
-      planCode: "cloudbox-6",
-      status: "active",
-      validFrom: nowIso(),
-      validUntil: new Date(Date.now() + 86_400_000).toISOString(),
-      maxManagedUsers: 6,
-      featuresJson: "[]",
-      offlineGraceDays: 7,
-      renewalWarningDays: 30,
-    });
-    await db.insert(entitlements).values([
-      {
-        id: newId("license"),
-        subscriptionId,
-        deviceId: enrolled.deviceId,
-        generation: 1,
-        claimsJson: "{}",
-        token: "gen1.jwe",
-        issuedBy: "test",
-        validUntil: new Date(Date.now() + 86_400_000).toISOString(),
-        revokedAt: nowIso(),
-      },
-      {
-        id: newId("license"),
-        subscriptionId,
-        deviceId: enrolled.deviceId,
-        generation: 2,
-        claimsJson: "{}",
-        token: "gen2.jwe",
-        issuedBy: "test",
-        validUntil: new Date(Date.now() + 86_400_000).toISOString(),
-      },
-    ]);
+  it("end-to-end through WT-5's issuance service: issue → GET returns the token; revoke → GET 404s again", async () => {
+    const enrolled = await enrollFreshDevice("entitlement-e2e-1");
+    const { staffHeaders } = await issueEntitlement(enrolled.tenantId, enrolled.deviceId);
 
-    const response = await app.request(
+    const issued = await app.request(
       "/api/v1/agent/entitlement",
       { headers: { authorization: `Bearer ${enrolled.deviceToken}` } },
       env,
     );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as AgentEntitlementResponse;
-    expect(body).toEqual({ entitlement: "gen2.jwe", generation: 2 });
+    expect(issued.status).toBe(200);
+    expect(issued.headers.get("cache-control")).toBe("no-store");
+    const issuedBody = (await issued.json()) as AgentEntitlementResponse;
+    expect(issuedBody.generation).toBe(1);
+    expect(typeof issuedBody.entitlement).toBe("string");
+
+    const revoke = await app.request(
+      `/api/v1/devices/${enrolled.deviceId}/entitlements/revoke`,
+      {
+        method: "POST",
+        headers: { ...staffHeaders, "content-type": "application/json" },
+        body: JSON.stringify({ reason: "test: end-to-end revoke" }),
+      },
+      env,
+    );
+    expect(revoke.status).toBe(200);
+
+    const afterRevoke = await app.request(
+      "/api/v1/agent/entitlement",
+      { headers: { authorization: `Bearer ${enrolled.deviceToken}` } },
+      env,
+    );
+    expect(afterRevoke.status).toBe(404);
   });
 });
 
@@ -357,7 +390,9 @@ describe("POST /api/v1/agent/uninstalled", () => {
     const activeCredentials = await db
       .select()
       .from(deviceCredentials)
-      .where(and(eq(deviceCredentials.deviceId, enrolled.deviceId), isNull(deviceCredentials.revokedAt)));
+      .where(
+        and(eq(deviceCredentials.deviceId, enrolled.deviceId), isNull(deviceCredentials.revokedAt)),
+      );
     expect(activeCredentials).toHaveLength(0);
 
     const auditRow = await env.DB.prepare(

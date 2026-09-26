@@ -32,7 +32,9 @@ export async function revokeDevice(
     db
       .update(deviceCredentials)
       .set({ revokedAt: now })
-      .where(and(eq(deviceCredentials.deviceId, input.deviceId), isNull(deviceCredentials.revokedAt))),
+      .where(
+        and(eq(deviceCredentials.deviceId, input.deviceId), isNull(deviceCredentials.revokedAt)),
+      ),
     audit(db, {
       eventType: "DEVICE_REVOKED",
       entityType: "device",
