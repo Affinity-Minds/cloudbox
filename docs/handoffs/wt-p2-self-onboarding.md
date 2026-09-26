@@ -55,11 +55,11 @@ docs(wt-14): ADR 0011, slice 2.6, licence-key runbook, handoff, evidence
 | `src/index.ts` | WT-1 | 4 allowlist entries for `/api/auth/start/*` + `/api/auth/connect/*`, email-normalisation + step-up sets, mount `onboardingAuth` before the Better Auth catch-all |
 | `src/auth/index.ts` | WT-1 | `AuthRequestContext.flow` (`start`/`connect`) + `connectTenantId`; start flow sends to/creates unknown addresses and audits `CUSTOMER_SIGNUP`; Connect success audit carries `surface`, `tenantId`; `disableSignUp` false only for `start` |
 | `src/auth/challenge.ts` | WT-1 | `verifyTurnstile` accepts Cloudflare testing-key answers outside production only (local demo) |
-| `src/ops-shell.ts` | WT-1 | `/licences` is a console route |
+| `src/ops-shell.ts` | WT-1 | `/licences` is a console route; **review W-1:** `opsBasePath` rejects `/api`, `/assets`, `/login`, `/portal`, `/start` |
 | `src/routes/v1/agent.ts` | WT-3 | enroll → activation (redeem + issue), heartbeat → auto-issuance when no live entitlement; response fields additive |
 | `src/routes/v1/enrollment.ts` | WT-3 | `createEnrollmentToken` optional `source`, `auditAfter` |
 | `src/routes/v1/screens/fleet.ts` | WT-3 | detail loader adds `plan` (same batch, 3 round trips) |
-| `src/entitlement/service.ts` | WT-5 | `Actor.type`/`Actor.source` (default `user`/`api`) |
+| `src/entitlement/service.ts` | WT-5 | `Actor.type`/`Actor.source` (default `user`/`api`); **review P2-1:** inside `issueForDevice` only, the entitlement insert is one `INSERT … SELECT … WHERE count(other licensed devices) < max_devices` (`changes !== 1` → `device_limit_reached`), and the audit row is written after it (was: pre-count, then batch insert + audit) |
 | `src/entitlement/status.ts` | WT-5 | lifecycle handles `pending` (no dates) → `expiry: "pending"`, not issuable |
 | `src/routes/v1/subscriptions.ts` | WT-5 | create: no dates → `pending` (plan assignment), dates → old behaviour; PATCH: dates required unless pending (`dates_required`) |
 | `packages/contracts/src/subscriptions.ts` | WT-5 | `pending` status + expiry, nullable dates, create request dates optional |
@@ -97,15 +97,15 @@ See `docs/slices/2.6-self-onboarding.md` (full table). Summary:
 
 | Endpoint | Gate | Audit |
 |---|---|---|
-| `POST /api/auth/start/send-code` `{email}` | Turnstile always; 5/(email,client)/15 min, 20/client/h | `AUTH_OTP_SENT` (WT-1's) |
+| `POST /api/auth/start/send-code` `{email}` | Turnstile always; 5/(email,client)/15 min, 20/client/h; 10/24 h to an address with no account | `AUTH_OTP_SENT` (WT-1's), `AUTH_START_CEILING` |
 | `POST /api/auth/start/verify` `{email, code}` | Turnstile always; 30/client/h | `AUTH_LOGIN_SUCCEEDED {surface:"start"}`, `CUSTOMER_SIGNUP` (first time) |
-| `POST /api/auth/connect/send-code` `{tenantCode, email}` | closed; identical answer | `AUTH_OTP_SENT {outcome:"not_member"}` once per window |
-| `POST /api/auth/connect/verify` `{tenantCode, email, code}` | closed; wrong-code body for anything wrong | `AUTH_LOGIN_SUCCEEDED {surface:"connect", tenantId}` |
+| `POST /api/auth/connect/send-code` `{tenantCode, email}` | closed; identical answer; 3 / 60 s per client (429 `rate_limited`) | `AUTH_OTP_SENT {outcome:"not_member"}` once per window |
+| `POST /api/auth/connect/verify` `{tenantCode, email, code}` | closed; `CONNECT_INVALID` for anything wrong; 3 / 60 s per client | `AUTH_LOGIN_SUCCEEDED {surface:"connect", tenantId}` |
 | `GET /api/v1/onboarding/config` | public | — |
 | `GET /api/v1/onboarding/overview` | customer | — |
-| `POST /api/v1/onboarding/tenants` | customer; 10/h | `TENANT_CREATED`, `USER_INVITED` (source `self_onboarding`) |
+| `POST /api/v1/onboarding/tenants` | customer; 10/h; ≤ 5 self-created tenants without a plan (409 `tenant_limit_reached`) | `TENANT_CREATED`, `USER_INVITED` (source `self_onboarding`) |
 | `POST /api/v1/onboarding/redeem` | customer; 20/client/h, 10/customer/h | `LICENSE_KEY_REDEEMED`, `TENANT_CREATED`, `USER_INVITED` (`license_redemption`), `SUBSCRIPTION_CHANGED` (`license_key`) |
-| `POST /api/v1/onboarding/activation-grants` | customer, Owner/Admin; 20/h | `ENROLLMENT_TOKEN_CREATED` (source `self_activation`) |
+| `POST /api/v1/onboarding/activation-grants` | customer, Owner/Admin; tenant `provisioning`/`active`/`trial` (else 403 `tenant_not_active`); 20/h | `ENROLLMENT_TOKEN_CREATED` (source `self_activation`) |
 | `GET /api/v1/connect/devices` | customer, active member | — |
 | `POST /api/v1/license-keys/batches` | `license.issue` | `LICENSE_KEYS_GENERATED` (no keys) |
 | `GET /api/v1/license-keys` | `license.issue` or `subscription.view` | — |
@@ -145,7 +145,7 @@ CloudBox.Agent.exe install --enroll-token <grant>
      and issued on the next heartbeat (heartbeat → licenseState "licensed", entitlementGeneration n).
 ```
 Errors: 401 (no session), 403 `forbidden` (not Owner/Admin of that tenant, or not a member),
-409 `tenant_inactive`, 429 `rate_limited`, 403 `challenge_required {siteKey}` (start path without a valid token).
+403 `tenant_not_active`, 429 `rate_limited`, 403 `challenge_required {siteKey}` (start path without a valid token).
 
 **WT-11 (Connect):**
 ```
@@ -153,11 +153,27 @@ POST /api/auth/connect/send-code {"tenantCode":"CBX-00001","email":"…"}       
 POST /api/auth/connect/verify    {"tenantCode":"CBX-00001","email":"…","code":"123456"}
      → 200 {token, user:{id,email,name,…}, tenantId, tenantCode} + cookie; active tenant = that tenant
      → 400 {"code":"INVALID_OTP","message":"Invalid OTP"} for a wrong code, unknown tenant, unknown email, non-member
+     → 429 {"error":"rate_limited"} after 3 calls per path per client within 60 s (members and strangers alike)
 GET  /api/v1/connect/devices[?tenantId=]
      → {tenantId, tenantCode, tenantName, plan:{state,…,message}, devices:[{deviceId,name,hostname,online,lastSeenAt,licenseState}]}
 ```
 Zod contract: `packages/contracts/src/connect.ts`. The account step-up (403 `challenge_required`
 above an address's failure budget) applies to both Connect paths exactly as at `/login`.
+
+## WT-8 phase-2 review (`docs/reviews/phase-2-onboarding-security.md`), fixed in `8c388e1`
+
+| Finding | Fix |
+|---|---|
+| P2-1 (High) concurrent activations exceed `max_devices` | limit enforced inside the entitlement INSERT (WT-5's `issueForDevice`, that function only); activation and heartbeat both go through it |
+| P2-2 Connect member/non-member oracle | per-client limit 3 / 60 s per path before the membership lookup; member send always answers `{success:true}`; every member-path verify refusal is the `CONNECT_INVALID` constant |
+| P2-5 start-path mail flood to new addresses | 10 codes / 24 h to an address with no customer row, then the same 200 and nothing sent; `AUTH_START_CEILING` audited once per day |
+| P2-3 testing keys when `ENVIRONMENT` unset | only `ENVIRONMENT === "development"` |
+| P2-4 grants for suspended tenants | only `provisioning`/`active`/`trial`; else 403 `tenant_not_active` |
+| P2-6 unbounded tenant self-creation | lifetime cap 5 self-created tenants without a plan per customer (409 `tenant_limit_reached`); sequential codes accepted (public by design) |
+| P2-8 key typed with lower case / spaces | canonicalised (upper-case, strip spaces and dashes, re-group) before the format check |
+| W-1 (Phase 1) `OPS_BASE_PATH=/api` | reserved first segments fall back to `/ops` |
+
+P2-7 (Drizzle snapshot) is WT-0's; P2-9 (typo'd primary contact) is WT-2's. All review tests pass unmodified.
 
 ## Security assumptions
 
@@ -181,11 +197,11 @@ above an address's failure budget) applies to both Connect paths exactly as at `
 
 ```
 $ corepack pnpm run verify
-biome check .            Checked 194 files. No fixes applied. (1 pre-existing warning, tests/e2e-cloud)
+biome check .            Checked 196 files. No fixes applied. (1 pre-existing warning, tests/e2e-cloud)
 pnpm typecheck           contracts, licensing-contracts, worker-api, admin-web, tests/e2e-cloud: Done
 packages/licensing-contracts   Test Files 2 passed (2)    Tests 16 passed (16)
 apps/admin-web                 Test Files 2 passed (2)    Tests 5 passed (5)
-apps/worker-api                Test Files 29 passed (29)  Tests 542 passed (542)
+apps/worker-api                Test Files 31 passed (31)  Tests 560 passed (560)   (after the review fixes, 8c388e1)
 pnpm build               admin-web ✓ built; worker-api wrangler deploy --dry-run OK
 EXIT 0
 ```

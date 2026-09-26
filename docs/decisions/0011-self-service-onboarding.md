@@ -26,7 +26,8 @@ normal path, and without a trial.
   be ours; single use, so the widget re-issues between calls). Without `TURNSTILE_SECRET_KEY` the
   start path is closed. Cloudflare's published *testing* keys are accepted outside production only.
 - Limits on top of Better Auth's per-IP ones: 5 sends per (email, client) per 15 min, 20 sends per
-  client per hour (across addresses), 30 verifies per client per hour.
+  client per hour (across addresses), 30 verifies per client per hour, and 10 code emails per 24 h
+  to an address that has no customer row yet (then the same 200, nothing sent; review P2-5).
 - `/login` is unchanged: closed, unknown addresses get the same answer and nothing is stored.
 
 ### 2. Tenant self-creation
@@ -34,12 +35,15 @@ normal path, and without a trial.
 (`provisioning`, next `CBX-#####` code, primary contact = the session email, **no subscription**)
 and the caller's `owner` membership in one batch, audited `TENANT_CREATED` + `USER_INVITED`
 (source `self_onboarding`), same row shapes as WT-2's staff create (primary contact = first owner).
-A customer may own several tenants (10 creations per hour per customer).
+A customer may own several tenants (10 creations per hour per customer; at most 5 self-created
+tenants without a plan at a time, review P2-6). Tenant codes are sequential and public by design
+(people type them into Connect), so a creator can estimate how many tenants exist; accepted.
 
 ### 3. Device self-activation replaces staff codes on the normal path
 `POST /api/v1/onboarding/activation-grants {tenantId, deviceLabel?}` (customer session, Owner or
 Admin of that tenant) mints a normal WT-3 enrollment token (label `self-activation by <email>`,
-TTL 15 min, audited `ENROLLMENT_TOKEN_CREATED` source `self_activation`) and returns it once. The
+TTL 15 min, audited `ENROLLMENT_TOKEN_CREATED` source `self_activation`) and returns it once, only
+for tenants that are `provisioning`, `active` or `trial` (else 403 `tenant_not_active`). The
 Setup app passes it to `CloudBox.Agent.exe install --enroll-token`. `/agent/enroll` accepts it like
 any code. Staff enrollment codes remain as the fallback.
 
@@ -49,7 +53,9 @@ any code. Staff enrollment codes remain as the fallback.
 2. **Redemption** — at the tenant's first successful server activation (`/agent/enroll` with any
    token): `valid_from = now`, `valid_until = now + plans.term_days` (WT-13's column; 365 when
    absent), status `active`, audited `SUBSCRIPTION_REDEEMED` (actor system, source `activation`,
-   device id). One conditional UPDATE: only the first activation redeems.
+   device id). One conditional UPDATE: only the first activation redeems. The plan's
+   `max_devices` is enforced inside the entitlement INSERT itself (review P2-1), so concurrent
+   activations or heartbeats cannot exceed it.
 3. **Licence generation** — right after, the device's entitlement is issued through WT-5's
    `issueForDevice` (`LICENSE_ISSUED`, actor system, source `activation`). Further servers under
    `max_devices` just get entitlements.
@@ -84,7 +90,9 @@ any code. Staff enrollment codes remain as the fallback.
 run the normal customer code flow only for an **active member of that tenant**; unknown tenant,
 unknown email and non-members get the identical answers (send: `200 {success:true}` with nothing
 sent; verify: the exact wrong-code body). Success sets the active tenant and is audited
-`AUTH_LOGIN_SUCCEEDED {surface: "connect", tenantId}`. `GET /api/v1/connect/devices` lists that
+`AUTH_LOGIN_SUCCEEDED {surface: "connect", tenantId}`. A per-client limit (3 / 60 s per path)
+runs before the membership lookup and every member-path refusal is re-serialised as the one
+Connect answer, so status sequences and bodies match for members and strangers (review P2-2). `GET /api/v1/connect/devices` lists that
 tenant's enrolled devices with online state and licence state. Contract: `packages/contracts/src/connect.ts`.
 
 ## Alternatives rejected

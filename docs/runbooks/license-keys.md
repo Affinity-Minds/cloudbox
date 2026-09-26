@@ -39,6 +39,8 @@ Any staff role with `subscription.view` (all roles) or `license.issue`.
   (unredeemed / expired / redeemed / revoked), who redeemed it and the tenant it created.
 - API: `GET /api/v1/license-keys?last4=HP48` (also `?batch=<batchId>`, `?status=redeemed`).
 - Two keys can share the last four symbols; confirm with the batch label and the store.
+- Buyers may type keys in lower case, with spaces or without dashes: the server re-formats them
+  before checking.
 - A buyer whose key "is not valid" gets the same answer for used, expired, revoked and mistyped
   keys (by design). Look it up: redeemed → by whom and when; expired → the batch expiry; revoked →
   the reason (hover the pill); not found → a typo (Crockford symbols: no I, L, O, U).

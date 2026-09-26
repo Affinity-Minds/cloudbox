@@ -21,7 +21,9 @@ pnpm --filter @cloudbox/worker-api test
 Test Files  2 failed | 29 passed (31)
 Tests       6 failed | 548 passed (554)
 ```
-Five of the failures are the P2 findings below. The sixth is W-1 from the Phase 1 fifth pass (Low, `OPS_BASE_PATH` accepts `/api`), which is still open.
+Five of the failures are the P2 findings below. The sixth is W-1 from the Phase 1 fifth pass (Low, `OPS_BASE_PATH` accepts `/api`), which is still open. **W-1 fixed in `8c388e1` (WT-14):** `opsBasePath` rejects `/api`, `/assets`, `/login`, `/portal` and `/start` and falls back to `/ops`.
+
+**Re-run after the fixes (`8c388e1`):** `corepack pnpm run verify` exits 0. worker-api: 31 files, 560 tests. Every review test passes unmodified. P2-7 and P2-9 stay open (WT-0 and WT-2).
 
 **Merge blocker (High): P2-1.**
 
@@ -44,6 +46,7 @@ Five of the failures are the P2 findings below. The sixth is W-1 from the Phase 
   - Insert the entitlement with `INSERT … SELECT … WHERE (SELECT count(DISTINCT device_id) FROM entitlements WHERE subscription_id = ? AND revoked_at IS NULL AND valid_until > ? AND device_id <> ?) < ?max`, and treat `meta.changes = 0` as `device_limit_reached`. D1 runs each statement on its own, so the check and the insert cannot interleave. The audit row must then be written only after a successful insert.
   - Alternatively, claim a per-subscription slot row with a conditional upsert before signing, and release it if the batch fails (agent-notes "a transaction cannot be made conditional on one row changed").
 - **Negative test:** P2-1.
+- **Fixed in `8c388e1` (WT-14).** Inside `issueForDevice` only (WT-5's function; noted in the WT-14 handoff). The entitlement is written by one `INSERT … SELECT … WHERE (count of other enrolled devices of the tenant with a live entitlement on a non-cancelled subscription) < max_devices`. `meta.changes !== 1` becomes `device_limit_reached`. `LICENSE_ISSUED`/`RENEWED` is audited only after a successful insert. UNIQUE(device_id, generation) stays the last defence. This covers both the activation path and the heartbeat catch-up, since both call it. The P2-1 test passes unmodified.
 
 ## Medium
 
@@ -63,23 +66,34 @@ Five of the failures are the P2 findings below. The sixth is W-1 from the Phase 
   - On verify, map every Better Auth 4xx from the member path to exactly `CONNECT_INVALID`, with our serialisation. Use one shared constant for the answer, so key order cannot differ.
   - Keep the member send's mail in `waitUntil` so timing stays level.
 - **Negative test:** both P2-2 tests.
+- **Fixed in `8c388e1` (WT-14).**
+  - Our own per-client limit (3 / 60 s per path) now runs on `/api/auth/connect/*` before the membership lookup.
+  - On a member send, whatever Better Auth answers, the caller gets `{success:true}`.
+  - Every non-2xx on the member verify path is re-serialised as the one `CONNECT_INVALID` constant.
+  - Both P2-2 tests pass unmodified, and WT-14 added a byte-exact body test.
 
 ### P2-5 The start path can mail-bomb any address; only Turnstile's per-token cost stops it
 - **Where:** `src/onboarding/auth-routes.ts:234-247` and `src/onboarding/common.ts:40-41`. The limits are 5 per (email, client) per 15 min and 20 per client per hour. There is no per-address ceiling (on purpose after S-2, but that reasoning applies to accounts that exist). Every send needs a fresh Turnstile token.
 - **Path:** a victim address that has no customer row can be sent unlimited code emails. The attacker only needs Turnstile-solving tokens (commercial solvers charge about $1–3 per 1,000) and a pool of IPs. The cost to the product is sender-domain reputation and Email Service quota; the victim gets a flood of mail.
 - **Fix:** put a per-address daily ceiling on start-path sends for addresses **without** a customer row (for example 10 per 24 h). Above it, answer the same `{success:true}` and send nothing. There is no account to lock out, and a real person can retry the next day or use the code already in their inbox (`resendStrategy: "reuse"`).
 - **Test to add:** 11 start sends for one new address, each from a new client with a mocked-valid Turnstile token, deliver at most 10 emails. Not added in this pass, because the ceiling value is a product decision.
+- **Fixed in `8c388e1` (WT-14).**
+  - The ceiling is 10 start-path code emails per 24 h to an address with no customer row, counted from `AUTH_OTP_SENT` audit rows (outcome sent / send_failed).
+  - Above it the answer is the same `{success:true}` and nothing is sent. `AUTH_START_CEILING` is audited once per 24 h.
+  - Test: `onboarding.test.ts` "P2-5" sends 12 from 12 clients and gets 10 mails, 1 audit row.
 
 ## Low
-- **P2-3: testing keys are accepted whenever `ENVIRONMENT` is not `production`, including when it is unset.** Location: `src/auth/challenge.ts` `verifyTurnstile`. Accept `result_with_testing_key` only when `ENVIRONMENT === "development"`, so the check fails closed. Production is safe today, because `wrangler.jsonc` defaults to `production` and WT-14's own test checks it. Test: `P2-3` (fails).
-- **P2-4: an Owner or Admin of a `suspended` or `past_due` tenant can still mint activation grants.** Only `archived` and `cancelled` are refused (`self-service.ts:192-194`). No licence is issued without a running subscription, but devices can still be enrolled into a suspended tenant. Decide the policy, then refuse at least `suspended`. Test: `P2-4` (fails).
-- **P2-6: tenant self-creation has no overall cap and reveals the tenant count.** The limit is 10 per customer per hour (`common.ts:46`), with no lifetime cap, so one throwaway identity can create 240 tenants a day. Because each one takes the next sequential `CBX-#####` code, any customer who creates a tenant learns roughly how many tenants exist. Add a lifetime cap per customer (for example 5 tenants without a subscription). Consider a non-sequential public code, or accept the leak and document it.
+- **P2-3: testing keys are accepted whenever `ENVIRONMENT` is not `production`, including when it is unset.** Location: `src/auth/challenge.ts` `verifyTurnstile`. Accept `result_with_testing_key` only when `ENVIRONMENT === "development"`, so the check fails closed. Production is safe today, because `wrangler.jsonc` defaults to `production` and WT-14's own test checks it. Test: `P2-3` (fails). **Fixed in `8c388e1`:** testing keys are accepted only when `ENVIRONMENT === "development"`.
+- **P2-4: an Owner or Admin of a `suspended` or `past_due` tenant can still mint activation grants.** Only `archived` and `cancelled` are refused (`self-service.ts:192-194`). No licence is issued without a running subscription, but devices can still be enrolled into a suspended tenant. Decide the policy, then refuse at least `suspended`. Test: `P2-4` (fails). **Fixed in `8c388e1`:** grants are allowed only for `provisioning`, `active` and `trial` tenants. `suspended`, `past_due`, `cancelled` and `archived` get 403 `tenant_not_active`.
+- **P2-6: tenant self-creation has no overall cap and reveals the tenant count.** The limit is 10 per customer per hour (`common.ts:46`), with no lifetime cap, so one throwaway identity can create 240 tenants a day. Because each one takes the next sequential `CBX-#####` code, any customer who creates a tenant learns roughly how many tenants exist. Add a lifetime cap per customer (for example 5 tenants without a subscription). Consider a non-sequential public code, or accept the leak and document it. **Fixed in `8c388e1`:**
+  - Lifetime cap: 5 self-created tenants per customer that have no non-cancelled subscription (409 `tenant_limit_reached`). Attaching a plan frees the slot. The 10 / h limit stays.
+  - The sequential-code count leak is accepted and documented in ADR 0011: codes are public by design (people type them into Connect).
 - **P2-7: Drizzle metadata is out of date for 0010.**
   - `drizzle-kit generate` still emits a `subscriptions` rebuild (the `pending` status and the date check), because `meta/` was not regenerated after the hand-written 0010.
   - `license_keys` is defined outside `db/schema.ts` (`onboarding/license-keys-table.ts`), so drizzle-kit does not see it.
 
   The SQL in 0010 itself matches the schema, and it rebuilds `subscriptions` correctly under `defer_foreign_keys`. Regenerate the snapshot and add the license-keys table to the drizzle-kit schema list, or the next `db:generate` will emit a duplicate migration. I ran the probe and deleted what it generated; nothing was committed.
-- **P2-8: licence keys typed in lower case or with spaces are rejected.** `LICENSE_KEY_PATTERN` is tested on the raw input (`license-keys.ts:257`) before the normalisation that `hashLicenseKey` applies. This is a usability issue, not a security one: normalise first, then test.
+- **P2-8: licence keys typed in lower case or with spaces are rejected.** `LICENSE_KEY_PATTERN` is tested on the raw input (`license-keys.ts:257`) before the normalisation that `hashLicenseKey` applies. This is a usability issue, not a security one: normalise first, then test. **Fixed in `8c388e1`:** `canonicalLicenseKey` upper-cases the input, drops spaces and dashes, and re-groups it before the format check and the hash.
 - **P2-9: a typo in the primary contact hands the tenant to that address.** WT-2's primary contact becomes owner, so a mistyped `primaryContactEmail` on a staff-created tenant makes that address the Owner (`routes/v1/tenants.ts`). The new owner still has to prove the address with a code, so only the real holder of that mailbox gets in. Show the contact back in the create confirmation, and consider a "pending owner" state until their first sign-in.
 
 ## Checked and holding
