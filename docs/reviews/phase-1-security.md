@@ -111,3 +111,139 @@ mailer stub before you rely on that.
 - **Browser-enforced behaviour:** SameSite handling, fetch-metadata headers and pushState origin rules (L-2, L-9) need a real browser (Playwright against `wrangler dev`).
 - **Email Service delivery** and `E_SENDER_NOT_VERIFIED` in production. The `production` GitHub environment's protection rules and the actual scope of the Cloudflare token are not visible from the repo.
 - **WT-2/WT-3/WT-5 code** is not merged yet. The second pass will extend this document.
+
+---
+
+# Second pass
+
+Reviewed commit: `phase-1/identity` @ `a3fc5f0`, merged into `review/phase-1-security`. New surface since the first pass:
+- closed sign-in
+- staff email + password + TOTP (Better Auth `emailAndPassword` + `twoFactor`)
+- forced first-sign-in setup and `setup_required`
+- `POST /staff` with `initialPassword` (also resets existing staff)
+- password lockout
+- the `/api/auth` allowlist
+- the bootstrap password seed and its workflow step
+
+Better Auth 1.7.6 source read: `plugins/two-factor/{index,verify-two-factor,totp/index,backup-codes/index}.mjs`, `plugins/email-otp/*`.
+
+New negative tests: `apps/worker-api/test/review/phase-1-second-pass.test.ts`. As before, each test asserts the secure behaviour.
+
+```
+pnpm --filter @cloudbox/worker-api test
+Test Files  1 failed | 12 passed (13)
+Tests       8 failed | 302 passed (310)
+```
+All 8 failures are in the second-pass file and each is a finding below. Every first-pass review test (`phase-1-hardening.test.ts`) passes unmodified.
+
+**Merge blockers (High): S-1, S-2.** There are no Critical findings.
+
+## Second-pass findings
+
+### S-1 (High) Anyone can lock any staff account, including every super admin, out of password sign-in
+- **Where:** `apps/worker-api/src/auth/index.ts:158-161` (`PASSWORD_FAILURE_CAPS.perEmail` = 100 / h) and `:375-381` (over either cap, every request is refused with 429 **before** the password is checked, including a correct one).
+- **Exploit path:** failures for a staff email are counted from `AUTH_LOGIN_FAILED` rows, whoever caused them. An attacker spreads 100 wrong passwords over 20 or more clients (the per-(email, client) cap of 5 does not stop this; the per-IP limit is 3 / 10 s). That is one free IPv6 /48 from a tunnel broker, or a few dollars of residential proxies. After that, the owner's correct password from anywhere gets 429 for the next hour. Repeating it every hour locks the account out indefinitely. Recovery needs another super admin's reset, or a D1 edit if every super admin is targeted. Existing sessions (7 days) are the only thing that keeps working.
+- **Evidence:** test `S-1 … 100 wrong passwords from 100 unrelated clients do not stop the owner's correct password` fails with `expected 429 to be 200`. Those are 100 real API requests, 1 per client.
+- **Fix:** the per-account ceiling must never refuse a correct password without a challenge a human can pass. Above the ceiling, require a valid Turnstile token on `/sign-in/email` (the skill `cloudflare-turnstile`; the login page already has a hidden-field pattern), and keep refusing only the (email, client) pairs that are over their own cap. For enrolled staff the password is only the first factor: Better Auth's TOTP account lockout (10 failures / 15 min) already limits the second step. An alternative is to drop the hard ceiling and alert on it instead (an audit event plus notification).
+- **Negative test:** S-1. It passes once a correct password from a clean client is accepted above the ceiling, or once the test sends a valid Turnstile token.
+
+### S-2 (High) The per-email OTP ceiling silently drops a customer's code: first-pass H-1 is back through the ceiling
+- **Where:** `src/auth/index.ts:45-48` (`perEmail` 30 / h) and `:328-335` (over the ceiling: answer 200, generate nothing, send nothing).
+- **Exploit path:** 30 send requests for a customer address from 10 or more clients (3 each, under both the per-IP and per-(email, client) limits) use up that address's hourly ceiling. For the rest of the hour every send, including the owner's from a fresh IP, answers "sent" and delivers nothing. The code the attacker's sends kept alive (reuse strategy) expires 5 minutes after the last one. About 30 requests per hour keep a customer out with no error shown to them.
+- **Note on origin:** my first-pass H-1 fix text suggested exactly this ceiling ("for example 30 per hour") without checking that silently suppressing sends is itself a lockout. That was my error; WT-1 implemented what I recommended.
+- **Evidence:** test `S-2 … 30 sends from 10 unrelated clients, then the owner still receives a code` fails with `expected 30 to be greater than 30`: the owner's request sent nothing.
+- **Fix:** same shape as S-1. Above the per-email ceiling, send when the request carries a valid Turnstile token and suppress only token-less requests. The ceiling then stops mail bombing by bots without locking out a person. The response body must stay identical in every case (anti-enumeration).
+- **Negative test:** S-2.
+
+### S-3 (Medium) An authenticator code can be used more than once
+- **Where:** Better Auth `plugins/two-factor/totp/index.mjs` (`createOTP(…).verify(code)`, no record of the last accepted time step). Configured at `src/auth/index.ts:580-584`.
+- **Exploit path:** someone who has the password and one observed or phished code (shoulder-surfing, a real-time phishing proxy, a screen share) can complete another sign-in with the same code for the rest of its validity window, which is about 30 to 90 s with the default ±1-step tolerance. The same applies to the fresh-code check on `/two-factor/disable` (`src/auth/index.ts:443-450`).
+- **Evidence:** test `S-3 … the same authenticator code cannot complete two sign-ins` fails: the replay answers 200.
+- **Fix:** in the `after` hook for `/two-factor/verify-totp`, and in the disable pre-check, record the accepted time step per user, for example `INSERT INTO settings(key, …) VALUES ('totp_step:'||user_id||':'||step, …) ON CONFLICT DO NOTHING`, or a small `totp_used(user_id, step)` table in a reserved migration. Refuse when the row already exists, and do the check in the `before` hook so no session is issued. Alternatively, ask upstream for Better Auth's replay option if one exists in a later version.
+- **Negative test:** S-3.
+
+### S-4 (Medium) Any client can mint a 30-day authenticator bypass, and an admin reset does not revoke it
+- **Where:** `/two-factor/verify-totp` and `/two-factor/verify-backup-code` are allowlisted (`src/index.ts:60-61`). Better Auth honours `trustDevice: true` from the request body (`verify-two-factor.mjs:41-58`), and on later password sign-ins skips the second factor for that device (`two-factor/index.mjs:252-271`). The admin UI sends `trustDevice: false` (`admin-web/src/api/auth.ts:58,61`), but the server does not enforce it. The reset, `setInitialStaffPassword` (`src/auth/users.ts:192-220`), removes the `two_factor` row and the sessions, but not the `trust-device-*` verification rows.
+- **Exploit path:** a device that once completed TOTP with `trustDevice: true` needs only the password for 30 days, and the cookie renews itself on each use. Example: a keylogged or stolen laptop. The admin resets the member, and the member types the new password on the same machine. The attacker now has the new password, and the old trust cookie still skips the newly enrolled authenticator.
+- **Evidence:**
+  - test `S-4 … the server does not issue a trust-device cookie` fails: a `trust_device` cookie is issued.
+  - test `S-4 … an admin reset … revokes trusted devices` fails with `expected 1 to be +0`: one trust row survives.
+
+  The same test shows that sessions **are** ended by the reset (both jars get 401 on `/api/v1/auth/session`).
+- **Fix:** in `src/index.ts`, reject (400) or strip `trustDevice` on the two verify paths, or set `trustDeviceMaxAge` to a value that disables it. In `setInitialStaffPassword` and after a successful `/change-password`, also run `DELETE FROM verification WHERE identifier LIKE 'trust-device-%' AND value = ?userId`.
+- **Negative test:** both S-4 tests.
+
+### S-5 (Medium) The reset path gives the resetter a working login for any account, including another super admin
+- **Where:** `src/routes/v1/staff.ts:98-112` (any `staff.manage` holder may set `initialPassword` on any existing staff member) and `:76-86` (role changes, including to `super_admin`, have no hierarchy check).
+- **Exploit path:**
+  - **(a)** Super admin A resets super admin B with a password A chose. B's second factor and sessions are removed. A signs in as B, changes the password, and enrols A's own authenticator. From then on every audit row attributes A's actions to B. The only trace is one `STAFF_PASSWORD_SET` row whose actor is A.
+  - **(b)** Permissions are rows. If `staff.manage` is ever granted to `admin`, an admin can promote itself to `super_admin` in one request, and can take over super admins through (a).
+- **Evidence:**
+  - test `S-5 … a super admin cannot reset another super admin's password` fails: the reset answers 200.
+  - test `S-5 … with staff.manage granted to 'admin' … cannot promote itself` fails: the self-promotion answers 200.
+  - `(holds) an admin without staff.manage cannot reset a super admin` passes: 403.
+- **Fix:**
+  - Refuse `initialPassword` when the target's role ranks at or above the actor's, unless the target is the actor. Refuse granting a role above the actor's own.
+  - For super-admin recovery, keep the bootstrap path, or require a second super admin's approval.
+  - Better still, do not let the resetter choose or see the new credential. Email the target a one-time setup link through the existing Email Service binding, so the reset cannot be used to take over an account.
+- **Negative test:** S-5 (three cases).
+
+### S-6 (Medium) Customer codes can be brute-forced slowly, and failed attempts across codes never lock the account
+- **Where:** `src/auth/index.ts:589-596` (3 attempts per code; `reuse` keeps a code alive while sends continue; a burned code is deleted and the next send issues a fresh one with 3 new attempts).
+- **Path:** the ceiling allows 30 sends / h per address. That is up to 90 guesses per hour against a 10⁶ space, about 0.2 % per day and roughly 50 % over a year of sustained effort, from a modest pool of clients. Nothing limits failed verifies across codes for one account. Customers have no data routes yet, but WT-2 makes them tenant owners.
+- **Fix:** add a per-account ceiling on failed code verifies (for example 10 per 24 h), counted from `AUTH_LOGIN_FAILED` rows for the address. Above it, require Turnstile, which fits the S-2 fix, and alert on it.
+- **Test to add:** simulate 10 burned codes for one address (by seeding rows), then a correct code without Turnstile is refused and a notification or audit row is written. Not added in this pass, because it needs the product decision on the challenge.
+
+### S-7 (Low) The bootstrap seed records `mustChangePassword: true` but does not set it
+- **Where:** `src/auth/users.ts:267-301`. When the bootstrap email already holds `super_admin` and the seed has not run, which happens whenever `BOOTSTRAP_SUPER_ADMIN_PASSWORD` is added after the fact, the owner's password is silently replaced by the GitHub secret. `must_change_password` and the authenticator are left as they were, so the audit row is false.
+- **Evidence:** test `S-9 … seeding a password onto an existing super admin sets must_change_password` fails with `expected +0 to be 1`, and the seed's `STAFF_PASSWORD_SET` row is present.
+- **Fix:** seed only when the bootstrap user has no credential account. Otherwise mark the seed done without touching the password. When the seed does run, also set `must_change_password = 1`.
+
+### S-8 (Low) Other residuals
+- **Non-staff password failures:** every non-staff failure on `/sign-in/email` writes one audit row and runs one scrypt hash (`src/auth/index.ts:384-394`). Only the per-IP limit bounds this (first-pass M-3 class). Apply the once-per-window rule the OTP path already has, and put Turnstile in front (S-1).
+- **`revokeOtherSessions` is chosen by the client:** the UI sends `revokeOtherSessions: true` (`admin-web/src/api/auth.ts:67`), but the server accepts `false`. Force it in the `before` hook for `/change-password`.
+- **Bootstrap window:** until the owner's first sign-in, the bootstrap account can be claimed by anyone who holds the GitHub `production` environment secret. They could complete the forced setup with their own authenticator. The Worker secret also stays set after seeding. Sign in right after the first deploy, then run `wrangler secret delete BOOTSTRAP_SUPER_ADMIN_PASSWORD` once `auth.bootstrap_password_seeded` exists.
+- **Shared NAT:** the per-(email, client) password cap locks out a staff member who shares a NAT, CGNAT or office IPv4 with the attacker. S-1's Turnstile fix covers this.
+
+## Verdicts on the first-pass "Fixed in" notes
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| H-1 OTP lockout | **Partially fixed.** Per-(email, client) cap and reuse hold; the per-email ceiling reintroduces the lockout (S-2). | WT-1 test "H-1: a caller at another IP…" passes; S-2 fails |
+| H-2 hidden endpoints | **Fixed.** Exact-match allowlist; every other Better Auth endpoint, enumerated from `auth.api`, answers 404 to GET and POST. | F-2 passes; S-7 (all enumerated endpoints) passes |
+| M-1 open stubs | **Fixed.** | F-4 passes |
+| M-2 deploy supply chain | **Partially fixed.** Cloudflare token is now step-scoped. `pnpm install --no-frozen-lockfile` remains (`deploy-cloudflare.yml:34`, `ci.yml:33,62`), and actions are still tag-pinned. | grep of workflows |
+| M-3 unbounded rows | **Partially fixed.** Accepted design: bounded by per-IP limits. Code-verify failures are deduplicated; password failures are not (S-8). | reading + WT-1 "M-3" tests |
+| L-1 dev origin trusted | Fixed | `trustedOrigins(env)`; WT-1 test |
+| L-2 login CSRF | Fixed. `isSameOriginWrite` covers every `/api/auth/*` write, with or without a cookie. | reading + WT-1 test |
+| L-3 correlation id | Fixed | `http.ts` always mints |
+| L-4 Phase 0 key | **Partially fixed.** The retire step is not `if: always()` and ends in `|| true`, so a failed prove step or a failed delete leaves the key live. `src/index.ts:115` still compares with `!==`. | `deploy-cloudflare.yml:193-198` |
+| L-5 workers.dev | Fixed | `wrangler.jsonc` |
+| L-6 dev values next to the prod route | Fixed: `ENVIRONMENT` now defaults to `production`. The suggested CI grep for `OTP_DEV_ECHO` was not added (minor). | `wrangler.jsonc` |
+| L-7 unaudited writes | Fixed. No secret material in any audit row after a full lifecycle. | S-8 (audit scan) passes |
+| L-8 last-super-admin race | Fixed. The condition is inside the `UPDATE … WHERE` / `DELETE … WHERE`, and D1 serialises writes. | reading |
+| L-9 `safeRedirect` | Fixed | WT-1 admin-web tests |
+| L-10 missing secret | Fixed | `assertAuthConfig` |
+| L-11 doc | Fixed | handoff |
+
+## New surface, claims that held
+- **`setup_required`:** every `/api/v1` route except `GET /auth/session` and `POST /auth/logout` answers 403 `setup_required` to a staff member mid-setup. S-6 walks every v1 route. `/api/auth` setup endpoints are the intended exception.
+- **Setup order:** enabling an authenticator before changing the initial password is refused (`PASSWORD_CHANGE_REQUIRED`; WT-1 test "in order").
+- **Non-staff password sign-in:** it fails exactly like a wrong password and costs a hash (WT-1 test). Staff cannot use email codes (WT-1 test).
+- **Backup codes:** single use, with an atomic compare-and-set on the encrypted list (Better Auth; WT-1 test "a backup code works once").
+- **Challenge limits:** 5 wrong codes per challenge burn it, and Better Auth's account lockout (10 / 15 min) applies.
+- **Admin reset:** ends every session of the target (S-4, second test, session part).
+- **Bootstrap:** grant and seed are race-safe (single conditional statements plus a claim row). The workflow sets the Worker secret only when it is absent and never echoes it.
+
+## Blocking list for the Phase 1 merge
+1. **S-1** per-account password ceiling lockout.
+2. **S-2** per-email OTP ceiling lockout. This is the remaining part of H-1.
+
+Recommended before merge, not blocking: S-3, S-4, S-5 (Medium), M-2's frozen lockfile, L-4's `if: always()`.
+
+## Second pass, not tested and why
+- **Turnstile and edge rate limiting:** they sit at the edge or in the browser, so the Workers pool cannot show them.
+- **S-6 brute-force rate:** it is probabilistic, so I worked it out on paper instead of running it.
+- **TOTP clock-skew tolerance:** the exact width (±1 step) was read from `@better-auth/utils/otp` defaults, not measured.
+- **Deploy scope:** the real `production` environment protection rules and the Cloudflare token scope are not visible from the repo.
+- **WT-2 and WT-3:** tenant, membership and device routes are still stubs here. Tenant-boundary and enrollment checks wait for their branches.
