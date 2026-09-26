@@ -134,7 +134,7 @@ pnpm --filter @cloudbox/worker-api test
 Test Files  1 failed | 12 passed (13)
 Tests       8 failed | 302 passed (310)
 ```
-All 8 failures are in the second-pass file and each is a finding below. Every first-pass review test (`phase-1-hardening.test.ts`) passes unmodified.
+All 8 failures are in the second-pass file and each is a finding below. Test `describe` labels differ from finding ids for the checks that held: in the test file, `S-6 (holds)` is the setup-gate walk, `S-7 (holds)` the allowlist enumeration, `S-8 (holds)` the audit secret scan, and `S-9` is finding S-7 (bootstrap seed). Every first-pass review test (`phase-1-hardening.test.ts`) passes unmodified.
 
 **Merge blockers (High): S-1, S-2.** There are no Critical findings.
 
