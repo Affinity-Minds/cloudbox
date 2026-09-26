@@ -1,10 +1,11 @@
 // Owner: WT-0. sidebar-07 shell driven by nav.ts; build stamp from /api/version in the footer.
-// WT-1 adds the signed-in user menu (with logout) above the build stamp.
+// Signed-in user menu with logout (WT-1, src/auth/user-menu.tsx) sits above the build stamp.
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Box } from "lucide-react";
 import type * as React from "react";
 import { versionQuery } from "@/api/system";
+import { UserMenu } from "@/auth/user-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -89,6 +90,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         ))}
       </SidebarContent>
       <SidebarFooter>
+        <UserMenu />
         <BuildStamp />
       </SidebarFooter>
       <SidebarRail />

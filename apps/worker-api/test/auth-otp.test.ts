@@ -358,7 +358,7 @@ describe("OTP dev echo", () => {
         { to: "d@example.test", code: "654321" },
       );
       expect(log).toHaveBeenCalledWith("[otp-dev-echo]", "d@example.test", "654321");
-      expect(outcome).toEqual({ echoed: true });
+      expect(outcome).toEqual({ errorCode: "E_NO_EMAIL_BINDING", echoed: true });
     } finally {
       log.mockRestore();
     }

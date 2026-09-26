@@ -1,10 +1,15 @@
-// Shell: WT-0 (sidebar-07 from nav.ts). Auth guard: WT-1 adds `beforeLoad` redirecting to /login.
+// Shell: WT-0 (sidebar-07 from nav.ts). Auth guard: WT-1 (`beforeLoad` → /login without a session).
+// The guard only routes the browser; every API call is authorised server-side regardless.
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { requireSession } from "@/auth/session";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export const Route = createFileRoute("/_app")({
+  beforeLoad: async ({ context, location }) => ({
+    session: await requireSession(context.queryClient, location.href),
+  }),
   component: AppShell,
 });
 
