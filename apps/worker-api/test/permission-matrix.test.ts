@@ -26,10 +26,12 @@ function isAllowlisted(path: string): boolean {
  * Routes gated only by `requireUser()` (any signed-in identity), not by a specific permission or
  * tenant standing, because the action is inherently self-service — every role, including
  * `read_only`, is meant to succeed. `POST /api/v1/auth/logout`: ending your own session is not a
- * "manage" action; nothing about `read_only` should forbid it. Extend this list only with the
- * same justification, never to silence a real gap.
+ * "manage" action; nothing about `read_only` should forbid it. `POST /api/v1/me/active-tenant`:
+ * picking which of *your own* memberships is active is gated only by membership in that tenant
+ * (re-resolved server-side every call, WT-2), never by a staff permission or tenant standing.
+ * Extend this list only with the same justification, never to silence a real gap.
  */
-const SELF_SERVICE_ROUTES = new Set(["POST /api/v1/auth/logout"]);
+const SELF_SERVICE_ROUTES = new Set(["POST /api/v1/auth/logout", "POST /api/v1/me/active-tenant"]);
 
 type RouteUnderTest = { method: string; path: string };
 

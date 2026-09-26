@@ -8,6 +8,7 @@ import { authFor } from "../../auth";
 import { getPrincipal, requireUser } from "../../auth/middleware";
 import { createDb } from "../../db/client";
 import type { AppEnv } from "../../env";
+import { getActiveTenantId } from "./me";
 
 const auth = new Hono<AppEnv>();
 
@@ -17,8 +18,8 @@ auth.get("/session", requireUser({ allowSetupPending: true }), async (c) => {
   const body: SessionResponse = {
     user: principal.user,
     permissions: [...principal.permissions].sort(),
-    // Owned by WT-2 (`POST /me/active-tenant`); null until that lands.
-    activeTenantId: null,
+    // WT-2: settings-style per-user row, re-validated against a live membership on every read.
+    activeTenantId: await getActiveTenantId(createDb(c.env.DB), principal.user.id),
     setup: principal.setup,
   };
   return c.json(body);

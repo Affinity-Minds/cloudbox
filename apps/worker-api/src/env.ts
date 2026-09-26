@@ -17,6 +17,10 @@ export type Bindings = {
   OTP_DEV_ECHO?: string;
 
   BETTER_AUTH_SECRET?: string;
+  /** Turnstile widget for the customer sign-in step-up (review T-1). Public; a var. */
+  TURNSTILE_SITE_KEY?: string;
+  /** Turnstile siteverify secret. Without it the step-up falls back to a per-account cooldown. */
+  TURNSTILE_SECRET_KEY?: string;
   /** Initial password of the bootstrap super admin (ADR 0009); seeded once, must be changed. */
   BOOTSTRAP_SUPER_ADMIN_PASSWORD?: string;
   ENTITLEMENT_SIGNING_JWK?: string;

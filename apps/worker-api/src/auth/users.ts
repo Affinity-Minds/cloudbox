@@ -7,7 +7,12 @@ import { audit } from "../audit";
 import { createDb } from "../db/client";
 import { staffMembers, twoFactor, user } from "../db/schema";
 import type { Bindings } from "../env";
-import { type AuthRequestContext, createAuth, PRODUCTION_ORIGIN } from "./index";
+import {
+  type AuthRequestContext,
+  createAuth,
+  deleteTrustedDevices,
+  PRODUCTION_ORIGIN,
+} from "./index";
 
 function authContext(env: Bindings, request: AuthRequestContext) {
   return createAuth(env, { ...request, baseURL: request.baseURL ?? PRODUCTION_ORIGIN }).$context;
@@ -73,6 +78,8 @@ export async function setInitialStaffPassword(
     db.update(user).set({ twoFactorEnabled: false }).where(eq(user.id, userId)),
   ]);
   await ctx.internalAdapter.deleteUserSessions(userId);
+  // Trusted devices would otherwise skip the new authenticator (review S-4).
+  await deleteTrustedDevices(db, userId);
 }
 
 const BOOTSTRAP_SEEDED_KEY = "auth.bootstrap_password_seeded";
@@ -83,8 +90,8 @@ const BOOTSTRAP_SEEDED_KEY = "auth.bootstrap_password_seeded";
  * `BOOTSTRAP_SUPER_ADMIN_PASSWORD` secret) a password, so that address can sign in at all.
  * Runs on auth requests; once done it costs one read. The grant is one `INSERT … WHERE NOT EXISTS`
  * and the seed is claimed by one `settings` row, so concurrent first requests produce one staff
- * row, one password and one audit entry each. The password is seeded once, ever: later changes by
- * the owner are never overwritten.
+ * row, one password and one audit entry each. The password is seeded once, ever, and only onto an
+ * account without one: a password the owner already has is never overwritten.
  */
 export async function ensureBootstrapSuperAdmin(
   env: Bindings,
@@ -134,17 +141,20 @@ export async function ensureBootstrapSuperAdmin(
     ON CONFLICT (key) DO NOTHING`);
   if ((claim.meta?.changes ?? 0) === 0) return;
   const ctx = await authContext(env, request);
-  const hash = await ctx.password.hash(password);
-  if (await ctx.internalAdapter.findCredentialAccount(userId)) {
-    await ctx.internalAdapter.updatePassword(userId, hash);
-  } else {
-    await ctx.internalAdapter.linkAccount({
-      userId,
-      providerId: "credential",
-      accountId: userId,
-      password: hash,
-    });
-  }
+  // Never overwrite a password the account already has (the owner may have changed it): the claim
+  // above marks the seed done either way, and only a real seed is recorded (review S-7).
+  if (await ctx.internalAdapter.findCredentialAccount(userId)) return;
+  await ctx.internalAdapter.linkAccount({
+    userId,
+    providerId: "credential",
+    accountId: userId,
+    password: await ctx.password.hash(password),
+  });
+  // A seeded password is an initial password: it must be replaced at the next sign-in.
+  await db
+    .update(staffMembers)
+    .set({ mustChangePassword: true })
+    .where(eq(staffMembers.userId, userId));
   await audit(db, {
     eventType: "STAFF_PASSWORD_SET",
     entityType: "staff_member",

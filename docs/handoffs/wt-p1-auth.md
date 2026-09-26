@@ -16,10 +16,10 @@ from D1 rows per request; every auth state change is audited.
 ## Current status
 
 - Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
-  PR #6. This round: **draft PR #9** https://github.com/Affinity-Minds/cloudbox/pull/9 (never merge
-  it myself).
-- `pnpm run verify`: green (check 130 files, admin-web 3/3, licensing-contracts 16/16, worker-api
-  206/206, build ok).
+  PR #6, closed sign-in + staff 2FA + first review merged as PR #9 (`a3fc5f0`). Second-pass review
+  fixes merged as PR #10. Third pass (T-1/T-2): new draft PR (see below; never merged by me).
+- `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
+  314/314, build ok).
 
 ## Commits in PR #9
 
@@ -30,7 +30,10 @@ c573cc2 fix(auth): WT-8 review findings H-1, H-2, M-1, M-3, L-1, L-2, L-3, L-8, 
 7198105 Merge origin/phase-1/identity (WT-5, WT-6 permission matrix, Biome fix, ADR 0009)
 7ebffc8 feat(auth): staff sign in with password + authenticator (ADR 0009)
 337e1ed feat(admin-web): staff + customer sign-in entry points, forced password and authenticator setup
-(+ docs commit: ADR 0002, this handoff, review "Fixed in" notes)
+a3fc5f0 docs: ADR 0002, handoff, review "Fixed in" notes
+(merge) origin/review/phase-1-security (WT-8 second pass + tests)
+5178503 fix(auth): WT-8 second pass S-1..S-8, M-3
+(+ docs commit: second-pass "Fixed in" notes, ADR 0002 limits, this handoff)
 ```
 
 ---
@@ -39,8 +42,11 @@ c573cc2 fix(auth): WT-8 review findings H-1, H-2, M-1, M-3, L-1, L-2, L-3, L-8, 
 
 - **worker-api**
   - `src/auth/index.ts`: `authOptions(env, request, self)`, `createAuth(env, request?)`,
-    `authFor(c)`, `authContextFor(c)`, `assertAuthConfig`, `trustedOrigins(env)`, constants
-    `OTP_SEND_CAPS`, `PASSWORD_FAILURE_CAPS`, `MIN_PASSWORD_LENGTH`, `HONEYPOT_HEADER`. Better Auth
+    `authFor(c)`, `authContextFor(c)`, `assertAuthConfig`, `trustedOrigins(env)`,
+    `deleteTrustedDevices`, constants `OTP_SEND_CAP`, `OTP_FAILURE_CAP`, `PASSWORD_FAILURE_CAP`,
+    `MIN_PASSWORD_LENGTH`, `HONEYPOT_HEADER`.
+  - `src/auth/counters.ts` (new): per-(email, client) failure counters and used-code claims in
+    `rate_limit` under SHA-256 keys (`counterKey`, `readCounter`, `bumpCounter`, `claimOnce`). Better Auth
     with `emailAndPassword` (no sign-up), `twoFactor` (TOTP issuer CloudBox, 10 backup codes) and
     `emailOTP` (closed, reuse). All sign-in policy lives in its `hooks.before/after`.
   - `src/auth/users.ts` (new): `ensureUserByEmail(env, email) → userId` (**WT-2 uses this for
@@ -119,16 +125,41 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 - Per-IP limits (Better Auth, D1): code send 3 / 60 s, code sign-in 3 / 60 s, password sign-in 3 / 10 s,
   `/two-factor/*` 3 / 10 s, rest 60 / 60 s (L-11 corrected). Better Auth also limits a 2FA challenge
   to 5 attempts and locks an account for 15 min after 10 consecutive failed second factors.
+- A client is an IPv4 address or an **IPv6 /48** (`ipv6Subnet: 48`, review T-1). Per (email, client):
+  code sends 5 / 15 min (same 200, nothing sent), failed code sign-ins 10 / h (fails like a wrong code),
+  failed passwords 5 / 15 min (429 with the wrong-password body). Uniform for every address.
+- Customer codes: 5 attempts per code, spendable only by clients that requested it (T-2). Per address,
+  30 failed checks / h across all clients is a budget: above it send and sign-in need a Turnstile token
+  (403 `{error:"challenge_required", detail:{siteKey}}`, UI shows the widget only then). **Fallback
+  without `TURNSTILE_SECRET_KEY`: a 15-minute per-account cooldown (429 `account_cooldown`, audited
+  `AUTH_ACCOUNT_COOLDOWN`) — the only per-account denial in the system, until Turnstile is configured.**
+  No per-account limit exists for staff passwords (S-1).
+- An accepted sign-in or disable authenticator code cannot be reused for 120 s (S-3). `trustDevice`
+  is forced off; admin reset and password change delete trusted-device rows (S-4). Password changes
+  always end other sessions (S-8).
+- Role ranking on `POST /api/v1/staff` (S-5): no role above your own; role changes and password
+  resets only for accounts strictly below the caller; nobody changes their own role.
 - Anti-enumeration: unknown, customer and staff addresses are indistinguishable on the code path;
   non-staff, unknown and wrong-password answers are identical on the password path (same hashing work).
 - Bootstrap: while no super admin exists, the first auth request creates the `BOOTSTRAP_SUPER_ADMIN_EMAIL`
   user and `super_admin` row (one audit row) and, from `BOOTSTRAP_SUPER_ADMIN_PASSWORD`, seeds its
-  password once ever (claimed by `settings.auth.bootstrap_password_seeded`; later changes of the
-  secret never overwrite the owner's password). `must_change_password = 1`, no authenticator yet.
+  password once ever and only onto an account without a password (claimed by
+  `settings.auth.bootstrap_password_seeded`); seeding sets `must_change_password = 1` (S-7).
+  **Operational:** sign in as the owner right after the first deploy, then
+  `wrangler secret delete BOOTSTRAP_SUPER_ADMIN_PASSWORD` (review S-8 bootstrap window).
+- Residual (review S-8): a staff member behind the same NAT/CGNAT as an attacker can be locked out
+  per client for 15 min; Turnstile/edge rate limiting is the recommended follow-up (ops).
 - No self-service password reset: an admin sets a new initial password (POST /staff), which forces
   change + re-enrolment. Lost authenticator: a backup code, or an admin reset.
 
 ## Deploy needs
+
+- **Turnstile (review T-1):** create a widget for `box.affinityminds.in` only, managed mode,
+  **pre-clearance off** (agent-notes cloudflare-workers trap 1). Secret `TURNSTILE_SECRET_KEY`
+  (Wrangler secret via a workflow sync step like the others — WT-0) and var `TURNSTILE_SITE_KEY`
+  (`wrangler.jsonc` vars — WT-0). Until both are set, the account budget falls back to the cooldown.
+  Cloudflare's dummy keys return hostname `example.com`, so they fail our hostname check on
+  localhost; local dev simply shows the widget and the rejection (see `13-customer-turnstile-step-up.png`).
 
 - Secrets: `BETTER_AUTH_SECRET` (existing step), **`BOOTSTRAP_SUPER_ADMIN_PASSWORD`** (new GitHub
   environment secret, ≥ 12 characters; the new workflow step puts it into the Worker once).
@@ -141,7 +172,18 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 
 ---
 
-## Tests (worker-api 206/206, admin-web 3/3)
+## Tests (worker-api 373/373 after merging WT-3/WT-4, admin-web 4/4, licensing-contracts 16/16)
+
+Third pass (T-1/T-2): `auth-stepup.test.ts` (5: /48 shares limits and counters; every failed check
+counts toward the budget; challenge_required for known and unknown alike, valid token passes send and
+sign-in; foreign-host or failed tokens refused; cooldown fallback audited once and budget reset),
+`auth-otp.test.ts` requester-only attempt spending, WT-8 `phase-1-third-pass` (T-2) green.
+
+Second pass adds WT-8 `review/phase-1-second-pass` (all green, unmodified) and in WT-1's files:
+`auth-otp.test.ts` "S-2" (owner gets a code after 40 sends from other clients) and "S-6";
+`staff-auth.test.ts` non-staff failures audited once + uniform 429, forced session revocation on
+password change, disable-code replay refused; `staff.test.ts` self role change 403.
+
 
 - `staff-auth.test.ts` (8): staff get the customer answer but no code, and a code for a staff email
   fails like a wrong code; password sign-in for non-staff (incl. a former staff member with a
@@ -191,21 +233,36 @@ The QR, key and backup codes in the screenshots belong to a local database that 
   valid" would leave an owner who lost the mail waiting up to 5 minutes and contradicts the review's
   negative test (owner at another IP must receive a message).
 - **Password lockout body:** 429 status with the wrong-password JSON body (as asked); the status
-  itself tells a caller they are locked, never whether the account exists.
+  itself tells a caller they are locked, never whether the account exists (the per-client counter is
+  the same for staff, non-staff and unknown addresses).
+- **S-8 "do not hash non-staff attempts":** within the per-client limit the hash is kept, because
+  skipping it would let response time tell staff addresses from others; beyond the limit nothing is
+  hashed or recorded, and audit rows for non-staff/unknown addresses are once per 15 min.
+- **S-5:** revoking (DELETE) is not ranked (a super admin can still remove a rogue peer); the
+  last-super-admin guard still applies. Role changes of one's own account are refused.
+- **Counters location:** the failure counters and used-code claims live in `rate_limit` (Better
+  Auth's table from 0004) under hashed keys rather than a new column on `two_factor`; a dummy
+  rate-limit rule of 1 h keeps Better Auth's pruning from removing them early.
 - `db/schema.ts`, `env.ts`, `http.ts`, `routes/v1/index.ts`, `package.json`/lockfile and the workflow
   were edited under the owner's decisions / WT-0 leave as listed above.
 
 ## Requests to other worktrees
 
 - [ ] WT-0: move `rateLimit` (`src/auth/rate-limit-table.ts`) into `db/schema.ts` and regenerate the
-  Drizzle snapshot including 0004; add `.dev.vars.example` with the keys above.
+  Drizzle snapshot including 0004; add `ENVIRONMENT=development` to `.dev.vars.example` (wrangler.jsonc
+  now defaults to production, and `OTP_DEV_ECHO=1` with production makes `createAuth` throw).
 - [ ] WT-0: a Staff nav entry and screen on `/api/v1/staff` (create with initial password, reset).
 - [ ] WT-2: create membership users with `ensureUserByEmail`; fill `activeTenantId` in the session.
 - [ ] WT-12: `sendOtpEmail(env, {to, code}, {correlationId, client})` must keep writing the
   `AUTH_OTP_SENT` audit row with `client`; the per-(email, client) cap counts it.
-- [ ] Ops: Cloudflare zone rate limiting / Turnstile on `/api/auth/*` (review M-3; edge, not the Worker).
+- [ ] Ops (reviews M-3, T-1): Cloudflare WAF rate-limiting rule on `box.affinityminds.in`
+  `/api/auth/sign-in/*` (and `/api/auth/email-otp/*`), counting characteristic **IP with IPv6 /48
+  prefix** (`ip.src` grouped by /48; Enterprise "IPv6 prefix" or the closest available), e.g. 30
+  requests / 10 min → block 10 min. Defence in depth for CPU (password hashing) and code guessing; the
+  Worker's own limits stay authoritative.
+- [ ] WT-0: `TURNSTILE_SITE_KEY` var and a `TURNSTILE_SECRET_KEY` secret sync step (see Deploy needs).
 
 ## Safe next action
 
-Review and merge PR #9 into `phase-1/identity`, set the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` environment
+Review and merge PR #10 into `phase-1/identity`, set the `BOOTSTRAP_SUPER_ADMIN_PASSWORD` environment
 secret before the next deploy, then sign in as the owner and complete the forced setup.

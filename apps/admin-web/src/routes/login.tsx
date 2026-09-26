@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import {
+  challengeSiteKey,
   describeAuthError,
   sendOtp,
   sessionQuery,
@@ -22,6 +23,7 @@ import {
 import { ApiError } from "@/api/client";
 import { AuthFrame, CodeBoxes } from "@/auth/auth-ui";
 import { safeRedirect } from "@/auth/session";
+import { TurnstileChallenge } from "@/auth/turnstile";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -322,22 +324,90 @@ function StaffCodeStep({ email, onRestart }: { email: string; onRestart: () => v
 const EmailForm = z.object({ email: Email, website: z.string() });
 type EmailForm = z.input<typeof EmailForm>;
 
+/**
+ * Turnstile step-up for customer codes (review T-1): invisible until the API answers
+ * `challenge_required` for an address over its failure budget. Then the widget appears, and once it
+ * yields a token the interrupted action runs again with it. Tokens are single use.
+ */
+function useStepUp() {
+  const [siteKey, setSiteKey] = useState<string | null>(null);
+  const [resetSignal, setResetSignal] = useState(0);
+  const token = useRef<string | null>(null);
+  const retry = useRef<(() => void) | null>(null);
+  const sentToken = useRef(false);
+  return {
+    widget: siteKey ? (
+      <div className="space-y-1">
+        <p className="text-sm text-muted-foreground">
+          Unusual activity for this address. Confirm you are a person to continue.
+        </p>
+        <TurnstileChallenge
+          siteKey={siteKey}
+          resetSignal={resetSignal}
+          onToken={(value) => {
+            token.current = value;
+            const again = retry.current;
+            retry.current = null;
+            if (value && again) again();
+          }}
+        />
+      </div>
+    ) : null,
+    /** The token for the next request (then spent), or null. */
+    take(): string | null {
+      const value = token.current;
+      sentToken.current = Boolean(value);
+      if (value) {
+        token.current = null;
+        setResetSignal((n) => n + 1);
+      }
+      return value;
+    },
+    /**
+     * "armed" (and `again` runs once the widget yields a token) when `cause` asks for the
+     * challenge; "rejected" when the request already carried a token (no automatic loop); else null.
+     */
+    challenged(cause: unknown, again: () => void): "armed" | "rejected" | null {
+      const key = challengeSiteKey(cause);
+      if (!key) return null;
+      setSiteKey(key);
+      if (sentToken.current) return "rejected";
+      retry.current = again;
+      return "armed";
+    },
+  };
+}
+type StepUp = ReturnType<typeof useStepUp>;
+
 function CustomerSignIn() {
   const [email, setEmail] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState("");
+  const stepUp = useStepUp();
   return email === null ? (
     <EmailStep
+      stepUp={stepUp}
       onSent={(sentTo, hp) => {
         setHoneypot(hp);
         setEmail(sentTo);
       }}
     />
   ) : (
-    <CodeStep email={email} honeypot={honeypot} onChangeEmail={() => setEmail(null)} />
+    <CodeStep
+      email={email}
+      honeypot={honeypot}
+      stepUp={stepUp}
+      onChangeEmail={() => setEmail(null)}
+    />
   );
 }
 
-function EmailStep({ onSent }: { onSent: (email: string, honeypot: string) => void }) {
+function EmailStep({
+  onSent,
+  stepUp,
+}: {
+  onSent: (email: string, honeypot: string) => void;
+  stepUp: StepUp;
+}) {
   const [error, setError] = useState<string | null>(null);
   const form = useForm<EmailForm, unknown, z.output<typeof EmailForm>>({
     resolver: zodResolver(EmailForm),
@@ -347,10 +417,12 @@ function EmailStep({ onSent }: { onSent: (email: string, honeypot: string) => vo
   const submit = form.handleSubmit(async ({ email, website }) => {
     setError(null);
     try {
-      await sendOtp(email, website);
+      await sendOtp(email, website, stepUp.take());
       onSent(email, website);
     } catch (cause) {
-      setError(describeAuthError(cause));
+      setError(
+        stepUp.challenged(cause, () => void submit()) === "armed" ? null : describeAuthError(cause),
+      );
     }
   });
 
@@ -378,6 +450,7 @@ function EmailStep({ onSent }: { onSent: (email: string, honeypot: string) => vo
         <FieldError errors={emailError ? [{ message: "Enter a valid email address." }] : []} />
       </Field>
       <Honeypot {...form.register("website")} />
+      {stepUp.widget}
       {error ? <ErrorLine>{error}</ErrorLine> : null}
       <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
         {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
@@ -401,10 +474,12 @@ function useCountdown(seconds: number) {
 function CodeStep({
   email,
   honeypot,
+  stepUp,
   onChangeEmail,
 }: {
   email: string;
   honeypot: string;
+  stepUp: StepUp;
   onChangeEmail: () => void;
 }) {
   const finish = useFinish();
@@ -423,9 +498,13 @@ function CodeStep({
     setError(null);
     setNotice(null);
     try {
-      await verifyOtp(email, value, honeypot);
+      await verifyOtp(email, value, honeypot, stepUp.take());
       await finish();
     } catch (cause) {
+      if (stepUp.challenged(cause, () => void verify(value)) === "armed") {
+        setError(null);
+        return;
+      }
       setError(describeAuthError(cause));
       setCode("");
       if (cause instanceof ApiError && cause.error === "too_many_attempts") countdown.restart();
@@ -439,13 +518,15 @@ function CodeStep({
     setResending(true);
     setError(null);
     try {
-      await sendOtp(email, honeypot);
+      await sendOtp(email, honeypot, stepUp.take());
       setCode("");
       // Nothing here may reveal whether the address exists (closed sign-in, ADR 0009).
       setNotice("If this address can sign in, the code is on its way again.");
       countdown.restart();
     } catch (cause) {
-      setError(describeAuthError(cause));
+      if (stepUp.challenged(cause, () => void resend()) !== "armed") {
+        setError(describeAuthError(cause));
+      }
     } finally {
       setResending(false);
     }
@@ -486,6 +567,7 @@ function CodeStep({
           </FieldDescription>
         )}
       </Field>
+      {stepUp.widget}
       <Button type="submit" className="w-full" disabled={verifying || code.length !== 6}>
         {verifying ? <Loader2 className="animate-spin" /> : null}
         {verifying ? "Checking…" : "Sign in"}

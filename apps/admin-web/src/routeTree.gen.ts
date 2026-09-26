@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PortalRouteImport } from './routes/portal'
 import { Route as SetupAuthenticatorRouteImport } from './routes/setup-authenticator'
 import { Route as SetupPasswordRouteImport } from './routes/setup-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
@@ -31,6 +32,11 @@ const AppRoute = AppRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalRoute = PortalRouteImport.update({
+  id: '/portal',
+  path: '/portal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetupAuthenticatorRoute = SetupAuthenticatorRouteImport.update({
@@ -97,6 +103,7 @@ const AppTenantsTenantIdRoute = AppTenantsTenantIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
+  '/portal': typeof PortalRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/portal': typeof PortalRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
@@ -128,6 +136,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/portal': typeof PortalRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/_app/audit': typeof AppAuditRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/portal'
     | '/setup-authenticator'
     | '/setup-password'
     | '/audit'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/portal'
     | '/setup-authenticator'
     | '/setup-password'
     | '/audit'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/login'
+    | '/portal'
     | '/setup-authenticator'
     | '/setup-password'
     | '/_app/audit'
@@ -193,6 +205,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  PortalRoute: typeof PortalRoute
   SetupAuthenticatorRoute: typeof SetupAuthenticatorRoute
   SetupPasswordRoute: typeof SetupPasswordRoute
 }
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal': {
+      id: '/portal'
+      path: '/portal'
+      fullPath: '/portal'
+      preLoaderRoute: typeof PortalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup-authenticator': {
@@ -360,6 +380,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  PortalRoute: PortalRoute,
   SetupAuthenticatorRoute: SetupAuthenticatorRoute,
   SetupPasswordRoute: SetupPasswordRoute,
 }

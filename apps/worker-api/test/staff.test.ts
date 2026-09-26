@@ -149,9 +149,13 @@ describe("staff management API", () => {
       "SELECT user_id FROM staff_members WHERE role = 'super_admin'",
     ).all<{ user_id: string }>();
     expect(results.map((r) => r.user_id)).toEqual([root.userId]);
+    // Nobody changes their own role (only accounts strictly below the caller; review S-5).
     const demote = await grant(root, "root@example.test", "admin");
-    expect(demote.status).toBe(409);
-    await expect(demote.json()).resolves.toEqual({ error: "conflict", detail: "last_super_admin" });
+    expect(demote.status).toBe(403);
+    await expect(demote.json()).resolves.toEqual({
+      error: "forbidden",
+      detail: "target_not_below_caller",
+    });
   });
 
   it("validates the body with the error shape", async () => {

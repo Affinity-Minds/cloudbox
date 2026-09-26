@@ -2,6 +2,50 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — Hand-rolled route resolution skipped the staff first-sign-in setup gate (WT-3)
+**Symptom:** WT-8's review sweep S-6 (every `/api/v1` route 403s `setup_required` for staff mid password-change/authenticator-enrolment) failed on `GET /screens/fleet` and `GET /screens/fleet/:deviceId` — a staff account that hadn't finished ADR 0009's forced setup could still read both.
+
+**Cause:** Both routes resolve their principal by hand via `getPrincipal()` instead of `auth/middleware.ts`'s `guard()`, because `requireTenantStanding()` needs a `:tenantId` path segment this route doesn't have (it's a `?tenant=` query filter). `guard()` is where the `setupPending()` check lives; bypassing it for the tenant-standing reason also silently bypassed the unrelated setup check.
+
+**Fix:** Added a small `principalOrRefuse()` helper in `screens/fleet.ts` that repeats `guard()`'s session-missing (401) and setup-pending (403 `setup_required`) checks before running the route's own tenant-scoping logic. A regression test signs in a `setupComplete: false` super admin and asserts the 403.
+
+**Blast radius:** Any future route that resolves its principal outside `guard()`/`requireUser()`/`requirePermission()` for a similar path-shape reason inherits every check `guard()` does, not just the one being worked around — easy to miss since the route still works correctly for a fully-set-up staff user.
+
+**Verification:** `apps/worker-api/test/review/phase-1-second-pass.test.ts` S-6 and `apps/worker-api/test/screens-fleet.test.ts`'s new case both green.
+
+## 2026-09-27 — A one-line-per-owner list no one deletes from silently re-gated a filled-in route (WT-3)
+**Symptom:** `POST /tenants/:tenantId/enrollment-tokens` 403'd every non-staff caller — including a tenant member with standing `admin` on their own tenant, who should have gotten a 201 through WT-3's own composed `device.manage`-OR-tenant-standing gate.
+
+**Cause:** `routes/v1/index.ts` carries a temporary safety net (review M-1): every path still serving the `{module,status:'stub'}` placeholder is wrapped in a blanket `requireStaff()` so a stub filled in later without its own guard can't ship open, with the comment "the owner deletes its line when the real, guarded router lands." `/tenants/:tenantId/enrollment-tokens` and `/devices` kept their stub-guard lines after WT-3 filled in real, gated routers, so every non-staff request hit the blanket `requireStaff()` and 403'd before ever reaching the real router's own gate.
+
+**Fix:** Deleted both stale lines from the stub list once their real routers existed, per the comment's own instruction.
+
+**Blast radius:** Any worktree whose route was covered by this safety net must delete its own line(s) when its real router lands — leaving them in doesn't error, it just silently narrows the route back to staff-only, which only shows up as a permission-boundary test failure (or a non-staff user support ticket) rather than a crash.
+
+**Verification:** `apps/worker-api/test/enrollment.test.ts` "201s for a non-staff tenant member with standing admin" (previously 403, now 201).
+
+## 2026-09-27 — Enrollment redeem update failed its FK before the device existed (WT-3)
+**Symptom:** `POST /agent/enroll` answered 500 with `FOREIGN KEY constraint failed` on the very first successful-looking enrollment, inside the conditional token-redemption `UPDATE`.
+
+**Cause:** Following agent-notes' "run the conditional update alone, then batch the rest" rule literally, the redeem `UPDATE` set both `redeemed_at` and `redeemed_device_id` in the same statement — but `redeemed_device_id` references `devices.id`, and the device row is only created in the batch that comes *after* the conditional update. D1 enforces the FK immediately, not deferred to commit.
+
+**Fix:** Split the concerns: the standalone conditional update claims the token by setting `redeemed_at` only (still checked with `.returning()`, still run before anything else); `redeemed_device_id` is set by a third statement inside the same `db.batch` as the device insert, ordered after it so the FK is satisfied within the transaction.
+
+**Blast radius:** Any conditional-claim-then-link pattern where the linked-to row doesn't exist yet. Generalizes the existing "conditional update run alone" note: the *columns in that update* still can't reference a row created later in the batch.
+
+**Verification:** `apps/worker-api/test/agent.test.ts` — enroll happy path, reuse, duplicate-key-with-retry.
+
+## 2026-09-27 — `formatAgo` always said "ago", even for a future timestamp (admin-web)
+**Symptom:** The Enrollment page's "Expires" column read "expires 24 hours ago" for a token that expires in the future.
+
+**Cause:** `lib/time.ts`'s `formatAgo` hard-appended the literal string `" ago"` to `formatDistanceToNowStrict()`. Every caller before WT-3's enrollment tokens only ever passed a past timestamp (`lastSeenAt`, `createdAt`, audit rows), so the bug was latent until the first future-dated field.
+
+**Fix:** Pass `{ addSuffix: true }` instead, which date-fns renders as "X ago" for the past and "in X" for the future — no call-site changes needed.
+
+**Blast radius:** `apps/admin-web/src/lib/time.ts` is shared; every existing caller keeps its exact previous output (all past dates), so this is additive.
+
+**Verification:** Enrollment page screenshot (`docs/evidence/wt-p2-enrollment/04-enrollment-list-active-token.png`) reads "in 24 hours"; `apps/admin-web` test suite still green.
+
 ## 2026-09-27 — Drizzle `db.batch` on D1 silently shifted joined columns (WT-5)
 **Symptom:** Entitlement issuance answered `409 device_not_enrolled` for an enrolled device; a screen query failed with `ambiguous column name: generation`.
 

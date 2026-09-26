@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authContextFor, createAuth, HONEYPOT_HEADER } from "./auth";
+import { customerCodeStepUp } from "./auth/challenge";
 import { isSameOriginWrite, requireUser } from "./auth/middleware";
 import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
@@ -68,6 +69,11 @@ const AUTH_ROUTES = new Set([
   "GET /api/auth/get-session", // Better Auth's session read (no state change beyond sliding expiry)
 ]);
 
+const CUSTOMER_CODE_PATHS = new Set([
+  "/api/auth/email-otp/send-verification-otp",
+  "/api/auth/sign-in/email-otp",
+]);
+
 app.use("/api/auth/*", async (c, next) => {
   if (!AUTH_ROUTES.has(`${c.req.method} ${new URL(c.req.url).pathname}`)) {
     return c.json({ error: "not_found" }, 404);
@@ -76,6 +82,11 @@ app.use("/api/auth/*", async (c, next) => {
   if (!isSameOriginWrite(c)) return c.json({ error: "forbidden" }, 403);
   // Honeypot enforced server-side: a plain 400 that names nothing (agent-notes ux-patterns).
   if (c.req.header(HONEYPOT_HEADER)) return c.json({ error: "invalid_request" }, 400);
+  // Customer codes: per-account step-up above the failure budget (Turnstile; review T-1).
+  if (CUSTOMER_CODE_PATHS.has(new URL(c.req.url).pathname)) {
+    const stepUp = await customerCodeStepUp(c);
+    if (stepUp) return stepUp;
+  }
   await next();
 });
 // Sign-out goes through the audited v1 logout so there is one way out.
@@ -108,11 +119,25 @@ const releaseInput = z.object({
   sha: z.string().min(1).max(128),
 });
 
+/** Length-hiding constant-time comparison for short secrets (compares SHA-256 digests). */
+async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const x = new Uint8Array(da);
+  const y = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return diff === 0;
+}
+
 app.patch("/api/v1/foundation/release", async (c) => {
   const configuredKey = c.env.PHASE0_ADMIN_KEY;
   const suppliedKey = c.req.header("X-CloudBox-Phase0-Key");
 
-  if (!configuredKey || !suppliedKey || suppliedKey !== configuredKey) {
+  if (!configuredKey || !suppliedKey || !(await constantTimeEqual(suppliedKey, configuredKey))) {
     return c.json({ error: "forbidden" }, 403);
   }
 
