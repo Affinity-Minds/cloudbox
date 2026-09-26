@@ -21,7 +21,17 @@ import { createSmtpProvider } from "./providers/smtp";
 import { type EmailMessage, type EmailProvider, EmailProviderError } from "./providers/types";
 
 export type SendEmailOptions = { purpose: string; correlationId?: string | null };
-export type SendEmailOutcome = { messageId?: string; errorCode?: string };
+/**
+ * `providerId`/`kind` are always set (even on failure) so a caller that writes its own audit row
+ * — `sendOtpEmail`'s `AUTH_OTP_SENT` (WT-1) — can record which provider actually handled the send
+ * without re-deriving it.
+ */
+export type SendEmailOutcome = {
+  messageId?: string;
+  errorCode?: string;
+  providerId: string;
+  kind: EmailProviderKind;
+};
 
 export type ProviderRow = {
   id: string;
@@ -130,7 +140,7 @@ async function attempt(
       { purpose: options.purpose, providerId: row.id, kind: row.kind, messageId: result.messageId },
       options.correlationId,
     );
-    return { messageId: result.messageId };
+    return { messageId: result.messageId, providerId: row.id, kind: row.kind };
   } catch (error) {
     const errorCode = error instanceof EmailProviderError ? error.code : "E_SEND_FAILED";
     await auditAttempt(
@@ -140,7 +150,7 @@ async function attempt(
       { purpose: options.purpose, providerId: row.id, kind: row.kind, errorCode },
       options.correlationId,
     );
-    return { errorCode };
+    return { errorCode, providerId: row.id, kind: row.kind };
   }
 }
 
@@ -169,7 +179,11 @@ export async function sendEmail(
     );
   }
 
-  let last: SendEmailOutcome = { errorCode: "E_ALL_PROVIDERS_FAILED" };
+  let last: SendEmailOutcome = {
+    errorCode: "E_ALL_PROVIDERS_FAILED",
+    providerId: rows[0]?.id ?? "unknown",
+    kind: rows[0]?.kind ?? "cloudflare_binding",
+  };
   for (const row of rows) {
     let provider: EmailProvider;
     try {
@@ -183,7 +197,7 @@ export async function sendEmail(
         { purpose: options.purpose, providerId: row.id, kind: row.kind, errorCode },
         options.correlationId,
       );
-      last = { errorCode };
+      last = { errorCode, providerId: row.id, kind: row.kind };
       continue;
     }
     const outcome = await attempt(env, row, provider, message, options);
@@ -214,9 +228,13 @@ export async function testEmailProvider(
       subject: "CloudBox test email",
       text: `This is a test message from the "${row.name}" email provider (${row.kind}).`,
     });
-    outcome = { messageId: result.messageId };
+    outcome = { messageId: result.messageId, providerId: row.id, kind: row.kind };
   } catch (error) {
-    outcome = { errorCode: error instanceof EmailProviderError ? error.code : "E_SEND_FAILED" };
+    outcome = {
+      errorCode: error instanceof EmailProviderError ? error.code : "E_SEND_FAILED",
+      providerId: row.id,
+      kind: row.kind,
+    };
   }
   await safeAudit(db, {
     eventType: "EMAIL_PROVIDER_TESTED",

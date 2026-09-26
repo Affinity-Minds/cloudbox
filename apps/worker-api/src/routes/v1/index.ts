@@ -2,6 +2,7 @@
 // Mount prefixes nest (`/tenants` and `/tenants/:tenantId/memberships`), so a module must attach
 // middleware per route, never with `use("*")`, or it would run for its neighbours too.
 import { Hono } from "hono";
+import { requireStaff } from "../../auth/middleware";
 import type { AppEnv } from "../../env";
 import agent from "./agent";
 import audit from "./audit";
@@ -20,6 +21,20 @@ import tenants from "./tenants";
 const v1 = new Hono<AppEnv>();
 
 v1.get("/", (c) => c.json({ name: "CloudBox API", version: "v1", status: "foundation" }));
+
+// Stub guard (review M-1, WT-1 with WT-0's leave): a module that is still a stub answers only to
+// staff, so a stub filled in later without its own guard cannot ship open. Exact paths, not
+// wildcards; the owner deletes its line when the real, guarded router lands.
+for (const stub of [
+  "/tenants", // WT-2
+  "/tenants/:tenantId/memberships", // WT-2
+  "/me", // WT-2
+  "/tenants/:tenantId/enrollment-tokens", // WT-3
+  "/devices", // WT-3
+  "/audit", // WT-0
+]) {
+  v1.use(stub, requireStaff());
+}
 
 v1.route("/auth", auth); // WT-1
 v1.route("/staff", staff); // WT-1

@@ -47,7 +47,8 @@ export const auditLog = sqliteTable(
   ],
 );
 
-// ─── Better Auth (generated: auth@1.7.6 generate, drizzle/sqlite, plugins: emailOTP) ──────────
+// ─── Better Auth (generated: auth@1.7.6 generate, drizzle/sqlite, plugins: twoFactor, emailOTP) ─
+// twoFactor added by WT-1 (owner decision, ADR 0009: staff password + authenticator); migration 0004.
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -62,6 +63,7 @@ export const user = sqliteTable("user", {
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false),
 });
 
 export const session = sqliteTable(
@@ -129,9 +131,33 @@ export const verification = sqliteTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+export const twoFactor = sqliteTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: integer("verified", { mode: "boolean" }).default(true),
+    failedVerificationCount: integer("failed_verification_count").default(0),
+    lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("twoFactor_secret_idx").on(table.secret),
+    index("twoFactor_userId_idx").on(table.userId),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  twoFactors: many(twoFactor),
+}));
+
+export const twoFactorRelations = relations(twoFactor, ({ one }) => ({
+  user: one(user, { fields: [twoFactor.userId], references: [user.id] }),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -156,6 +182,10 @@ export const staffMembers = sqliteTable(
     role: text("role", { enum: STAFF_ROLES }).notNull(),
     createdBy: text("created_by"),
     createdAt: createdAt(),
+    /** 1 until the staff member replaces the initial password an admin set (ADR 0009, WT-1). */
+    mustChangePassword: integer("must_change_password", { mode: "boolean" })
+      .notNull()
+      .default(true),
   },
   (table) => [check("staff_members_role_check", sql`${table.role} IN ${staffRoleCheck}`)],
 );

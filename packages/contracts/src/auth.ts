@@ -30,18 +30,38 @@ export const SessionUser = z.object({
 });
 export type SessionUser = z.infer<typeof SessionUser>;
 
+/**
+ * Staff first-sign-in gates (ADR 0009). Until both are false, every staff route answers 403
+ * `setup_required` and the console sends the user to /setup-password, then /setup-authenticator.
+ */
+export const StaffSetup = z.object({
+  passwordChangeRequired: z.boolean(),
+  authenticatorRequired: z.boolean(),
+});
+export type StaffSetup = z.infer<typeof StaffSetup>;
+
 /** `GET /api/v1/auth/session`. */
 export const SessionResponse = z.object({
   user: SessionUser,
   permissions: z.array(z.string()),
   activeTenantId: z.string().nullable(),
+  /** Present for staff only. */
+  setup: StaffSetup.nullable().optional(),
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
-/** `POST /api/v1/staff`. */
+/** Staff passwords (ADR 0009): an admin sets the initial one; the staff member must change it. */
+export const StaffPassword = z.string().min(12).max(256);
+
+/**
+ * `POST /api/v1/staff`. `initialPassword` is required when the email is not yet staff; for an
+ * existing staff member it resets the password, which forces a change and authenticator
+ * re-enrolment at the next sign-in. Never logged or audited.
+ */
 export const CreateStaffRequest = z.object({
   email: Email,
   role: StaffRole,
+  initialPassword: StaffPassword.optional(),
 });
 export type CreateStaffRequest = z.infer<typeof CreateStaffRequest>;
 

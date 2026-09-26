@@ -261,7 +261,11 @@ emailProvidersRoute.post("/:id/test", requirePermission("settings.manage"), asyn
   if (!existing) return c.json({ error: "not_found" }, 404);
 
   const outcome = await testEmailProvider(c.env, existing, c.var.user.email, c.var.user.id);
-  return c.json({ ok: outcome.messageId !== undefined, ...outcome });
+  return c.json({
+    ok: outcome.messageId !== undefined,
+    messageId: outcome.messageId,
+    errorCode: outcome.errorCode,
+  });
 });
 
 export default emailProvidersRoute;

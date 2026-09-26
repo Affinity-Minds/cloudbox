@@ -1,20 +1,26 @@
 // Owner: WT-1. Session → principal resolution, done per request from D1 and cached for that request
 // only. Nothing is cached across requests, so a revoked session, role or grant takes effect on the
 // next request.
-import type { StaffRole } from "@cloudbox/contracts";
+import type { StaffRole, StaffSetup } from "@cloudbox/contracts";
 import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { createDb } from "../db/client";
 import { rolePermissions, staffMembers } from "../db/schema";
 import type { AppEnv, AppUser } from "../env";
-import { authFor, TRUSTED_ORIGINS } from "./index";
+import { authFor, trustedOrigins } from "./index";
 
 export type Principal = {
   user: AppUser;
   sessionId: string;
   /** Staff permission keys from `role_permissions` for the user's staff role; empty for non-staff. */
   permissions: ReadonlySet<string>;
+  /** Staff first-sign-in gates (ADR 0009); null for non-staff. */
+  setup: StaffSetup | null;
 };
+
+/** Staff whose initial password or authenticator is still pending (ADR 0009). */
+export const setupPending = (p: Principal) =>
+  p.setup !== null && (p.setup.passwordChangeRequired || p.setup.authenticatorRequired);
 
 const principals = new WeakMap<Request, Promise<Principal | null>>();
 
@@ -24,7 +30,11 @@ async function loadPrincipal(c: Context<AppEnv>): Promise<Principal | null> {
 
   // One query: the staff role and every grant of that role (no row = not staff).
   const rows = await createDb(c.env.DB)
-    .select({ role: staffMembers.role, permission: rolePermissions.permissionKey })
+    .select({
+      role: staffMembers.role,
+      mustChangePassword: staffMembers.mustChangePassword,
+      permission: rolePermissions.permissionKey,
+    })
     .from(staffMembers)
     .leftJoin(rolePermissions, eq(rolePermissions.role, staffMembers.role))
     .where(eq(staffMembers.userId, session.user.id));
@@ -42,6 +52,12 @@ async function loadPrincipal(c: Context<AppEnv>): Promise<Principal | null> {
     },
     sessionId: session.session.id,
     permissions,
+    setup: rows[0]
+      ? {
+          passwordChangeRequired: rows[0].mustChangePassword,
+          authenticatorRequired: !session.user.twoFactorEnabled,
+        }
+      : null,
   };
 }
 
@@ -62,11 +78,27 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * POST/PATCH/DELETE; a foreign one (or a cross-site fetch-metadata hint) is refused. Requests with
  * neither (server-to-server, tests) are not browsers and carry no ambient cookie risk.
  */
+function isTrustedOrigin(c: Context<AppEnv>, origin: string): boolean {
+  return origin === new URL(c.req.url).origin || trustedOrigins(c.env).includes(origin);
+}
+
 function isCrossSiteWrite(c: Context<AppEnv>): boolean {
   if (SAFE_METHODS.has(c.req.method)) return false;
   const origin = c.req.header("origin");
-  if (origin) return origin !== new URL(c.req.url).origin && !TRUSTED_ORIGINS.includes(origin);
+  if (origin) return !isTrustedOrigin(c, origin);
   return c.req.header("sec-fetch-site") === "cross-site";
+}
+
+/**
+ * Strict form for unauthenticated auth writes (sign-in is a login-CSRF target, review L-2): the
+ * request must positively prove it comes from our pages, with a trusted `Origin` or
+ * `Sec-Fetch-Site: same-origin`, cookie or not.
+ */
+export function isSameOriginWrite(c: Context<AppEnv>): boolean {
+  if (SAFE_METHODS.has(c.req.method)) return true;
+  const origin = c.req.header("origin");
+  if (origin) return isTrustedOrigin(c, origin);
+  return c.req.header("sec-fetch-site") === "same-origin";
 }
 
 export const unauthenticated = (c: Context<AppEnv>) =>
@@ -79,23 +111,34 @@ export const forbidden = (c: Context<AppEnv>) => c.json({ error: "forbidden" as 
  */
 export function guard(
   check: (principal: Principal, c: Context<AppEnv>) => boolean | Promise<boolean>,
+  options: { allowSetupPending?: boolean } = {},
 ): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     if (isCrossSiteWrite(c)) return forbidden(c);
     const principal = await getPrincipal(c);
     if (!principal) return unauthenticated(c);
     c.set("user", principal.user);
+    // A staff account that has not replaced its initial password and enrolled an authenticator
+    // reaches nothing but its session, logout and the Better Auth setup endpoints (ADR 0009).
+    if (!options.allowSetupPending && setupPending(principal)) {
+      return c.json({ error: "setup_required" as const, detail: principal.setup }, 403);
+    }
     if (!(await check(principal, c))) return forbidden(c);
     await next();
   };
 }
 
-/** Resolves the Better Auth session into `c.var.user`; 401 `{error:'unauthenticated'}` otherwise. */
-export function requireUser(): MiddlewareHandler<AppEnv> {
-  return guard(() => true);
+/**
+ * Resolves the Better Auth session into `c.var.user`; 401 `{error:'unauthenticated'}` otherwise.
+ * Staff with setup pending pass only with `allowSetupPending` (session and logout).
+ */
+export function requireUser(
+  options: { allowSetupPending?: boolean } = {},
+): MiddlewareHandler<AppEnv> {
+  return guard(() => true, options);
 }
 
-/** `requireUser()` plus a `staff_members` row; 403 `{error:'forbidden'}` otherwise. */
+/** `requireUser()` plus a `staff_members` row with setup done; 403 otherwise. */
 export function requireStaff(): MiddlewareHandler<AppEnv> {
   return guard((principal) => principal.user.staffRole !== null);
 }

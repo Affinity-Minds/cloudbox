@@ -25,8 +25,12 @@ const call = (path: string, who: SignedIn | null, init: RequestInit = {}) =>
     env,
   );
 
-const grant = (who: SignedIn | null, email: string, role: string) =>
-  call("/api/v1/staff", who, { method: "POST", body: JSON.stringify({ email, role }) });
+const INITIAL = "initial-password-0001";
+const grant = (who: SignedIn | null, email: string, role: string, initialPassword?: string) =>
+  call("/api/v1/staff", who, {
+    method: "POST",
+    body: JSON.stringify({ email, role, initialPassword }),
+  });
 
 async function auditFor(entityId: string) {
   const { results } = await env.DB.prepare(
@@ -41,7 +45,7 @@ describe("staff management API", () => {
   it("is gated by staff.manage: 401 anonymous, 403 for admin", async () => {
     expect((await call("/api/v1/staff", null)).status).toBe(401);
     expect((await call("/api/v1/staff", admin)).status).toBe(403);
-    expect((await grant(admin, "x@example.test", "support")).status).toBe(403);
+    expect((await grant(admin, "x@example.test", "support", INITIAL)).status).toBe(403);
     expect((await call(`/api/v1/staff/${root.userId}`, admin, { method: "DELETE" })).status).toBe(
       403,
     );
@@ -63,8 +67,9 @@ describe("staff management API", () => {
     );
   });
 
-  it("grants a role to an email that has never signed in; the grant applies at first sign-in", async () => {
-    const created = await grant(root, "New.Support@Example.test", "support");
+  it("creates a new staff member with an initial password: one user row, then password sign-in", async () => {
+    expect((await grant(root, "New.Support@Example.test", "support")).status).toBe(400);
+    const created = await grant(root, "New.Support@Example.test", "support", INITIAL);
     expect(created.status).toBe(201);
     const member = (await created.json()) as StaffMember;
     expect(member).toMatchObject({
@@ -72,38 +77,26 @@ describe("staff management API", () => {
       role: "support",
       createdBy: root.userId,
     });
+    const users = await env.DB.prepare('SELECT count(*) AS n FROM "user" WHERE email = ?')
+      .bind("new.support@example.test")
+      .first<{ n: number }>();
+    expect(users?.n).toBe(1);
 
-    // First sign-in through the real OTP flow (the user row exists but is unverified).
-    let code = "";
-    const mailEnv = {
-      ...env,
-      EMAIL: {
-        send: async (m: { text: string }) => {
-          code = m.text.match(/\b(\d{6})\b/)?.[1] ?? "";
-          return { messageId: "m" };
+    const signIn = await app.request(
+      "/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.9",
+          origin: "http://localhost",
         },
-      } as unknown as SendEmail,
-    };
-    const post = (path: string, body: unknown) =>
-      app.request(
-        path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" },
-          body: JSON.stringify(body),
-        },
-        mailEnv,
-      );
-    await post("/api/auth/email-otp/send-verification-otp", {
-      email: "new.support@example.test",
-      type: "sign-in",
-    });
-    const verified = await post("/api/auth/sign-in/email-otp", {
-      email: "new.support@example.test",
-      otp: code,
-    });
-    expect(verified.status).toBe(200);
-    const cookie = verified.headers
+        body: JSON.stringify({ email: "new.support@example.test", password: INITIAL }),
+      },
+      env,
+    );
+    expect(signIn.status).toBe(200);
+    const cookie = signIn.headers
       .getSetCookie()
       .map((c) => c.split(";")[0])
       .join("; ");
@@ -112,10 +105,11 @@ describe("staff management API", () => {
     ).json()) as SessionResponse;
     expect(session.user.id).toBe(member.userId);
     expect(session.user.staffRole).toBe("support");
+    expect(session.setup).toEqual({ passwordChangeRequired: true, authenticatorRequired: true });
 
     const rows = await auditFor(member.userId);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ event_type: "STAFF_ROLE_GRANTED", actor_id: root.userId });
+    expect(rows.map((r) => r.event_type)).toEqual(["STAFF_ROLE_GRANTED", "STAFF_PASSWORD_SET"]);
+    expect(JSON.stringify(rows)).not.toContain(INITIAL);
   });
 
   it("changes a role (audited with before/after) and is idempotent for the same role", async () => {
@@ -161,10 +155,11 @@ describe("staff management API", () => {
   });
 
   it("validates the body with the error shape", async () => {
-    const response = await grant(root, "not-an-email", "super_admin");
+    const response = await grant(root, "not-an-email", "super_admin", INITIAL);
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
-    expect((await grant(root, "ok@example.test", "owner")).status).toBe(400);
+    expect((await grant(root, "ok@example.test", "owner", INITIAL)).status).toBe(400);
+    expect((await grant(root, "short@example.test", "support", "too-short")).status).toBe(400);
   });
 
   it("refuses a cross-site grant", async () => {
