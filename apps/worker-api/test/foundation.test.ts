@@ -65,12 +65,10 @@ describe("CloudBox API foundation", () => {
     });
   });
 
-  // tenants, memberships and me are implemented (WT-2) and no longer answer this stub shape at
-  // their root path; see apps/worker-api/test/tenants.test.ts and memberships.test.ts instead.
+  // auth/staff (WT-1) and tenants/memberships/me (WT-2) are implemented and no longer answer
+  // this stub shape at their root path; see their own test files instead.
   it("mounts every remaining module stub under /api/v1", async () => {
     const paths = {
-      auth: "/api/v1/auth",
-      staff: "/api/v1/staff",
       enrollment: "/api/v1/tenants/ten_x/enrollment-tokens",
       devices: "/api/v1/devices",
       agent: "/api/v1/agent",

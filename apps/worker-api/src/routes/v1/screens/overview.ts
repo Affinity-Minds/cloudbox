@@ -2,6 +2,7 @@
 import type { OverviewScreen } from "@cloudbox/contracts";
 import { count, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { requirePermission } from "../../../authz/permissions";
 import { createDb, type Db } from "../../../db/client";
 import { auditLog, devices, subscriptions, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
@@ -44,9 +45,10 @@ export async function loadOverview(db: Db): Promise<OverviewScreen> {
   };
 }
 
-// WT-1: gate with requireStaff() once sessions exist (see authz/permissions.ts).
 const overview = new Hono<AppEnv>();
 
-overview.get("/", async (c) => c.json(await loadOverview(createDb(c.env.DB))));
+overview.get("/", requirePermission("tenant.view"), async (c) =>
+  c.json(await loadOverview(createDb(c.env.DB))),
+);
 
 export default overview;

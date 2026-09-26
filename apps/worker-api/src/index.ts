@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { authFor, HONEYPOT_HEADER } from "./auth";
+import { requireUser } from "./auth/middleware";
 import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
 import { apiVersion, correlationId } from "./http";
 import v1 from "./routes/v1";
+import { logout } from "./routes/v1/auth";
 
 export type { Bindings } from "./env";
 
@@ -43,7 +46,13 @@ app.get("/api/version", (c) =>
   }),
 );
 
-// WT-1 mounts the Better Auth handler here: app.on(["GET", "POST"], "/api/auth/*", …).
+// Better Auth. Sign-out goes through the audited v1 logout so there is one way out.
+app.post("/api/auth/sign-out", requireUser(), logout);
+app.on(["GET", "POST"], "/api/auth/*", (c): Response | Promise<Response> => {
+  // Honeypot enforced server-side: a plain 400 that names nothing (agent-notes ux-patterns).
+  if (c.req.header(HONEYPOT_HEADER)) return c.json({ error: "invalid_request" }, 400);
+  return authFor(c).handler(c.req.raw);
+});
 
 app.get("/api/v1/foundation", async (c) => {
   try {
