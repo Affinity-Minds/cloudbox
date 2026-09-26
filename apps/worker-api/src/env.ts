@@ -20,6 +20,11 @@ export type Bindings = {
   STAFF_AUTH_SECRET?: string;
   /** Better Auth secret of the customer identity system (/api/auth). */
   CUSTOMER_AUTH_SECRET?: string;
+  /**
+   * Base path of the discreet staff console (owner decision): one segment, e.g. `/ops` (default) or
+   * a long random slug. Only documents under it carry the ops marker; nothing links to it.
+   */
+  OPS_BASE_PATH?: string;
   /** Turnstile widget for the customer sign-in step-up (review T-1). Public; a var. */
   TURNSTILE_SITE_KEY?: string;
   /** Turnstile siteverify secret. Without it the step-up falls back to a per-account cooldown. */

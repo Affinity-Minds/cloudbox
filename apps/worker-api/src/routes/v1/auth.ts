@@ -2,24 +2,50 @@
 // GET /session, POST /logout. Better Auth is mounted at /api/auth/* (customers) and /api/ops/auth/*
 // (staff) in src/index.ts; each mount's sign-out is routed to the audited logout below.
 import type { SessionResponse } from "@cloudbox/contracts";
-import { type Context, Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { audit } from "../../audit";
 import { authFor, customerAuthFor, type Surface } from "../../auth";
-import { getPrincipal, requireSession } from "../../auth/middleware";
+import {
+  type Audience,
+  getCustomerPrincipal,
+  getPrincipal,
+  getStaffPrincipal,
+  guardFor,
+} from "../../auth/middleware";
 import { createDb } from "../../db/client";
 import type { AppEnv } from "../../env";
 import { getActiveTenantId } from "./me";
 
 const auth = new Hono<AppEnv>();
 
-auth.get("/session", requireSession({ allowSetupPending: true }), async (c) => {
-  const principal = await getPrincipal(c);
+/** `?as=staff` / `?as=customer` pins the identity system; without it, whichever is present. */
+function audienceOf(c: Context<AppEnv>): Audience {
+  const as = c.req.query("as");
+  return as === "staff" || as === "customer" ? as : "either";
+}
+
+function sessionAudience(): MiddlewareHandler<AppEnv> {
+  return (c, next) => guardFor(audienceOf(c), () => true, { allowSetupPending: true })(c, next);
+}
+
+auth.get("/session", sessionAudience(), async (c) => {
+  const audience = audienceOf(c);
+  const principal =
+    audience === "staff"
+      ? await getStaffPrincipal(c)
+      : audience === "customer"
+        ? await getCustomerPrincipal(c)
+        : await getPrincipal(c);
   if (!principal) return c.json({ error: "unauthenticated" }, 401);
   const body: SessionResponse = {
     user: principal.user,
     permissions: [...principal.permissions].sort(),
     // WT-2: settings-style per-user row, re-validated against a live membership on every read.
-    activeTenantId: await getActiveTenantId(createDb(c.env.DB), principal.user.id),
+    // Memberships belong to customer identities only.
+    activeTenantId:
+      principal.surface === "customer"
+        ? await getActiveTenantId(createDb(c.env.DB), principal.user.id)
+        : null,
     setup: principal.setup,
     surface: principal.surface,
   };
@@ -58,6 +84,9 @@ export function logoutFor(surface: Surface | "current") {
   };
 }
 
-auth.post("/logout", requireSession({ allowSetupPending: true }), logoutFor("current"));
+auth.post("/logout", sessionAudience(), (c) => {
+  const audience = audienceOf(c);
+  return logoutFor(audience === "either" ? "current" : audience)(c);
+});
 
 export default auth;

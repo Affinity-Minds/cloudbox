@@ -14,7 +14,7 @@
     "directory": "../admin-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": true
   },
   "d1_databases": [
     {
@@ -53,6 +53,7 @@
     "BUILD_TIME": "development",
     "ENVIRONMENT": "production",
     "TURNSTILE_SITE_KEY": "",
+    "OPS_BASE_PATH": "/ops",
     "EMAIL_FROM": "no-reply@em.affinity.ai.in",
     "BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"
   }

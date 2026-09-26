@@ -11,6 +11,7 @@ import { createDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
 import { apiVersion, correlationId } from "./http";
+import { serveAsset } from "./ops-shell";
 import v1 from "./routes/v1";
 import { logoutFor } from "./routes/v1/auth";
 
@@ -212,11 +213,13 @@ app.onError((error, c) => {
 });
 
 // Return directly: calling c.notFound() in here recurses (agent-notes cloudflare-workers #6).
+// Everything outside /api is the SPA and its assets (run_worker_first), served through
+// ops-shell.ts so the staff console document is marked only under OPS_BASE_PATH.
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith("/api/")) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.text("Not Found", 404);
+  return serveAsset(c);
 });
 
 export default app;
