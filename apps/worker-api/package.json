@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@cloudbox/contracts": "workspace:*",
     "@hono/zod-validator": "0.9.1",
     "better-auth": "1.7.6",
     "drizzle-orm": "0.45.3",

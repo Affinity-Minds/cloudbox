@@ -3,10 +3,7 @@
   "compilerOptions": {
     "module": "ESNext",
     "noEmit": true,
-    "types": ["@cloudflare/workers-types"],
-    "paths": {
-      "@cloudbox/contracts": ["../../packages/contracts/src/index.ts"]
-    }
+    "types": []
   },
   "include": ["src"]
 }
