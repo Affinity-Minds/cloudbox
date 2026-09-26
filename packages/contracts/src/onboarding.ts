@@ -8,7 +8,27 @@ import { TenantPublicCode } from "./tenants";
 const Code = z.string().regex(/^\d{6}$/);
 
 /** IANA time zone, e.g. `Asia/Kolkata`. */
-export const TimeZone = z.string().trim().min(1).max(64);
+/** IANA zone, validated with the runtime's own zone list (falls back to a DateTimeFormat probe). */
+export function isValidTimeZone(zone: string): boolean {
+  try {
+    const sv = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    if (typeof sv === "function" && sv.call(Intl, "timeZone").includes(zone)) return true;
+  } catch {
+    // fall through to the probe
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+export const TimeZone = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine(isValidTimeZone, { message: "invalid_timezone" });
 
 /**
  * `POST /api/auth/start/send-code`. Always needs a Turnstile token in `x-cloudbox-turnstile`.
