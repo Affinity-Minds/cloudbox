@@ -74,7 +74,7 @@ function App() {
             <span className="environment">box.affinityminds.in</span>
           </div>
 
-          <div className="status-grid" aria-label="Deployment status">
+          <section className="status-grid" aria-label="Deployment status">
             <div className="metric">
               <span className="metric-label">Release</span>
               <strong>{data?.release?.status ?? (error ? "Unavailable" : "Loading")}</strong>
