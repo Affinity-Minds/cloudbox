@@ -18,7 +18,8 @@ export function subscriptionLifecycle(
   const from = Date.parse(sub.validFrom);
   const until = Date.parse(sub.validUntil);
   const at = now.getTime();
-  const daysRemaining = Math.floor((until - at) / DAY_MS);
+  // Whole days, truncated toward zero: 11.8 days left → 11; expired 5.8 days ago → -5.
+  const daysRemaining = Math.trunc((until - at) / DAY_MS) || 0;
   const live = sub.status === "active" || sub.status === "trial";
   const inWindow = from <= at && at < until;
 

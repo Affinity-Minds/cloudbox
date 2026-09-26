@@ -2,6 +2,39 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — Drizzle `db.batch` on D1 silently shifted joined columns (WT-5)
+**Symptom:** Entitlement issuance answered `409 device_not_enrolled` for an enrolled device; a screen query failed with `ambiguous column name: generation`.
+
+**Cause:** Drizzle's D1 batch path turns each row object into an array with `Object.values` and then maps by position. A select over a join that returns two columns with the same SQL name (`devices.status` and `subscriptions.status`, `devices.id` and `subscriptions.id`) collapses to one key, so every later field shifts by one. The same query run alone (not in a batch) is fine, which hides it. Separately, a subquery alias equal to a real column name (`max(generation) as generation`) is ambiguous in the outer join.
+
+**Fix:** In batched selects, alias every duplicated column name (`sql\`${devices.status}\`.as("device_status")`) and give aggregates distinct aliases (`max_generation`). Comment at the query in `src/entitlement/service.ts`.
+
+**Blast radius:** Any `db.batch([...])` containing a join that selects same-named columns from two tables. Screen loaders are the usual place (fast-data-hydration pushes everything into one batch).
+
+**Verification:** `test/subscriptions.test.ts` issuance and screen tests.
+
+## 2026-09-27 — Zod `.partial()` kept a `.default()`: an empty PATCH would have re-activated a subscription (WT-5)
+**Symptom:** `CreateSubscriptionRequest.omit({planCode}).partial().parse({})` returned `{ status: "active" }`.
+
+**Cause:** In Zod 4, `.partial()` wraps a field that has `.default()`; the default still fills a missing value.
+
+**Fix:** `UpdateSubscriptionRequest` is spelled out with optional fields and no defaults, plus a "at least one field" refinement.
+
+**Blast radius:** Any update schema derived with `.partial()` from a create schema that has defaults (agent-notes cloudflare-workers #16 is the sibling: defaults only exist after `parse`).
+
+**Verification:** `PATCH /subscriptions/:id` with `{}` answers 400; covered in `test/subscriptions.test.ts`.
+
+## 2026-09-27 — `pnpm check` finds no files inside `.claude/worktrees/*`
+**Symptom:** `biome check .` in a worktree under `.claude/worktrees/` reports "No files were processed" and fails `verify`.
+
+**Cause:** `biome.json` excludes `!!**/.claude`, which Biome matches against the absolute path, so the whole worktree is excluded.
+
+**Fix (local only):** run Biome with a copy of the config that drops that line and disables VCS integration (`--config-path <scratch dir>`); CI (checked out at the repo root) is unaffected. Not changed in the repo because `biome.json` is WT-0's.
+
+**Blast radius:** Every worktree created under `.claude/worktrees/`; `verify` is red locally for a reason unrelated to the code.
+
+**Verification:** Biome checks 100+ files with the scratch config; CI runs the committed config.
+
 ## 2026-09-27 — First production deploy failed twice on the Cloudflare account, not the code
 **Symptom:** `Deploy CloudBox` failed at "Ensure Cloudflare resources": first `Authentication error [code: 10000]` on `/d1/database`, then after a token fix `Please enable R2 through the Cloudflare Dashboard [code: 10042]`. The first D1 database that did get created landed in region WNAM.
 

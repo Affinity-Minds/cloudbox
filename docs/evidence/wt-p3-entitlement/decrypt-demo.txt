@@ -1,0 +1,37 @@
+# WT-5 local demo, 2026-09-26T19:08Z — wrangler dev (local D1), data seeded through the WT-5 API
+# Token itself is not reproduced here (confidential artefact); only its protected header.
+
+$ # JWE protected header of entitlements.token for dev_example-01 generation 1
+{"alg":"RSA-OAEP-256","enc":"A256GCM","cty":"JWT","kid":"ebP10BH2rEFPxFI1Rn1BErUAPUq0F8EuWbs3WP9WYzA"}
+segments: 5  length: 1771
+
+$ node packages/licensing-contracts/scripts/inspect-entitlement.ts device-private.jwk.json server-public.jwk.json < entitlement.jwe
+{
+  "kid": "ebP10BH2rEFPxFI1Rn1BErUAPUq0F8EuWbs3WP9WYzA",
+  "claims": {
+    "iss": "cloudbox",
+    "kid": "ebP10BH2rEFPxFI1Rn1BErUAPUq0F8EuWbs3WP9WYzA",
+    "jti": "lic_24a64ac5-c1f1-473e-bc5b-ae04a5091731",
+    "iat": 1790449401,
+    "license_id": "lic_24a64ac5-c1f1-473e-bc5b-ae04a5091731",
+    "tenant_id": "ten_example-org",
+    "device_id": "dev_example-01",
+    "device_key_thumbprint": "z_vBWctj2jI71lmbszoaEM41U5BesP17-Hnhq3d6tFo",
+    "max_managed_users": 6,
+    "valid_from": "2026-09-26T19:03:21.063Z",
+    "valid_until": "2027-09-26T00:00:00.000Z",
+    "renewal_warning_days": 30,
+    "offline_grace_days": 7,
+    "generation": 1,
+    "features": [
+      "remote_access",
+      "managed_backup",
+      "fleet"
+    ]
+  }
+}
+
+$ # same token, another enrolled device's private key (CLOUDBOX-00002)
+$ node packages/licensing-contracts/scripts/inspect-entitlement.ts other-device-private.jwk.json server-public.jwk.json < entitlement.jwe
+rejected: decryption_failed: entitlement could not be decrypted
+exit 1
