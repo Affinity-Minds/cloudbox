@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AuditEntry } from "./screens";
 
 export const DeviceStatus = z.enum(["enrolled", "revoked", "transferred"]);
 export type DeviceStatus = z.infer<typeof DeviceStatus>;
@@ -31,13 +32,20 @@ export const Device = z.object({
 });
 export type Device = z.infer<typeof Device>;
 
-/** Row on `GET /api/v1/screens/fleet`. */
+/** Derived from `entitlements`: no row, a non-expired row, or the newest row past `valid_until`. */
+export const LicenseState = z.enum(["none", "active", "expired"]);
+export type LicenseState = z.infer<typeof LicenseState>;
+
+/** Row on `GET /api/v1/screens/fleet`. Added by WT-3 beyond the foundation's original pick:
+ * `windowsBuild` (already a `Device` column) and `licenseState` (derived, not stored) — both
+ * additive-only and never consumed by the Agent API, so the Windows agent (WT-4) is unaffected. */
 export const FleetListItem = Device.pick({
   id: true,
   tenantId: true,
   name: true,
   status: true,
   hostname: true,
+  windowsBuild: true,
   agentVersion: true,
   keyProtection: true,
   lastSeenAt: true,
@@ -46,5 +54,58 @@ export const FleetListItem = Device.pick({
   tenantCode: z.string(),
   tenantName: z.string(),
   online: z.boolean(),
+  licenseState: LicenseState,
 });
 export type FleetListItem = z.infer<typeof FleetListItem>;
+
+export const FleetFacets = z.object({
+  total: z.number().int(),
+  online: z.number().int(),
+  offline: z.number().int(),
+  degradedKey: z.number().int(),
+});
+export type FleetFacets = z.infer<typeof FleetFacets>;
+
+/** Minimal tenant picker, embedded until WT-2 ships `GET /api/v1/tenants` (WT-5's subscriptions
+ * screen does the same for the same reason). Scoped to the caller: every tenant for staff, only
+ * their own for a tenant-standing caller — the Enrollment page's tenant picker reuses this list. */
+export const FleetTenantOption = z.object({
+  id: z.string(),
+  publicCode: z.string(),
+  displayName: z.string(),
+});
+export type FleetTenantOption = z.infer<typeof FleetTenantOption>;
+
+/** `GET /api/v1/screens/fleet?tenant=&online=&q=`. */
+export const FleetScreen = z.object({
+  items: z.array(FleetListItem),
+  facets: FleetFacets,
+  tenants: z.array(FleetTenantOption),
+});
+export type FleetScreen = z.infer<typeof FleetScreen>;
+
+/** `GET /api/v1/screens/fleet/:deviceId` — overview + license + health tabs come off this row;
+ * the audit tab is a separate array of the same shape the audit screen uses. */
+export const FleetDeviceDetail = Device.extend({
+  tenantCode: z.string(),
+  tenantName: z.string(),
+  licenseState: LicenseState,
+});
+export type FleetDeviceDetail = z.infer<typeof FleetDeviceDetail>;
+
+export const FleetEntitlementRow = z.object({
+  id: z.string(),
+  subscriptionId: z.string(),
+  generation: z.number().int(),
+  issuedAt: z.string(),
+  validUntil: z.string(),
+  revokedAt: z.string().nullable(),
+});
+export type FleetEntitlementRow = z.infer<typeof FleetEntitlementRow>;
+
+export const FleetDetailScreen = z.object({
+  device: FleetDeviceDetail,
+  entitlements: z.array(FleetEntitlementRow),
+  audit: z.array(AuditEntry),
+});
+export type FleetDetailScreen = z.infer<typeof FleetDetailScreen>;

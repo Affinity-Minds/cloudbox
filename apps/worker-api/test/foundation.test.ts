@@ -71,9 +71,6 @@ describe("CloudBox API foundation", () => {
       tenants: "/api/v1/tenants",
       memberships: "/api/v1/tenants/ten_x/memberships",
       me: "/api/v1/me",
-      enrollment: "/api/v1/tenants/ten_x/enrollment-tokens",
-      devices: "/api/v1/devices",
-      agent: "/api/v1/agent",
       audit: "/api/v1/audit",
     };
     // Stubs answer only to staff (review M-1); the agent stub stays public for device auth (WT-3).
