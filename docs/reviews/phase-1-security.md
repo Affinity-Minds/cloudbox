@@ -378,3 +378,47 @@ A tenant `user` cannot change its own standing.
 - **U-2** (Medium): tenant takeover by a tenant admin. Fix it before customers get self-service member management in the UI.
 - Make the deploy fail or warn loudly while `TURNSTILE_SECRET_KEY` is missing in production.
 - Pin actions by commit SHA (Low).
+
+---
+
+# Fifth pass / final verdict
+
+Reviewed commit: `origin/phase-1/identity` @ `13186f4`. It rebuilds identity as two Better Auth instances, one for staff and one for customers. Each has its own tables, cookies (`cbx_ops_session` / `cbx_session`), secrets, mounts (`/api/ops/auth/*` / `/api/auth/*`) and plugin lists. The branch also moves the staff console under `OPS_BASE_PATH` (`src/ops-shell.ts`), fixes U-1 and fixes U-2. It is merged into `review/phase-1-security`, which is now at `54a1136`.
+New test file: `apps/worker-api/test/review/phase-1-fifth-pass.test.ts`.
+
+```
+pnpm --filter @cloudbox/worker-api test                        → 26 files, 469 passed (before the new file)
+vitest run test/review/phase-1-fifth-pass.test.ts             → 4 passed, 1 failed (W-1, Low)
+drizzle-kit generate                                          → "No schema changes, nothing to migrate"
+```
+
+## WT-1's edits to the review tests: verified
+`git diff c5dd820..HEAD -- apps/worker-api/test/review` touches only `phase-1-second-pass.test.ts` and `phase-1-fourth-pass.test.ts`. Almost every change is an address change: `/api/auth/*` became `/api/ops/auth/*` on the staff paths, and `verification` / `"user"` became `customer_verifications` / `staff_users` / `staff_verifications`. Two changes touch assertion scope, and both are sound:
+1. **`U-3` screen read:** `[403, 404]` became `[401, 403, 404]`. A customer cookie is no longer read on a staff screen at all, so 401 is the correct denial. It is still a denial.
+2. **`S-6 (holds)` setup-gate walk:** now skips `/api/v1/me*`. Those routes are customer-only and never read a staff session, so a staff member mid-setup gets 401 there. The new test `V-1 … a super admin has no tenant standing and no customer routes` covers this independently and passes.
+
+No `expect` was weakened in U-1, U-2, S-1…S-5, S-7…S-9, T-2 or F-2/F-4/F-6/F-8. All of them pass, including both U-1 Kelvin-sign tests (the NFKC + trim + lowercase `Email`, which fails closed) and both U-2 tenant-ranking tests.
+
+## Separation attacks: all hold
+- **A customer cookie cannot reach `requirePermission`:** it uses `guardFor("staff", …)` (`authz/permissions.ts:44-47`). A tenant owner's customer session gets 401 on `/staff`, `/screens/audit`, `/screens/overview` and `/plans` (test V-1).
+- **A staff cookie cannot reach `requireTenantStanding` or `getTenantStanding`:** `guardFor("customer", …)` applies, `getTenantStanding` returns null for any non-customer surface, and the per-request cache key is now `userId:tenantId`. A super admin gets 401 on `/me/tenants` and `/me/active-tenant` (V-1). The FKs back this up at the database level: `staff_members → staff_users` and `tenant_memberships → customer_users` (0003).
+- **Routes open to both audiences** (`guard` = "either": memberships, enrollment; `requireSession`: session, logout): each candidate principal is checked on its own, with its own permissions or standing. Scopes never combine. With both cookies, a `read_only` staff member plus a tenant `user` still gets 403 on an invite and 403 on `/staff` (V-1). The fleet screen uses `getPrincipal`: staff first, with no fallback to the customer principal, which fails closed.
+- **`?as=staff|customer`** exists only on `GET /api/v1/auth/session` and logout. It only chooses which of the caller's own cookies to report or end, so it cannot be abused.
+- **`OPS_BASE_PATH`:** one segment only, `^/[A-Za-z0-9_-]{1,128}$`, trimmed. Empty, `/`, traversal, dots, percent-encoding and multi-segment values all fall back to `/ops` (V-2).
+- **Ops-shell marker:** it is injected server-side, only on known console routes, and escaped. A client that forges it only changes its own UI. Every staff API call is still authorised by the staff cookie and staff tables. Being hard to find is not a security control here, and the review does not treat it as one. `/api/ops/auth/*` answers under any base path.
+- **Bootstrap seeding:** `ensureBootstrapSuperAdmin` → `ensureStaffUserByEmail` → staff tables only. Staff grants use `ensureStaffUserByEmail`, and memberships use `ensureCustomerByEmail`. The deprecated alias `ensureUserByEmail` maps to customers and has no caller in `src/` (grep).
+- **Secrets:** separate `STAFF_AUTH_SECRET` and `CUSTOMER_AUTH_SECRET`. `assertAuthConfig(env, surface)` fails closed when the one for that surface is missing.
+- **Migrations 0003/0004, rewritten in place:** they match the Drizzle schema (no drift). Production only ever applied 0001/0002 (`origin/main` holds only those two), so rewriting them is safe for production. Any dev or staging D1 that applied the old 0003/0004 must be recreated.
+
+## New findings (none blocking)
+- **W-1 (Low):** `OPS_BASE_PATH` accepts `/api` and `/assets` (`ops-shell.ts:11`). With `/api`, the console becomes unreachable, because `/api/*` goes to the Worker's API and 404s. It is a misconfiguration trap, not a security hole. Fix: reserve `api` and `assets` (and any top-level static directory) in `opsBasePath`. Test: `V-2 (Low) …` (fails today).
+- **W-2 (Low, defence in depth):** the tenant branch of `resolveFleetAccess` (`screens/fleet.ts:22-34`) queries memberships by `principal.user.id` without checking `principal.surface === "customer"`. The FK makes a staff id in `tenant_memberships` impossible, so this cannot be exploited today. Add the surface check so it does not depend on the schema.
+
+## Final verdict
+**Phase 1 may merge to main. No Critical or High findings are open.** Every earlier blocker is closed and verified by the review tests: H-1, H-2, S-1, S-2, T-1, U-1. U-2 (tenant ranking) is also closed.
+
+Follow-ups, none blocking:
+- W-1, W-2 (Low).
+- Make the deploy fail or warn loudly while `TURNSTILE_SECRET_KEY` is missing in production (fourth pass).
+- Pin workflow actions to commit SHAs.
+- Recreate any dev or staging D1 that applied the old 0003/0004.
