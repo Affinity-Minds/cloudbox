@@ -4,6 +4,7 @@ using CloudBox.Agent.Identity;
 using CloudBox.Agent.Install;
 using CloudBox.Agent.Service;
 using Microsoft.Win32;
+using Xunit.Abstractions;
 
 namespace CloudBox.Agent.Tests;
 
