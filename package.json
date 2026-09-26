@@ -1,0 +1,20 @@
+{
+  "name": "cloudbox",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.5.1",
+  "scripts": {
+    "build": "pnpm --filter @cloudbox/admin-web build && pnpm --filter @cloudbox/worker-api build",
+    "dev": "pnpm --parallel --filter @cloudbox/admin-web --filter @cloudbox/worker-api dev",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "check": "biome check .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "verify": "pnpm check && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13"
+  }
+}

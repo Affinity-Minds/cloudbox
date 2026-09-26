@@ -1,0 +1,133 @@
+name: Deploy CloudBox
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudbox-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_ORIGIN: https://box.affinityminds.in
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm run verify
+
+      - name: Stamp build
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = "apps/worker-api/wrangler.jsonc";
+          let source = fs.readFileSync(path, "utf8");
+          source = source.replace('"BUILD_SHA": "development"', `"BUILD_SHA": "${process.env.GITHUB_SHA}"`);
+          source = source.replace('"BUILD_TIME": "development"', `"BUILD_TIME": "${new Date().toISOString()}"`);
+          fs.writeFileSync(path, source);
+          NODE
+
+      - name: Ensure Cloudflare resources exist and pin their ids
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! pnpm wrangler d1 list --json | jq -e '.[] | select(.name=="cloudbox-db")' >/dev/null; then
+            pnpm wrangler d1 create cloudbox-db
+          fi
+          db_id="$(pnpm wrangler d1 list --json | jq -r '.[] | select(.name=="cloudbox-db") | .uuid')"
+          test -n "$db_id"
+          pnpm wrangler r2 bucket create cloudbox-artifacts 2>/dev/null || true
+          pnpm wrangler r2 bucket info cloudbox-artifacts >/dev/null
+          node - "$db_id" <<'NODE'
+          const fs = require("fs");
+          const id = process.argv[2];
+          const path = "wrangler.jsonc";
+          let source = fs.readFileSync(path, "utf8");
+          if (!source.includes('"database_id"')) {
+            source = source.replace('"database_name": "cloudbox-db",', `"database_name": "cloudbox-db",\n      "database_id": "${id}",`);
+          }
+          fs.writeFileSync(path, source);
+          NODE
+          grep -n database_id wrangler.jsonc
+
+      - name: Apply D1 migrations
+        working-directory: apps/worker-api
+        run: pnpm wrangler d1 migrations apply cloudbox-db --remote
+
+      - name: Deploy Worker
+        working-directory: apps/worker-api
+        run: pnpm wrangler deploy
+
+      - name: Create temporary Phase 0 deploy credential
+        id: phase0-key
+        shell: bash
+        run: |
+          key="$(openssl rand -hex 32)"
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          printf '%s' "$key" | pnpm --dir apps/worker-api wrangler secret put PHASE0_ADMIN_KEY
+
+      - name: Prove audited administrative state change
+        shell: bash
+        env:
+          PHASE0_ADMIN_KEY: ${{ steps.phase0-key.outputs.key }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error             --retry 5 --retry-delay 2             -X PATCH "$PRODUCTION_ORIGIN/api/v1/foundation/release"             -H "content-type: application/json"             -H "X-CloudBox-Phase0-Key: $PHASE0_ADMIN_KEY"             --data "$(jq -cn --arg sha "$GITHUB_SHA" '{status:"deployed",sha:$sha}')"             | tee /tmp/audited-change.json
+
+      - name: Verify production health, version, D1 and audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/health" | tee /tmp/health.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/version" | tee /tmp/version.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2             "$PRODUCTION_ORIGIN/api/v1/foundation" | tee /tmp/foundation.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+          const version = JSON.parse(fs.readFileSync("/tmp/version.json", "utf8"));
+          const foundation = JSON.parse(fs.readFileSync("/tmp/foundation.json", "utf8"));
+          const sha = process.env.GITHUB_SHA;
+
+          if (version.gitSha !== sha) {
+            throw new Error(`Version mismatch: expected ${sha}, got ${version.gitSha}`);
+          }
+
+          if (foundation.release?.sha !== sha) {
+            throw new Error(`Audited release mismatch: expected ${sha}, got ${foundation.release?.sha}`);
+          }
+
+          const proved = foundation.audit?.some(
+            (event) =>
+              event.eventType === "foundation.release.changed" &&
+              event.actorId === "github-actions" &&
+              event.after?.sha === sha,
+          );
+
+          if (!proved) {
+            throw new Error("Foundation audit proof was not returned by the deployed API");
+          }
+          NODE

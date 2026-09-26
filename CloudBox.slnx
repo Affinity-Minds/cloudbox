@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="apps/cloudbox-agent/CloudBox.Agent.csproj" />
+  <Project Path="apps/cloudbox-status/CloudBox.Status.csproj" />
+  <Project Path="apps/cloudbox-connect/CloudBox.Connect.csproj" />
+  <Project Path="apps/cloudbox-server-setup/CloudBox.Server.Setup.csproj" />
+</Solution>
