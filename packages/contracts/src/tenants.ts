@@ -48,8 +48,36 @@ export const TenantListItem = Tenant.pick({
 }).extend({
   deviceCount: z.number().int(),
   memberCount: z.number().int(),
+  /** Earliest `valid_until` among non-cancelled subscriptions; null when none exist. */
+  nextSubscriptionExpiry: z.string().nullable(),
+  /** Device health rollup is owned by Fleet (WT-3); always `unknown` here — never fabricated. */
+  health: z.literal("unknown"),
 });
 export type TenantListItem = z.infer<typeof TenantListItem>;
+
+/** `GET /api/v1/screens/tenants?status=&q=&plan=&page=`. */
+export const TenantsScreenQuery = z.object({
+  status: TenantStatus.optional(),
+  q: z.string().trim().max(120).optional(),
+  plan: z.string().max(64).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+});
+export type TenantsScreenQuery = z.infer<typeof TenantsScreenQuery>;
+
+export const TenantsScreenFacet = z.object({ value: z.string(), count: z.number().int() });
+export type TenantsScreenFacet = z.infer<typeof TenantsScreenFacet>;
+
+export const TenantsScreen = z.object({
+  items: z.array(TenantListItem),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  facets: z.object({
+    status: z.array(TenantsScreenFacet),
+    plan: z.array(TenantsScreenFacet),
+  }),
+});
+export type TenantsScreen = z.infer<typeof TenantsScreen>;
 
 export const CreateTenantRequest = z.object({
   displayName: z.string().trim().min(1).max(120),
