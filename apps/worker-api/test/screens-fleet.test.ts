@@ -129,6 +129,8 @@ describe("GET /api/v1/screens/fleet", () => {
     expect(ownBody.items.every((d) => d.tenantId === tenantA.tenantId)).toBe(true);
     expect(ownBody.items.some((d) => d.hostname === "tenant-a-host")).toBe(true);
     expect(ownBody.items.some((d) => d.hostname === "tenant-b-host")).toBe(false);
+    // The embedded tenant picker is scoped the same way: never leaks Tenant B's name/code.
+    expect(ownBody.tenants.map((t) => t.id)).toEqual([tenantA.tenantId]);
 
     const explicitOwn = await app.request(
       `/api/v1/screens/fleet?tenant=${tenantA.tenantId}`,

@@ -131,7 +131,15 @@ export async function loadFleet(
     .filter((row) => filters.online === undefined || row.online === filters.online)
     .map(({ licenseValidUntil: _lvu, ...row }) => row);
 
-  return { items, facets };
+  // Lightweight tenant picker for the fleet filter and the Enrollment page — see the FleetScreen
+  // contract doc comment for why this lives here instead of a real tenants list (WT-2).
+  const tenantOptions = await db
+    .select({ id: tenants.id, publicCode: tenants.publicCode, displayName: tenants.displayName })
+    .from(tenants)
+    .where(access.kind === "tenant" ? inArray(tenants.id, access.tenantIds) : undefined)
+    .orderBy(tenants.displayName);
+
+  return { items, facets, tenants: tenantOptions };
 }
 
 export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: string) {
@@ -166,6 +174,7 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
     db
       .select({
         id: entitlements.id,
+        subscriptionId: entitlements.subscriptionId,
         generation: entitlements.generation,
         issuedAt: entitlements.issuedAt,
         validUntil: entitlements.validUntil,

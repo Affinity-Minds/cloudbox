@@ -66,10 +66,21 @@ export const FleetFacets = z.object({
 });
 export type FleetFacets = z.infer<typeof FleetFacets>;
 
+/** Minimal tenant picker, embedded until WT-2 ships `GET /api/v1/tenants` (WT-5's subscriptions
+ * screen does the same for the same reason). Scoped to the caller: every tenant for staff, only
+ * their own for a tenant-standing caller — the Enrollment page's tenant picker reuses this list. */
+export const FleetTenantOption = z.object({
+  id: z.string(),
+  publicCode: z.string(),
+  displayName: z.string(),
+});
+export type FleetTenantOption = z.infer<typeof FleetTenantOption>;
+
 /** `GET /api/v1/screens/fleet?tenant=&online=&q=`. */
 export const FleetScreen = z.object({
   items: z.array(FleetListItem),
   facets: FleetFacets,
+  tenants: z.array(FleetTenantOption),
 });
 export type FleetScreen = z.infer<typeof FleetScreen>;
 
@@ -84,6 +95,7 @@ export type FleetDeviceDetail = z.infer<typeof FleetDeviceDetail>;
 
 export const FleetEntitlementRow = z.object({
   id: z.string(),
+  subscriptionId: z.string(),
   generation: z.number().int(),
   issuedAt: z.string(),
   validUntil: z.string(),
