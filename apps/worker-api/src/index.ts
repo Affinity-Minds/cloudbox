@@ -1,15 +1,21 @@
+import { Email } from "@cloudbox/contracts";
+import type { Context, Next } from "hono";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { changeFoundationRelease, loadFoundation } from "./db/audit";
+import { authContextFor, createAuth, customerAuthFor, HONEYPOT_HEADER } from "./auth";
+import { customerCodeStepUp } from "./auth/challenge";
+import { guardFor, isSameOriginWrite } from "./auth/middleware";
+import { ensureBootstrapSuperAdmin } from "./auth/users";
+import { createDb } from "./db/client";
+import type { AppEnv, Bindings } from "./env";
+import { changeFoundationRelease, loadFoundation } from "./foundation";
+import { apiVersion, correlationId } from "./http";
+import { serveAsset } from "./ops-shell";
+import v1 from "./routes/v1";
+import { logoutFor } from "./routes/v1/auth";
 
-export type Bindings = {
-  DB: D1Database;
-  ARTIFACTS: R2Bucket;
-  FLEET_PRESENCE: DurableObjectNamespace;
-  BUILD_SHA?: string;
-  BUILD_TIME?: string;
-  PHASE0_ADMIN_KEY?: string;
-};
+export type { Bindings } from "./env";
 
 export class FleetPresence {
   constructor(
@@ -24,7 +30,10 @@ export class FleetPresence {
   }
 }
 
-const app = new Hono<{ Bindings: Bindings }>();
+const app = new Hono<AppEnv>();
+
+app.use("/api/*", correlationId());
+app.use("/api/v1/*", apiVersion());
 
 app.get("/api/health", (c) =>
   c.json({
@@ -38,25 +47,110 @@ app.get("/api/version", (c) =>
     service: "cloudbox-control-plane",
     gitSha: c.env.BUILD_SHA ?? "development",
     builtAt: c.env.BUILD_TIME ?? "development",
+    environment: c.env.ENVIRONMENT ?? "development",
   }),
 );
 
-app.use("/api/v1/*", async (c, next) => {
+// Better Auth, two separate surfaces (owner decision; ADR 0002/0009). Each mount answers only the
+// endpoints its product uses (review H-2), exact match; everything else is the ordinary 404, so a
+// staff endpoint does not exist under /api/auth and a customer one does not exist under /api/ops/auth.
+const CUSTOMER_AUTH_ROUTES = new Set([
+  "POST /api/auth/email-otp/send-verification-otp", // /login, email step (type "sign-in")
+  "POST /api/auth/sign-in/email-otp", // /login, code step
+  "POST /api/auth/sign-out", // routed to the audited logout below
+  "GET /api/auth/get-session",
+]);
+const STAFF_AUTH_ROUTES = new Set([
+  "POST /api/ops/auth/sign-in/email", // <ops>/login, password step
+  "POST /api/ops/auth/two-factor/verify-totp", // <ops>/login authenticator step; setup confirmation
+  "POST /api/ops/auth/two-factor/verify-backup-code", // <ops>/login backup-code fallback
+  "POST /api/ops/auth/change-password", // <ops>/setup-password (forced at first sign-in)
+  "POST /api/ops/auth/two-factor/enable", // <ops>/setup-authenticator (QR + backup codes)
+  "POST /api/ops/auth/two-factor/generate-backup-codes", // regenerate backup codes (password)
+  "POST /api/ops/auth/two-factor/disable", // password + fresh authenticator code
+  "POST /api/ops/auth/sign-out", // routed to the audited logout below
+  "GET /api/ops/auth/get-session",
+]);
+/** Paths whose body names an email: parsed and normalised here, before anything counts (U-1). */
+const EMAIL_BODY_PATHS = new Set([
+  "/api/auth/email-otp/send-verification-otp",
+  "/api/auth/sign-in/email-otp",
+  "/api/ops/auth/sign-in/email",
+]);
+const CUSTOMER_CODE_PATHS = new Set([
+  "/api/auth/email-otp/send-verification-otp",
+  "/api/auth/sign-in/email-otp",
+]);
+
+/** The request Better Auth sees: the original, or one whose `email` was normalised (U-1). */
+const normalisedRequests = new WeakMap<Request, Request>();
+
+function authGate(routes: Set<string>) {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const path = new URL(c.req.url).pathname;
+    if (!routes.has(`${c.req.method} ${path}`)) return c.json({ error: "not_found" }, 404);
+    // Login CSRF: auth writes must prove they come from our pages, with or without a cookie (L-2).
+    if (!isSameOriginWrite(c)) return c.json({ error: "forbidden" }, 403);
+    // Honeypot enforced server-side: a plain 400 that names nothing (agent-notes ux-patterns).
+    if (c.req.header(HONEYPOT_HEADER)) return c.json({ error: "invalid_request" }, 400);
+    if (EMAIL_BODY_PATHS.has(path)) {
+      // One spelling per mailbox: NFKC + lower-case, then validated. An address that does not
+      // parse is refused here, never passed on (review U-1: Better Auth would lower-case a
+      // variant CloudBox's own limits did not recognise).
+      const body = (await c.req.raw
+        .clone()
+        .json()
+        .catch(() => null)) as Record<string, unknown> | null;
+      const email = Email.safeParse(body?.email);
+      if (!body || !email.success) return c.json({ error: "invalid_request" }, 400);
+      normalisedRequests.set(
+        c.req.raw,
+        new Request(c.req.raw, { body: JSON.stringify({ ...body, email: email.data }) }),
+      );
+      // Customer codes: per-account step-up above the failure budget (Turnstile; review T-1).
+      if (CUSTOMER_CODE_PATHS.has(path)) {
+        const stepUp = await customerCodeStepUp(c, email.data);
+        if (stepUp) return stepUp;
+      }
+    }
+    await next();
+  };
+}
+
+app.use("/api/auth/*", authGate(CUSTOMER_AUTH_ROUTES));
+app.use("/api/ops/auth/*", authGate(STAFF_AUTH_ROUTES));
+// Staff API responses are never indexed (the discreet ops surface).
+app.use("/api/ops/*", async (c, next) => {
   await next();
-  c.header("X-API-Version", "v1");
+  c.res.headers.set("X-Robots-Tag", "noindex, nofollow");
 });
-
-app.get("/api/v1", (c) =>
-  c.json({
-    name: "CloudBox API",
-    version: "v1",
-    status: "foundation",
-  }),
+// Sign-out goes through the audited logout so there is one way out per surface.
+app.post(
+  "/api/auth/sign-out",
+  guardFor("customer", () => true),
+  logoutFor("customer"),
 );
+app.post(
+  "/api/ops/auth/sign-out",
+  guardFor("staff", () => true, { allowSetupPending: true }),
+  logoutFor("staff"),
+);
+app.on(
+  ["GET", "POST"],
+  "/api/auth/*",
+  (c): Promise<Response> =>
+    customerAuthFor(c).handler(normalisedRequests.get(c.req.raw) ?? c.req.raw),
+);
+app.on(["GET", "POST"], "/api/ops/auth/*", async (c): Promise<Response> => {
+  const context = authContextFor(c);
+  // Until a super admin exists, the bootstrap address needs a staff identity (one read once it does).
+  await ensureBootstrapSuperAdmin(c.env, context);
+  return createAuth(c.env, context).handler(normalisedRequests.get(c.req.raw) ?? c.req.raw);
+});
 
 app.get("/api/v1/foundation", async (c) => {
   try {
-    const foundation = await loadFoundation(c.env.DB);
+    const foundation = await loadFoundation(createDb(c.env.DB));
     return c.json({
       version: {
         gitSha: c.env.BUILD_SHA ?? "development",
@@ -75,11 +169,25 @@ const releaseInput = z.object({
   sha: z.string().min(1).max(128),
 });
 
+/** Length-hiding constant-time comparison for short secrets (compares SHA-256 digests). */
+async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const x = new Uint8Array(da);
+  const y = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return diff === 0;
+}
+
 app.patch("/api/v1/foundation/release", async (c) => {
   const configuredKey = c.env.PHASE0_ADMIN_KEY;
   const suppliedKey = c.req.header("X-CloudBox-Phase0-Key");
 
-  if (!configuredKey || !suppliedKey || suppliedKey !== configuredKey) {
+  if (!configuredKey || !suppliedKey || !(await constantTimeEqual(suppliedKey, configuredKey))) {
     return c.json({ error: "forbidden" }, 403);
   }
 
@@ -88,19 +196,30 @@ app.patch("/api/v1/foundation/release", async (c) => {
     return c.json({ error: "invalid_request" }, 400);
   }
 
-  const result = await changeFoundationRelease(c.env.DB, parsed.data, {
-    type: "bootstrap-admin",
-    id: "github-actions",
+  const result = await changeFoundationRelease(createDb(c.env.DB), parsed.data, {
+    actor: { type: "bootstrap-admin", id: "github-actions" },
+    correlationId: c.var.correlationId,
   });
 
   return c.json(result);
 });
 
+app.route("/api/v1", v1);
+
+app.onError((error, c) => {
+  if (error instanceof HTTPException) return error.getResponse();
+  console.error("unhandled", c.var.correlationId, error);
+  return c.json({ error: "internal_error" }, 500);
+});
+
+// Return directly: calling c.notFound() in here recurses (agent-notes cloudflare-workers #6).
+// Everything outside /api is the SPA and its assets (run_worker_first), served through
+// ops-shell.ts so the staff console document is marked only under OPS_BASE_PATH.
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith("/api/")) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.text("Not Found", 404);
+  return serveAsset(c);
 });
 
 export default app;

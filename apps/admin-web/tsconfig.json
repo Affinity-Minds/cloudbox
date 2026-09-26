@@ -4,7 +4,11 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@cloudbox/contracts": ["../../packages/contracts/src/index.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

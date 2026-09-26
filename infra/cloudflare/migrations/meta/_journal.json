@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790447088751,
+      "tag": "0003_identity_tenancy_devices",
+      "breakpoints": true
+    }
+  ]
+}

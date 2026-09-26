@@ -1,6 +1,22 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
-  "files": { "ignoreUnknown": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!!.claude",
+      "!!.worktrees",
+      "!!**/dist",
+      "!apps/admin-web/src/components/ui",
+      "!apps/admin-web/src/routeTree.gen.ts",
+      "!infra/cloudflare/migrations/meta"
+    ]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -9,12 +25,19 @@
   },
   "linter": {
     "enabled": true,
-    "rules": { "preset": "recommended" }
+    "rules": {
+      "preset": "recommended"
+    }
   },
   "javascript": {
     "formatter": {
       "quoteStyle": "double",
       "semicolons": "always"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   }
 }

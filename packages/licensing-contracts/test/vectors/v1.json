@@ -1,0 +1,55 @@
+{
+  "note": "TEST VECTOR ONLY. Throwaway keys; never trust this server key outside tests.",
+  "format": "JWS ES256 {typ:cbx-entitlement+jwt} nested in JWE RSA-OAEP-256/A256GCM {cty:JWT}",
+  "token": "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIiwiY3R5IjoiSldUIiwia2lkIjoia0dLUW5nWFV6Mkx3Ui1RQ2J3c1YzZm1yREVuVXlrZ1RtU1dWSlIxUTFNcyJ9.YOtwVbUf1K6__QzsL67XK-38RelCTPZ3fX0Zt8MjaUFcUCak8YD6k6dRozgTYyig9IgKi2UJZnU5YnKHnYjYc1bztiIuG5EM5MGm9lIBY3evRhGVAEyvPKzisTKyDDsHPwxRtD1jBI0Kul_xXClcR0q6WRhzF7mylOKA1SLtzHxMbkcifLbauohYQyaSe7HTi6iHCvjgUq1r51GZOiuSbJWWFVbQZBV-Hs0VFXB4Y5lWb3yN67FLYGkISUHEjWUp6qvAmnuY7qjfM-_260EkOuj6B3M1Ceq8luzGTdabWR6ELCtk8axm0zfa5JVQwQbqyYWHPAJNaHmxWY-_rq9vqA.bNfLpNy0ndopOZXc.OcPYP2eKgGk7pmSqrVcnIL1DW-L-Tiut3w6eTaa78CfTNUP-magnms_2R7Rwf_n6Ts4CkpY-KxxJ-NH-Z-Rh3bcm5NzjCmsGLcCr5EIkvEyO05BfI_zEGBCb0N2iKnMfLfwdsOW4YZ_0GEdUe9gh0EU6U6D_uFCOwBUvtTpj8i9tzOjL3xSczpGD0l6m3HPJrbauvpfooXZqHMeJdok6awroI_q6exMOPrv9D-NW3Y7hTZDMCyP29FzRjHUESRo1KrS_70p5xgK4lwnTtjl72BRcqwbdi2VBrQvW8aaJVtKuraFO2AFVGBlI_luNJU8XSz_nmGXR2xicsSlIUN3sWlYN5RpzpFzxa0gLPevUwOlkZGtl2lpFIE_fChKtuWmY-fNdaKHpvw9MyJq89yiH5bW0Vz-gZ9GUdFQrBrUPkt3vESioy9Fg4_rYt_bOjVz6IDx8f_5m5wgLQQ3UF3-GbAIM-Ccuv-82DMyW-mYU4LwUa0giQnU3ByVpUXUUAl4PVz5A8J6D2RizYPNVb7gbCS9JvRBMfxSFq7G0hBTpw3M0ro98Y_Ok2MesBgDCc3djNmMNar00ttRv7P6x_KPui_mAgRX7uIo_KLH8wzs62NRBaaTY9jHU3DFR2DyOA_T0G-ZCqDXYU6FmG5AS8jFILUzmrUzEaSs5ej8HUhhy7h4jG9CnhQqKvw9vjk3dDwufh_EkEeL2Gpzl1haEYpw3mJFnoFiI8ViPDmvj-Y5l435oqHALSagNEZaNMWx2CFXGTgZ5aXbc7ZQ_nyATV-5ctyI5VM9QUa6SH1OHjGbM-pzE40IaYNhV1ieRv2RrNmj5S9bZgruQJoMDL8auVDUVejUc7_vXMczv08krAQhaebZxVY_zkDNCEssTTHrx65BbLBq0gGpFm8yBbtHWneVpKDzYtR5e8eXC7CIXqNdxtaT_an9NF3mw3JfQilAxGXqqKvoMHZMHo6XqAE88DxgQbqskIU3MWyiEKYKnPuHFEN3IaLLUc6lXr5cS1cBxvP7z5vBVTY3vkafoXKLyso2cSvkVUjc3hD_vTdC3DrNhRfwjWrf0wtOUwnSb720M_mSNHfySfhDT97LzTZQziTNrjKbekt20XLgRwnqtu0ggSJlpZ48-AcU-G3Wyd887xL47tWEdZPG_8Y8Ju8pbIWmXuUru2ZvRkona5wvfJyBoE_i2aRtu3yTZVMQPbrYzhyO_d_1Hraa76RJP0jsgMmkIbJeYYMvp1JhdSURSqrkrXPccu0L_Tv3_tYIWhpyxGkAFXBaC5JwoJooXItdPD7oDDYqocYxtJI_YBmdRumUne5A3DyXKX5QWsWDLaNy52Q.mGGaYlfOhzKW4t2bUtHahg",
+  "devicePrivateJwk": {
+    "kty": "RSA",
+    "n": "mc_eHh9g8GFaI-1TVJ5A7YPZCYnVWAPZtkHNaLh_AzZyB-GQGksie7wmy_2s3sEIR7j-SP3T8K14ORBmy7Hkzh2W6RLeXqCIIp9zeuWG4tAF-UWMtpa109KLAvdIs1-I_zDDy4iWxwARqPTkN_X4g5c1nuPbBsfr_TOhA5FINbsJ7YiSWoES6eL8bCOOjHGLkfKqUONu2APNLUVCUpt1K5KjupQJuEwZRZX6VLhuN7P80yPD80LxMIb7nTplnVLq3iEWH33chtxoA1pKrBcQB5uvvp-6LOMBTFfT3w0iToOUwT2SxfNd-wS54dF7WUSkkuEYwUvssj5MXQ6MukFFjQ",
+    "e": "AQAB",
+    "d": "CaO2oK4oQeBkCRDgUlMJsCj9cuTVv0qcfBjjIe9AHIguvNI02QUA7_7CcrHfAeXYmkAchaAMxo5klLTzsEvhkk5V7Rz-3TDT31GdZ-QXIENXwH_MmgvXcONGzYSIZJ9140Jf3vNcObQGJ0_TtrMeZEbXeDIBAcuJPWjdLC9Qdnd9q1yV6JVDwkRm1EQ-O7Bd4wbhuCDNv-iQWyfALc-Oqrmj6qM08mrBnv7urNP9hIi6CBA33U5Z5X1RRjf_OaWWG11YJ3OZp7HU8K3iO7kZJZmO1lUD0Vi_zlccqOhge8NyPfi7j1smPTe8mrS5L42pA_1F5ul6HJZB7uZveFRZuQ",
+    "p": "1ylgxGbZFZF1CSE0JXss57YNStRNRVcqwGl7UBYOA6jd_VlDzKcqbYh5M8clJyeerP_rXVV1wvW0FIEQVJSyCDwOP8loqz68zJe15_DD2nsy8hIzfNOI4AbRHRR6cJ6Aqji1zySLMFQ7JwkR3ZwyrP2en6LvbBnqGNKiI3t0lfk",
+    "q": "twGIkZdmFjZvSNAcnUmjaAOtGxyBWhdKQO-Zbv_YWTNHlM06YxRsGsr-KVfyVrC0dt8gCOdODGEsg-FbE3idKTE-8wUuAiCPon598ygRcd7Tg5sC2Q4V-r8ufNMEK6QEeVltSb2w8PeVJo3PEJvfxcXjqYVeAyeBn0glHXPaQTU",
+    "dp": "PGN2r2kWYMFUkd1p32M09UvZazku_tk6PIree1nVUR2iQKs_Jj983wVAz1GDkfvCw1eI3cdQqAmCI4cd6D9bwIfqj-idogKXxuyFt7WRos6VO-_z14MflZEUPA81VkqGXkBQdvUQw93ARHJ9Oy_N4VPFo5R9kl-rno_vxfmufTE",
+    "dq": "avdIfeDCWMVkcmjB8OVzz34mliwpJyFp0164jfqY2Dpy4nS6ZeMv9NElkcDH8wfB06FDNjEMm4vI2yTDeTQMmGEibCVg6PljOxU4RQHsgGQ_uTLHjVsAWdmZMHiefWuW-d7dVDa9z3rHAQvuNcUGHLE4CoPbmXhj-VfP6dEnhuk",
+    "qi": "gX0tJ48Esvvj_z8-1whyanHMn0uod6VEiOZelEoIIRRw2odY-SvV6F66DWv2BoO3JmpIOYBqD1IBIcvKa-ptoYPasrH6_kjbox-QSha6S3kIH2ZahlPavW9BO7WACtrG-dwEXKLfLVz9bjzMyzGXr9WeHv7O4MH_U7Tm28OeSo4"
+  },
+  "otherDevicePrivateJwk": {
+    "kty": "RSA",
+    "n": "rmzVjDBAD84wa_tRy0T_QGI2Nfw3X6lJq59OPDdXf0QY3Cx3VtdtPzN_mjkwNEqgQiga1zDz35zBF9iCVrdZgW_OWml8WTEjJRqCE1eoVFKznNQy1lNHLeR1kAFo9M18RLhEq1poc8Xnfs4fuXbK6bEAc7DTIzkOwegCW1asf8miLTt43pF7miZSI5Cz30lhO4c44JKKMfI9fS6daPxrWVX95I77SqdSUE_Q9D1_eyam69COQw5ogl9uI3YCOoPbWw4jB-q1Da15l2vFrj8RtuS9i4C_9B4HDlPASRlyZ4moOnRmKShtsVvTez9dutAQF5qk01TZJG4pPbC0g50f-Q",
+    "e": "AQAB",
+    "d": "Db-e4n6wIf7M4soLw7Oz0fGb18wCWlw35hr3uffbwfiOZBZuLq5q2ks3IOMmmUyTjrtmCDW_102eC8DhXy_zEmiLcaV0a3xbypIpFBi5-DGPnko8mpe0Wdny6U-vI_Kpe6oxoXcOGigMi_p31jDWpC5zPGtA7TsTXnXo76Wokabj-i1YPkStmluPBmIf5HSU4da8_jUpOAIhJnAROBo35YGyXS4tuoWKm0dNUdqW6oAAckZUuMbNRkcCZPyA6csSGwzcYGYAYecTm8g0ZURtxnSBHwrr4g9Z0lkghaM4xln3JmDn5z6V3wEf6LyjhbLjd4u8F8m1SvohGPx_mHw-PQ",
+    "p": "2SqR_yujlPf5Q_oWbk7JcK0i8lz-kIcn92ag75zMDpFuq6rMNE9TLbUqWAXbbYVF5R_IfQQjPIX7x_tCvzRGpSw1j2TEDCrTZXwcwdoipEQnnCf9ckVSIV8yC9lclgxmYOT9cwUpzgNM1L_o3gCO2V721_3wuYdzq_uFxPX5QLU",
+    "q": "zZ2pMcLXTykDWKyS4CdzxOAhW1fS5EmHgAE1UrP-54eivY9n6y-MbwAS-GWcGcLjP_sMKxv6yszjE6qNlbIhBMS7vPFYjMRmqMkEDQkCeEg99oHNeC3TIENibtUrUM_O63zCvvMOtjL-9Ielul_Ht1NMPPSfOpNUwQWtrQk04LU",
+    "dp": "iiA9hCNphFLExKvIoJiUH4q_84-aiqqsjPtF2aHNWGbAEYgtIghiS2wzZpEzI9HkxvsUNg_vqYs-vc_egGbrmBsqZe4dk--ZTa9HSzVHW1vOJdB5r7jPqFI4Lrkt3nI8m9yKKCJcmKAYuijmIG4SbcetEWx_NEInHHh6ePBKfRE",
+    "dq": "UelJCeXQ2FxCVQUKzflpiTiwkS7_eKpCLKBOmc_S8HF8R3_lqi-bBm1FIWd5NFoLJeXhBxtyYXAV1jPPi58WwEuPbsnGuO1U6FCMKJU6Qqik5pr3O7Ulsmilwflx9BOVHwLooiE57yOJpeiUARc-_K1WZcId3Lvsu6iDc7eDNTE",
+    "qi": "XzJuJ3i9z2u3aEBrSag_57ac80y33tmIdvsY20Lk02MU1-0ZdFqSADum4CQja7aYS1vuM8obNOxx8ugVTsFovqfH6LsNJvy4kNVHEUy9FcZL-FtvphiCcpS2oJqbCSO_9Dm0BZmySc2xBzIJrpd3Emz_rqV0LLVywOQ2_HF7Oqw"
+  },
+  "serverPublicJwks": [
+    {
+      "kty": "EC",
+      "x": "KRbdkoq4xQX-NYWYHMfZCMB-j18LrZ-KkSJWElHlZC0",
+      "y": "DEF5oAj0hU1wLmf-VOeElFqllqKvntfa9ope5EiZnTg",
+      "crv": "P-256",
+      "kid": "kGKQngXUz2LwR-QCbwsV3fmrDEnUykgTmSWVJR1Q1Ms",
+      "alg": "ES256",
+      "use": "sig"
+    }
+  ],
+  "expectedClaims": {
+    "iss": "cloudbox",
+    "kid": "kGKQngXUz2LwR-QCbwsV3fmrDEnUykgTmSWVJR1Q1Ms",
+    "jti": "lic_00000000-0000-4000-8000-000000000001",
+    "iat": 1790467200,
+    "license_id": "lic_00000000-0000-4000-8000-000000000001",
+    "tenant_id": "ten_00000000-0000-4000-8000-000000000001",
+    "device_id": "dev_00000000-0000-4000-8000-000000000001",
+    "device_key_thumbprint": "YFNsAEhVAsheKejjT13yU8qcycSGYL-5eIZYihGC6X0",
+    "max_managed_users": 6,
+    "valid_from": "2026-09-27T00:00:00.000Z",
+    "valid_until": "2027-09-27T00:00:00.000Z",
+    "renewal_warning_days": 30,
+    "offline_grace_days": 7,
+    "generation": 1,
+    "features": ["remote_access", "managed_backup", "fleet"]
+  }
+}

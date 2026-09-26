@@ -19,9 +19,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,22 +31,34 @@ jobs:
         with:
           node-version: 22
 
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
 
       - name: Stamp build
         shell: bash
+        env:
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          BOOTSTRAP_SUPER_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_SUPER_ADMIN_EMAIL }}
         run: |
           node - <<'NODE'
           const fs = require("fs");
           const path = "apps/worker-api/wrangler.jsonc";
+          const bootstrapEmail = process.env.BOOTSTRAP_SUPER_ADMIN_EMAIL;
+          if (!bootstrapEmail) throw new Error("Repository variable BOOTSTRAP_SUPER_ADMIN_EMAIL is not set");
           let source = fs.readFileSync(path, "utf8");
           source = source.replace('"BUILD_SHA": "development"', `"BUILD_SHA": "${process.env.GITHUB_SHA}"`);
           source = source.replace('"BUILD_TIME": "development"', `"BUILD_TIME": "${new Date().toISOString()}"`);
+          source = source.replace('"TURNSTILE_SITE_KEY": ""', `"TURNSTILE_SITE_KEY": "${process.env.TURNSTILE_SITE_KEY ?? ""}"`);
+          source = source.replace('"ENVIRONMENT": "development"', '"ENVIRONMENT": "production"');
+          source = source.replace('"BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"', `"BOOTSTRAP_SUPER_ADMIN_EMAIL": ${JSON.stringify(bootstrapEmail)}`);
+          if (!source.includes('"ENVIRONMENT": "production"')) throw new Error("ENVIRONMENT stamp failed");
           fs.writeFileSync(path, source);
           NODE
 
       - name: Ensure Cloudflare resources exist and pin their ids
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         shell: bash
         run: |
@@ -94,14 +103,126 @@ jobs:
           grep -n -E 'database_id|bucket_name' wrangler.jsonc || true
 
       - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         run: pnpm wrangler d1 migrations apply cloudbox-db --remote
 
+      - name: Ensure STAFF_AUTH_SECRET exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Better Auth secret of the staff identity system (/api/ops/auth) (ADR 0002: two identity systems, nothing shared).
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "STAFF_AUTH_SECRET")' >/dev/null; then
+            echo "STAFF_AUTH_SECRET already set"
+          else
+            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put STAFF_AUTH_SECRET
+          fi
+
+      - name: Ensure CUSTOMER_AUTH_SECRET exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Better Auth secret of the customer identity system (/api/auth) (ADR 0002: two identity systems, nothing shared).
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "CUSTOMER_AUTH_SECRET")' >/dev/null; then
+            echo "CUSTOMER_AUTH_SECRET already set"
+          else
+            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put CUSTOMER_AUTH_SECRET
+          fi
+
+      - name: Retire BETTER_AUTH_SECRET (replaced by STAFF_AUTH_SECRET and CUSTOMER_AUTH_SECRET)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "BETTER_AUTH_SECRET")' >/dev/null; then
+            pnpm wrangler secret delete BETTER_AUTH_SECRET --force
+          else
+            echo "BETTER_AUTH_SECRET not present"
+          fi
+
+      - name: Ensure PROVIDER_SECRETS_KEY exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # AES-256-GCM key for email_providers.secret_ciphertext (WT-12). Same pattern as the auth
+          # secrets above: created once, rotating it would strand existing ciphertext.
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "PROVIDER_SECRETS_KEY")' >/dev/null; then
+            echo "PROVIDER_SECRETS_KEY already set"
+          else
+            openssl rand -base64 32 | tr -d '\n' | pnpm wrangler secret put PROVIDER_SECRETS_KEY
+          fi
+
+      - name: Ensure BOOTSTRAP_SUPER_ADMIN_PASSWORD exists (set once from the environment secret)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BOOTSTRAP_SUPER_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_SUPER_ADMIN_PASSWORD }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Worker seeds it once into Better Auth (hashed) and forces a change at first sign-in;
+          # later edits of the secret never overwrite the owner's password (ADR 0009, WT-1).
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "BOOTSTRAP_SUPER_ADMIN_PASSWORD")' >/dev/null; then
+            echo "BOOTSTRAP_SUPER_ADMIN_PASSWORD already set"
+          elif [ -n "${BOOTSTRAP_SUPER_ADMIN_PASSWORD}" ]; then
+            printf '%s' "${BOOTSTRAP_SUPER_ADMIN_PASSWORD}" | pnpm wrangler secret put BOOTSTRAP_SUPER_ADMIN_PASSWORD
+          else
+            echo "::warning::BOOTSTRAP_SUPER_ADMIN_PASSWORD environment secret is not set; the bootstrap super admin cannot sign in yet"
+          fi
+
+      - name: Sync ENTITLEMENT_SIGNING_JWK (when set)
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENTITLEMENT_SIGNING_JWK: ${{ secrets.ENTITLEMENT_SIGNING_JWK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ENTITLEMENT_SIGNING_JWK}" ]; then echo "not set; issuance stays 503"; exit 0; fi
+          printf '%s' "$ENTITLEMENT_SIGNING_JWK" | pnpm wrangler secret put ENTITLEMENT_SIGNING_JWK
+
+      - name: Sync TURNSTILE_SECRET_KEY (when set)
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TURNSTILE_SECRET_KEY}" ]; then echo "::warning::TURNSTILE_SECRET_KEY is not set; customer sign-in step-up falls back to a per-account cooldown (review U-cooldown). Set the production environment secret."; exit 0; fi
+          printf '%s' "$TURNSTILE_SECRET_KEY" | pnpm wrangler secret put TURNSTILE_SECRET_KEY
+
       - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/worker-api
         run: pnpm wrangler deploy
 
       - name: Create temporary Phase 0 deploy credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         id: phase0-key
         shell: bash
         run: |
@@ -128,6 +249,14 @@ jobs:
             echo "attempt $attempt: HTTP $code (waiting for the new Worker version)"; sleep 5
           done
           echo "::error::Audited release change never returned 200"; cat /tmp/audited-change.json || true; exit 1
+
+      - name: Retire the temporary Phase 0 deploy credential
+        if: always()
+        working-directory: apps/worker-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm wrangler secret delete PHASE0_ADMIN_KEY --force
 
       - name: Verify production health, version, D1 and audit
         shell: bash

@@ -1,0 +1,23 @@
+{
+  "name": "@cloudbox/licensing-contracts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate-signing-key": "node scripts/generate-signing-key.ts",
+    "inspect-entitlement": "node scripts/inspect-entitlement.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}
