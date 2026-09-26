@@ -47,12 +47,23 @@ app.get("/api/version", (c) =>
   }),
 );
 
-// Better Auth. Only the endpoints the product uses answer (review H-2, ADR 0009: no passwords);
+// Better Auth. Only the endpoints the product uses answer (review H-2; ADR 0009: passwords for
+// staff only, no sign-up, no reset by email);
 // every other Better Auth or plugin path is 404, so a hidden endpoint cannot be a second way in.
 // Exact match: a trailing-slash or case variant is not on the list either.
 const AUTH_ROUTES = new Set([
-  "POST /api/auth/email-otp/send-verification-otp", // login form, email step (type "sign-in")
-  "POST /api/auth/sign-in/email-otp", // login form, code step
+  // Customers (tenant members): email code.
+  "POST /api/auth/email-otp/send-verification-otp", // login, customer email step (type "sign-in")
+  "POST /api/auth/sign-in/email-otp", // login, customer code step
+  // Staff (ADR 0009): password + authenticator.
+  "POST /api/auth/sign-in/email", // login, staff password step
+  "POST /api/auth/two-factor/verify-totp", // login, staff authenticator step; setup confirmation
+  "POST /api/auth/two-factor/verify-backup-code", // login, staff backup-code fallback
+  "POST /api/auth/change-password", // /setup-password (forced at first sign-in)
+  "POST /api/auth/two-factor/enable", // /setup-authenticator (QR + backup codes)
+  "POST /api/auth/two-factor/generate-backup-codes", // regenerate backup codes (password)
+  "POST /api/auth/two-factor/disable", // password + fresh authenticator code
+  // Everyone.
   "POST /api/auth/sign-out", // routed to the audited v1 logout below
   "GET /api/auth/get-session", // Better Auth's session read (no state change beyond sliding expiry)
 ]);
@@ -68,7 +79,7 @@ app.use("/api/auth/*", async (c, next) => {
   await next();
 });
 // Sign-out goes through the audited v1 logout so there is one way out.
-app.post("/api/auth/sign-out", requireUser(), logout);
+app.post("/api/auth/sign-out", requireUser({ allowSetupPending: true }), logout);
 app.on(["GET", "POST"], "/api/auth/*", async (c): Promise<Response> => {
   const request = authContextFor(c);
   // Until a super admin exists, the bootstrap address needs a user row to be able to sign in.

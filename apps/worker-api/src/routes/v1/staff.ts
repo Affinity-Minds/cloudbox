@@ -7,7 +7,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
 import { authContextFor } from "../../auth";
-import { ensureUserByEmail } from "../../auth/users";
+import { ensureUserByEmail, setInitialStaffPassword } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
 import { staffMembers, user } from "../../db/schema";
@@ -54,42 +54,62 @@ staff.post(
     if (!result.success) return c.json({ error: "invalid_request" }, 400);
   }),
   async (c) => {
-    const { email, role } = c.req.valid("json");
+    const { email, role, initialPassword } = c.req.valid("json");
     const db = createDb(c.env.DB);
     const actor = c.var.user;
 
-    // The user may never have signed in: create the row (admin action) so the grant is waiting
-    // when they first verify a code. Sign-in itself never creates users (ADR 0002).
-    const targetId = await ensureUserByEmail(c.env, email, authContextFor(c));
-
     const [existing] = await db
-      .select({ role: staffMembers.role })
+      .select({ userId: staffMembers.userId, role: staffMembers.role })
       .from(staffMembers)
-      .where(eq(staffMembers.userId, targetId));
-    if (existing?.role === role) {
-      const [member] = await listStaff(db, targetId);
-      return c.json(member, 200);
+      .innerJoin(user, eq(user.id, staffMembers.userId))
+      .where(eq(user.email, email));
+    // A new staff member signs in with password + authenticator (ADR 0009): the admin sets the
+    // initial password here and hands it over out of band.
+    if (!existing && !initialPassword) {
+      return c.json({ error: "invalid_request", detail: "initial_password_required" }, 400);
     }
-    const result = await db
-      .insert(staffMembers)
-      .values({ userId: targetId, role, createdBy: actor.id })
-      .onConflictDoUpdate({
-        target: staffMembers.userId,
-        set: { role },
-        setWhere: keepsASuperAdmin(targetId),
-      })
-      .run();
-    if (!changed(result)) return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
-    await audit(db, {
-      eventType: "STAFF_ROLE_GRANTED",
-      entityType: "staff_member",
-      entityId: targetId,
-      actor: { type: "user", id: actor.id },
-      before: existing ? { role: existing.role } : null,
-      after: { role, email },
-      correlationId: c.var.correlationId,
-      source: "api",
-    });
+
+    // The user may never have signed in: create the row (admin action). Sign-in itself never
+    // creates users (ADR 0002/0009).
+    const targetId = existing?.userId ?? (await ensureUserByEmail(c.env, email, authContextFor(c)));
+
+    if (existing?.role !== role) {
+      const result = await db
+        .insert(staffMembers)
+        .values({ userId: targetId, role, createdBy: actor.id })
+        .onConflictDoUpdate({
+          target: staffMembers.userId,
+          set: { role },
+          setWhere: keepsASuperAdmin(targetId),
+        })
+        .run();
+      if (!changed(result)) return c.json({ error: "conflict", detail: "last_super_admin" }, 409);
+      await audit(db, {
+        eventType: "STAFF_ROLE_GRANTED",
+        entityType: "staff_member",
+        entityId: targetId,
+        actor: { type: "user", id: actor.id },
+        before: existing ? { role: existing.role } : null,
+        after: { role, email },
+        correlationId: c.var.correlationId,
+        source: "api",
+      });
+    }
+    if (initialPassword) {
+      // Forces a password change and authenticator re-enrolment at next sign-in and ends the
+      // member's sessions. The password itself is never audited or logged.
+      await setInitialStaffPassword(c.env, targetId, initialPassword, authContextFor(c));
+      await audit(db, {
+        eventType: "STAFF_PASSWORD_SET",
+        entityType: "staff_member",
+        entityId: targetId,
+        actor: { type: "user", id: actor.id },
+        before: null,
+        after: { reason: existing ? "admin_reset" : "new_staff", mustChangePassword: true },
+        correlationId: c.var.correlationId,
+        source: "api",
+      });
+    }
     const [member] = await listStaff(db, targetId);
     return c.json(member, existing ? 200 : 201);
   },

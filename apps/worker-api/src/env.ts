@@ -17,6 +17,8 @@ export type Bindings = {
   OTP_DEV_ECHO?: string;
 
   BETTER_AUTH_SECRET?: string;
+  /** Initial password of the bootstrap super admin (ADR 0009); seeded once, must be changed. */
+  BOOTSTRAP_SUPER_ADMIN_PASSWORD?: string;
   ENTITLEMENT_SIGNING_JWK?: string;
   PHASE0_ADMIN_KEY?: string;
 };

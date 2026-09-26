@@ -11,7 +11,7 @@ import type { AppEnv } from "../../env";
 
 const auth = new Hono<AppEnv>();
 
-auth.get("/session", requireUser(), async (c) => {
+auth.get("/session", requireUser({ allowSetupPending: true }), async (c) => {
   const principal = await getPrincipal(c);
   if (!principal) return c.json({ error: "unauthenticated" }, 401);
   const body: SessionResponse = {
@@ -19,6 +19,7 @@ auth.get("/session", requireUser(), async (c) => {
     permissions: [...principal.permissions].sort(),
     // Owned by WT-2 (`POST /me/active-tenant`); null until that lands.
     activeTenantId: null,
+    setup: principal.setup,
   };
   return c.json(body);
 });
@@ -46,6 +47,6 @@ export async function logout(c: Context<AppEnv>) {
   return response;
 }
 
-auth.post("/logout", requireUser(), logout);
+auth.post("/logout", requireUser({ allowSetupPending: true }), logout);
 
 export default auth;

@@ -192,7 +192,7 @@ describe("email OTP sign-in", () => {
     expect(ghost.headers.get("set-cookie")).toBeNull();
     expect(await countRows("user", "email", "ghost@example.test")).toBe(0);
     expect(await auditRows("AUTH_LOGIN_FAILED", "ghost@example.test")).toEqual([
-      { reason: "INVALID_OTP" },
+      { method: "email_otp", reason: "INVALID_OTP" },
     ]);
   });
 
@@ -225,7 +225,7 @@ describe("email OTP sign-in", () => {
     expect(response.status).toBe(400);
     expect(response.headers.get("set-cookie")).toBeNull();
     const failures = await auditRows("AUTH_LOGIN_FAILED", "invalid@example.test");
-    expect(failures).toEqual([{ reason: "INVALID_OTP" }]);
+    expect(failures).toEqual([{ method: "email_otp", reason: "INVALID_OTP" }]);
     expect(JSON.stringify(failures)).not.toContain(wrong);
   });
 
@@ -253,7 +253,7 @@ describe("email OTP sign-in", () => {
     const response = await verifyCode("expired@example.test", code, box.env, ip);
     expect(response.status).toBe(400);
     expect(await auditRows("AUTH_LOGIN_FAILED", "expired@example.test")).toEqual([
-      { reason: "OTP_EXPIRED" },
+      { method: "email_otp", reason: "OTP_EXPIRED" },
     ]);
   });
 
@@ -410,7 +410,11 @@ describe("email OTP sign-in", () => {
   it("H-2: only the product's auth endpoints answer; everything else is 404", async () => {
     const paths = [
       "/api/auth/sign-up/email",
-      "/api/auth/sign-in/email",
+      "/api/auth/sign-up/email/",
+      "/api/auth/forget-password",
+      "/api/auth/request-password-reset",
+      "/api/auth/two-factor/get-totp-uri",
+      "/api/auth/two-factor/send-otp",
       "/api/auth/update-user",
       "/api/auth/revoke-session",
       "/api/auth/revoke-sessions",

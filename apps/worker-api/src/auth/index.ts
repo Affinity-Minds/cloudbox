@@ -5,8 +5,8 @@
 import { Email, OtpSendRequest } from "@cloudbox/contracts";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware, getIP } from "better-auth/api";
-import { emailOTP } from "better-auth/plugins";
+import { APIError, createAuthMiddleware, getIP, getSessionFromCtx } from "better-auth/api";
+import { emailOTP, twoFactor } from "better-auth/plugins";
 import { and, count, eq, gt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { audit } from "../audit";
@@ -28,6 +28,9 @@ export function trustedOrigins(env: Pick<Bindings, "ENVIRONMENT">): string[] {
     ? [PRODUCTION_ORIGIN]
     : [PRODUCTION_ORIGIN, VITE_DEV_ORIGIN];
 }
+
+/** Staff passwords: initial ones set by an admin, and every change. */
+export const MIN_PASSWORD_LENGTH = 12;
 
 /** Honeypot: the login form copies its hidden field here; any non-empty value is a bot. */
 export const HONEYPOT_HEADER = "x-cloudbox-hp";
@@ -125,6 +128,153 @@ async function recentFailure(db: Db, email: string): Promise<boolean> {
   return (row?.n ?? 0) > 0;
 }
 
+const SIGN_IN_PASSWORD_PATH = "/sign-in/email";
+const CHANGE_PASSWORD_PATH = "/change-password";
+const TWO_FACTOR_ENABLE_PATH = "/two-factor/enable";
+const TWO_FACTOR_DISABLE_PATH = "/two-factor/disable";
+const TOTP_VERIFY_PATH = "/two-factor/verify-totp";
+const BACKUP_CODE_VERIFY_PATH = "/two-factor/verify-backup-code";
+const SESSION_SETUP_PATHS = new Set([
+  CHANGE_PASSWORD_PATH,
+  TWO_FACTOR_ENABLE_PATH,
+  TWO_FACTOR_DISABLE_PATH,
+  TOTP_VERIFY_PATH,
+  BACKUP_CODE_VERIFY_PATH,
+  "/two-factor/generate-backup-codes",
+]);
+
+/** Better Auth's wrong-password answer; every refused password sign-in answers with this body. */
+const INVALID_EMAIL_OR_PASSWORD = {
+  code: "INVALID_EMAIL_OR_PASSWORD",
+  message: "Invalid email or password",
+};
+
+/**
+ * Failed password sign-ins (review H-1 applied to passwords): 5 per (email, client /64) in 15 min
+ * locks that client out with a 429 carrying the same body as a wrong password; the per-account
+ * ceiling is abuse protection only, high enough that nobody else can lock an account out cheaply.
+ * Counted from `AUTH_LOGIN_FAILED` rows; refused attempts write nothing.
+ */
+export const PASSWORD_FAILURE_CAPS = {
+  perEmailAndClient: { windowSeconds: 15 * 60, max: 5 },
+  perEmail: { windowSeconds: 60 * 60, max: 100 },
+};
+
+type Actor = {
+  userId: string;
+  email?: string;
+  staff?: boolean;
+  mustChangePassword?: boolean;
+  twoFactorEnabled?: boolean;
+  /** True on the second step of a password sign-in (no session yet). */
+  viaChallenge?: boolean;
+};
+
+/** Lets hooks call the instance's own endpoints (the fresh-TOTP check on disable). */
+type AuthSelf = {
+  auth?: {
+    api: { verifyTOTP: (input: { headers: Headers; body: { code: string } }) => Promise<unknown> };
+  };
+};
+
+/** The user row and staff state for an email: one query. */
+async function accountByEmail(db: Db, email: string) {
+  const [row] = await db
+    .select({
+      userId: schema.user.id,
+      staffRole: schema.staffMembers.role,
+      mustChangePassword: schema.staffMembers.mustChangePassword,
+    })
+    .from(schema.user)
+    .leftJoin(schema.staffMembers, eq(schema.staffMembers.userId, schema.user.id))
+    .where(eq(schema.user.email, email.toLowerCase()))
+    .limit(1);
+  return row ?? null;
+}
+
+async function passwordFailureCounts(db: Db, email: string, client: string) {
+  const now = Date.now();
+  const tightSince = new Date(now - PASSWORD_FAILURE_CAPS.perEmailAndClient.windowSeconds * 1000);
+  const wideSince = new Date(now - PASSWORD_FAILURE_CAPS.perEmail.windowSeconds * 1000);
+  const { auditLog } = schema;
+  const [row] = await db
+    .select({
+      total: count(),
+      fromClient:
+        sql<number>`coalesce(sum(case when ${auditLog.createdAt} > ${tightSince.toISOString()}
+        and json_extract(${auditLog.afterJson}, '$.client') = ${client} then 1 else 0 end), 0)`.mapWith(
+          Number,
+        ),
+    })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.entityType, AUTH_EMAIL_ENTITY),
+        eq(auditLog.entityId, email),
+        eq(auditLog.eventType, "AUTH_LOGIN_FAILED"),
+        sql`json_extract(${auditLog.afterJson}, '$.method') = 'password'`,
+        gt(auditLog.createdAt, wideSince.toISOString()),
+      ),
+    );
+  return { total: row?.total ?? 0, fromClient: row?.fromClient ?? 0 };
+}
+
+function auditLoginFailure(
+  db: Db,
+  email: string,
+  after: Record<string, unknown>,
+  correlationId: string | null,
+) {
+  // Never the submitted code or password.
+  return audit(db, {
+    eventType: "AUTH_LOGIN_FAILED",
+    entityType: AUTH_EMAIL_ENTITY,
+    entityId: email,
+    actor: { type: "system", id: "sign-in" },
+    before: null,
+    after,
+    correlationId,
+    source: "api",
+  });
+}
+
+function auditLoginSuccess(
+  db: Db,
+  userId: string,
+  after: Record<string, unknown>,
+  correlationId: string | null,
+) {
+  return audit(db, {
+    eventType: "AUTH_LOGIN_SUCCEEDED",
+    entityType: "user",
+    entityId: userId,
+    actor: { type: "user", id: userId },
+    before: null,
+    after,
+    correlationId,
+    source: "api",
+  });
+}
+
+function auditUserEvent(
+  db: Db,
+  eventType: string,
+  userId: string,
+  after: Record<string, unknown> | null,
+  correlationId: string | null,
+) {
+  return audit(db, {
+    eventType,
+    entityType: "user",
+    entityId: userId,
+    actor: { type: "user", id: userId },
+    before: null,
+    after,
+    correlationId,
+    source: "api",
+  });
+}
+
 function errorCode(returned: unknown): string {
   if (returned instanceof APIError) {
     const body = returned.body as { code?: string } | undefined;
@@ -133,16 +283,27 @@ function errorCode(returned: unknown): string {
   return "unknown";
 }
 
-export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
+export function authOptions(env: Bindings, request: AuthRequestContext = {}, self: AuthSelf = {}) {
   const correlationId = request.correlationId ?? null;
   const db = createDb(env.DB);
+  // Who is acting on a session or two-factor endpoint; set by the before hook, read by the after
+  // hook. One auth instance serves one request, so this closure is per request.
+  let actor: Actor | null = null;
   return {
     baseURL: request.baseURL,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: trustedOrigins(env),
     database: drizzleAdapter(db, { provider: "sqlite", schema: { ...schema, rateLimit } }),
-    emailAndPassword: { enabled: false },
+    // Passwords exist only for staff (ADR 0009). No sign-up and no reset by email: an admin sets
+    // an initial password (POST /api/v1/staff), which forces a change and re-enrolment.
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      minPasswordLength: MIN_PASSWORD_LENGTH,
+      maxPasswordLength: 256,
+      revokeSessionsOnPasswordReset: true,
+    },
     // Per-IP limits, stored in D1 so every isolate shares them. The emailOTP plugin's rules apply
     // to its paths (OTP send and sign-in: 3 / 60 s each); everything else under /api/auth is 60/min.
     rateLimit: { enabled: true, storage: "database", window: 60, max: 60 },
@@ -157,79 +318,270 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== SEND_OTP_PATH) return;
-        // Only sign-in codes exist here; other types would answer differently for unknown emails.
-        const parsed = OtpSendRequest.safeParse(ctx.body);
-        if (!parsed.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
-        const email = parsed.data.email;
         const client = clientKey(ctx.request ?? ctx.headers, ctx.context.options);
-        const sends = await otpSendCounts(db, email, client);
-        if (
-          sends.fromClient >= OTP_SEND_CAPS.perEmailAndClient.max ||
-          sends.total >= OTP_SEND_CAPS.perEmail.max
-        ) {
-          // Same answer as a send; any code already sent stays valid (resendStrategy "reuse").
-          return ctx.json({ success: true });
+        switch (ctx.path) {
+          case SEND_OTP_PATH: {
+            // Only sign-in codes exist here; other types would answer differently for unknown emails.
+            const parsed = OtpSendRequest.safeParse(ctx.body);
+            if (!parsed.success) throw new APIError("BAD_REQUEST", { message: "Invalid request" });
+            const email = parsed.data.email;
+            const sends = await otpSendCounts(db, email, client);
+            if (
+              sends.fromClient >= OTP_SEND_CAPS.perEmailAndClient.max ||
+              sends.total >= OTP_SEND_CAPS.perEmail.max
+            ) {
+              // Same answer as a send; any code already sent stays valid (resendStrategy "reuse").
+              return ctx.json({ success: true });
+            }
+            // Closed sign-in (ADR 0002/0009): an address without a user row, or a staff address
+            // (staff sign in with password + authenticator, never with a code), gets exactly the
+            // answer a customer gets, but no code is generated, stored or sent. Recorded like a
+            // send (with the client), so the caps above bound these rows too.
+            const account = await accountByEmail(db, email);
+            if (!account || account.staffRole) {
+              const record = audit(db, {
+                eventType: "AUTH_OTP_SENT",
+                entityType: AUTH_EMAIL_ENTITY,
+                entityId: email,
+                actor: { type: "system", id: "email-otp" },
+                before: null,
+                after: { outcome: account ? "staff_email" : "unknown_email", client },
+                correlationId,
+                source: "api",
+              }).then(() => undefined);
+              await ctx.context.runInBackgroundOrAwait(record);
+              return ctx.json({ success: true });
+            }
+            return;
+          }
+          case SIGN_IN_OTP_PATH: {
+            // A staff address never holds a code; refuse it exactly like a wrong code.
+            const email = Email.safeParse((ctx.body as { email?: unknown } | undefined)?.email);
+            if (email.success && (await accountByEmail(db, email.data))?.staffRole) {
+              await auditLoginFailure(
+                db,
+                email.data,
+                { method: "email_otp", reason: "INVALID_OTP", client },
+                correlationId,
+              );
+              throw APIError.from("BAD_REQUEST", { code: "INVALID_OTP", message: "Invalid OTP" });
+            }
+            return;
+          }
+          case SIGN_IN_PASSWORD_PATH: {
+            const body = ctx.body as { email?: unknown; password?: unknown } | undefined;
+            const email = Email.safeParse(body?.email);
+            if (!email.success) return; // Better Auth answers INVALID_EMAIL.
+            const failures = await passwordFailureCounts(db, email.data, client);
+            if (
+              failures.fromClient >= PASSWORD_FAILURE_CAPS.perEmailAndClient.max ||
+              failures.total >= PASSWORD_FAILURE_CAPS.perEmail.max
+            ) {
+              throw APIError.from("TOO_MANY_REQUESTS", INVALID_EMAIL_OR_PASSWORD);
+            }
+            // Passwords are for staff only: anyone else fails exactly like a wrong password, after
+            // the same hashing work Better Auth does for an unknown user.
+            if (!(await accountByEmail(db, email.data))?.staffRole) {
+              await ctx.context.password.hash(
+                typeof body?.password === "string" ? body.password : "",
+              );
+              await auditLoginFailure(
+                db,
+                email.data,
+                { method: "password", reason: "INVALID_EMAIL_OR_PASSWORD", client },
+                correlationId,
+              );
+              throw APIError.from("UNAUTHORIZED", INVALID_EMAIL_OR_PASSWORD);
+            }
+            return;
+          }
         }
-        // Closed sign-in (ADR 0002): an address without a user row gets exactly the answer a known
-        // one gets, but no code is generated, stored or sent. Recorded like a send (with the client),
-        // so the caps above bound these rows too.
-        if (!(await ctx.context.internalAdapter.findUserByEmail(email))) {
-          const record = audit(db, {
-            eventType: "AUTH_OTP_SENT",
-            entityType: AUTH_EMAIL_ENTITY,
-            entityId: email,
-            actor: { type: "system", id: "email-otp" },
-            before: null,
-            after: { outcome: "unknown_email", client },
-            correlationId,
-            source: "api",
-          }).then(() => undefined);
-          await ctx.context.runInBackgroundOrAwait(record);
-          return ctx.json({ success: true });
+        if (!SESSION_SETUP_PATHS.has(ctx.path)) return;
+
+        // Password change and authenticator endpoints: who is acting, and in which order.
+        const session = await getSessionFromCtx(ctx);
+        if (session) {
+          const staff = await accountByEmail(db, session.user.email);
+          actor = {
+            userId: session.user.id,
+            email: session.user.email,
+            staff: Boolean(staff?.staffRole),
+            mustChangePassword: Boolean(staff?.mustChangePassword),
+            twoFactorEnabled: Boolean(
+              (session.user as { twoFactorEnabled?: boolean }).twoFactorEnabled,
+            ),
+          };
+        } else if (ctx.path === TOTP_VERIFY_PATH || ctx.path === BACKUP_CODE_VERIFY_PATH) {
+          // Second step of a password sign-in: the pending challenge names the user.
+          const cookie = ctx.context.createAuthCookie("two_factor");
+          const challenge = await ctx.getSignedCookie(cookie.name, ctx.context.secret);
+          const pending = challenge
+            ? await ctx.context.internalAdapter.findVerificationValue(challenge)
+            : null;
+          actor = pending ? { userId: pending.value, viaChallenge: true } : null;
+        }
+        if (ctx.path === CHANGE_PASSWORD_PATH) {
+          const body = ctx.body as { currentPassword?: unknown; newPassword?: unknown } | undefined;
+          if (body?.currentPassword === body?.newPassword) {
+            throw APIError.from("BAD_REQUEST", {
+              code: "PASSWORD_UNCHANGED",
+              message: "Choose a password different from the current one",
+            });
+          }
+        }
+        if (ctx.path === TWO_FACTOR_ENABLE_PATH) {
+          // Authenticators are for staff, and only after the initial password was replaced.
+          if (!actor?.staff)
+            throw APIError.from("FORBIDDEN", { code: "NOT_STAFF", message: "Forbidden" });
+          if (actor.mustChangePassword) {
+            throw APIError.from("FORBIDDEN", {
+              code: "PASSWORD_CHANGE_REQUIRED",
+              message: "Change the initial password first",
+            });
+          }
+        }
+        if (ctx.path === TWO_FACTOR_DISABLE_PATH) {
+          // Turning the second factor off needs a fresh authenticator code, not only the password.
+          const code = (ctx.body as { code?: unknown } | undefined)?.code;
+          if (typeof code !== "string" || !self.auth) {
+            throw APIError.from("UNAUTHORIZED", { code: "INVALID_CODE", message: "Invalid code" });
+          }
+          await self.auth.api.verifyTOTP({ headers: ctx.headers ?? new Headers(), body: { code } });
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== SIGN_IN_OTP_PATH) return;
+        const returned = ctx.context.returned;
+        const failed = returned instanceof APIError;
+        const client = clientKey(ctx.request ?? ctx.headers, ctx.context.options);
         const signedIn = ctx.context.newSession;
-        if (signedIn) {
-          await audit(db, {
-            eventType: "AUTH_LOGIN_SUCCEEDED",
-            entityType: "user",
-            entityId: signedIn.user.id,
-            actor: { type: "user", id: signedIn.user.id },
-            before: null,
-            after: { sessionId: signedIn.session.id },
+        switch (ctx.path) {
+          case SIGN_IN_OTP_PATH: {
+            if (signedIn) {
+              await auditLoginSuccess(
+                db,
+                signedIn.user.id,
+                { method: "email_otp", sessionId: signedIn.session.id },
+                correlationId,
+              );
+              return;
+            }
+            const body = ctx.body as { email?: unknown } | undefined;
+            const parsedEmail = Email.safeParse(body?.email);
+            const email = parsedEmail.success ? parsedEmail.data : "invalid";
+            // An address with no user row can only ever fail; record it once per window, not per
+            // attempt, so anonymous callers cannot grow the append-only log without bound (M-3).
+            if (
+              (!parsedEmail.success ||
+                !(await ctx.context.internalAdapter.findUserByEmail(email))) &&
+              (await recentFailure(db, email))
+            ) {
+              return;
+            }
+            await auditLoginFailure(
+              db,
+              email,
+              { method: "email_otp", reason: errorCode(returned) },
+              correlationId,
+            );
+            return;
+          }
+          case SIGN_IN_PASSWORD_PATH: {
+            if (signedIn) {
+              // No authenticator yet (first sign-in): the session only reaches the setup steps.
+              await auditLoginSuccess(
+                db,
+                signedIn.user.id,
+                { method: "password", setupPending: true, sessionId: signedIn.session.id },
+                correlationId,
+              );
+              return;
+            }
+            if (failed) {
+              const email = Email.safeParse((ctx.body as { email?: unknown } | undefined)?.email);
+              if (email.success) {
+                await auditLoginFailure(
+                  db,
+                  email.data,
+                  { method: "password", reason: errorCode(returned), client },
+                  correlationId,
+                );
+              }
+            }
+            // Otherwise the password was right and a second factor is pending (twoFactorRedirect).
+            return;
+          }
+          case TOTP_VERIFY_PATH:
+          case BACKUP_CODE_VERIFY_PATH: {
+            const method = ctx.path === TOTP_VERIFY_PATH ? "totp" : "backup_code";
+            if (!actor) return;
+            if (failed) {
+              await audit(db, {
+                eventType: "AUTH_LOGIN_FAILED",
+                entityType: "user",
+                entityId: actor.userId,
+                actor: { type: "system", id: "two-factor" },
+                before: null,
+                after: { method, reason: errorCode(returned), client },
+                correlationId,
+                source: "api",
+              });
+              return;
+            }
+            if (actor.viaChallenge) {
+              await auditLoginSuccess(
+                db,
+                actor.userId,
+                { method: `password+${method}`, sessionId: signedIn?.session.id ?? null },
+                correlationId,
+              );
+            } else if (!actor.twoFactorEnabled && method === "totp") {
+              await auditUserEvent(
+                db,
+                "AUTH_2FA_ENABLED",
+                actor.userId,
+                { method: "totp" },
+                correlationId,
+              );
+            }
+            return;
+          }
+        }
+        if (failed || !actor || !SESSION_SETUP_PATHS.has(ctx.path)) return;
+        if (ctx.path === CHANGE_PASSWORD_PATH) {
+          await db
+            .update(schema.staffMembers)
+            .set({ mustChangePassword: false })
+            .where(eq(schema.staffMembers.userId, actor.userId));
+          await auditUserEvent(db, "AUTH_PASSWORD_CHANGED", actor.userId, null, correlationId);
+        } else if (ctx.path === TWO_FACTOR_ENABLE_PATH) {
+          await auditUserEvent(
+            db,
+            "AUTH_2FA_ENROLLMENT_STARTED",
+            actor.userId,
+            null,
             correlationId,
-            source: "api",
-          });
-          return;
+          );
+        } else if (ctx.path === "/two-factor/generate-backup-codes") {
+          await auditUserEvent(
+            db,
+            "AUTH_2FA_BACKUP_CODES_REGENERATED",
+            actor.userId,
+            null,
+            correlationId,
+          );
+        } else if (ctx.path === TWO_FACTOR_DISABLE_PATH) {
+          await auditUserEvent(db, "AUTH_2FA_DISABLED", actor.userId, null, correlationId);
         }
-        const body = ctx.body as { email?: unknown } | undefined;
-        const parsedEmail = Email.safeParse(body?.email);
-        const email = parsedEmail.success ? parsedEmail.data : "invalid";
-        // An address with no user row can only ever fail; record it once per window, not per
-        // attempt, so anonymous callers cannot grow the append-only log without bound (M-3).
-        if (
-          (!parsedEmail.success || !(await ctx.context.internalAdapter.findUserByEmail(email))) &&
-          (await recentFailure(db, email))
-        ) {
-          return;
-        }
-        // Never the submitted code; the reason is Better Auth's error code.
-        await audit(db, {
-          eventType: "AUTH_LOGIN_FAILED",
-          entityType: AUTH_EMAIL_ENTITY,
-          entityId: email,
-          actor: { type: "system", id: "email-otp" },
-          before: null,
-          after: { reason: errorCode(ctx.context.returned) },
-          correlationId,
-          source: "api",
-        });
       }),
     },
     plugins: [
+      // Staff second factor: authenticator app (TOTP) with backup codes. Better Auth's own
+      // account lockout (10 consecutive failures → 15 min) applies to sign-in verification.
+      twoFactor({
+        issuer: "CloudBox",
+        totpOptions: { digits: 6, period: 30 },
+        backupCodeOptions: { amount: 10, length: 10 },
+      }),
       emailOTP({
         otpLength: 6,
         // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts).
@@ -253,7 +605,10 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}) {
 
 export function createAuth(env: Bindings, request: AuthRequestContext = {}) {
   assertAuthConfig(env);
-  return betterAuth(authOptions(env, request));
+  const self: AuthSelf = {};
+  const auth = betterAuth(authOptions(env, request, self));
+  self.auth = auth;
+  return auth;
 }
 
 /** The auth instance for a Hono request: its correlation id and its own origin as base URL. */
