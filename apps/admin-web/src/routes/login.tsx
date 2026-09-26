@@ -1,28 +1,39 @@
-// Owner: WT-1. Email OTP sign-in: email step → six-digit code step (agent-notes ux-patterns
-// "One-time codes": six boxes, submit on the sixth digit, paste fills all, 30 s resend timer,
-// autocomplete="one-time-code", server-enforced honeypot).
+// Owner: WT-1. One sign-in page, two entry points (ADR 0009):
+// - Staff: email + password, then the six-digit code from their authenticator app (or a backup code).
+// - Customers (tenant members): email, then a six-digit code sent by email.
+// Customers never see a password field; staff never receive email codes.
 import { Email } from "@cloudbox/contracts";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { Box, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { describeAuthError, sendOtp, sessionQuery, verifyOtp } from "@/api/auth";
+import {
+  describeAuthError,
+  sendOtp,
+  sessionQuery,
+  signInWithPassword,
+  verifyBackupCode,
+  verifyOtp,
+  verifyTotp,
+} from "@/api/auth";
 import { ApiError } from "@/api/client";
+import { AuthFrame, CodeBoxes } from "@/auth/auth-ui";
 import { safeRedirect } from "@/auth/session";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 const RESEND_SECONDS = 30;
 
+type Mode = "staff" | "customer";
+
 export const Route = createFileRoute("/login")({
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; as?: Mode } => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+    as: search.as === "customer" ? "customer" : search.as === "staff" ? "staff" : undefined,
   }),
   beforeLoad: async ({ context, search }) => {
     const session = await context.queryClient.fetchQuery(sessionQuery).catch(() => null);
@@ -31,34 +42,298 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
+/** After any successful sign-in: drop the cached 401 and go where the user was headed. */
+function useFinish() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { redirect: target } = Route.useSearch();
+  return async () => {
+    queryClient.removeQueries({ queryKey: sessionQuery.queryKey });
+    // The console's guard sends staff with pending setup to /setup-password first.
+    await navigate({ href: safeRedirect(target), replace: true });
+  };
+}
+
+function LoginPage() {
+  const search = Route.useSearch();
+  const [mode, setMode] = useState<Mode>(search.as ?? "staff");
+  return (
+    <AuthFrame>
+      <div role="tablist" aria-label="Who is signing in" className="mb-5 grid grid-cols-2 gap-2">
+        {(
+          [
+            ["staff", "Staff sign-in", "Password + authenticator"],
+            ["customer", "Customer sign-in", "Code by email"],
+          ] as const
+        ).map(([value, title, hint]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={mode === value}
+            onClick={() => setMode(value)}
+            className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+              mode === value
+                ? "border-primary bg-primary/5"
+                : "border-border text-muted-foreground hover:bg-muted/50"
+            }`}
+          >
+            <span className="block font-medium text-foreground">{title}</span>
+            <span className="block text-xs text-muted-foreground">{hint}</span>
+          </button>
+        ))}
+      </div>
+      {mode === "staff" ? <StaffSignIn /> : <CustomerSignIn />}
+    </AuthFrame>
+  );
+}
+
+/** Invisible to people, filled by bots; the server rejects any value (x-cloudbox-hp). */
+function Honeypot(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      type="text"
+      tabIndex={-1}
+      autoComplete="new-password"
+      aria-hidden="true"
+      className="absolute -left-[10000px] h-px w-px overflow-hidden opacity-0"
+      {...props}
+    />
+  );
+}
+
+function ErrorLine({ children }: { children: React.ReactNode }) {
+  return (
+    <p role="alert" className="text-sm text-destructive">
+      {children}
+    </p>
+  );
+}
+
+// ─── Staff ──────────────────────────────────────────────────────────────────────────────────
+
+const StaffForm = z.object({ email: Email, password: z.string().min(1), website: z.string() });
+type StaffForm = z.input<typeof StaffForm>;
+
+function StaffSignIn() {
+  const [step, setStep] = useState<"password" | "code">("password");
+  const [email, setEmail] = useState("");
+  return step === "password" ? (
+    <StaffPasswordStep
+      onSecondFactor={(address) => {
+        setEmail(address);
+        setStep("code");
+      }}
+    />
+  ) : (
+    <StaffCodeStep email={email} onRestart={() => setStep("password")} />
+  );
+}
+
+function StaffPasswordStep({ onSecondFactor }: { onSecondFactor: (email: string) => void }) {
+  const finish = useFinish();
+  const [error, setError] = useState<string | null>(null);
+  const form = useForm<StaffForm, unknown, z.output<typeof StaffForm>>({
+    resolver: zodResolver(StaffForm),
+    defaultValues: { email: "", password: "", website: "" },
+  });
+
+  const submit = form.handleSubmit(async ({ email, password, website }) => {
+    setError(null);
+    try {
+      const result = await signInWithPassword(email, password, website);
+      if (result?.twoFactorRedirect) onSecondFactor(email);
+      else await finish();
+    } catch (cause) {
+      form.resetField("password");
+      setError(describeAuthError(cause));
+    }
+  });
+
+  const errors = form.formState.errors;
+  return (
+    <form onSubmit={submit} noValidate className="space-y-4">
+      <div>
+        <h1 className="text-base font-semibold">Staff sign-in</h1>
+        <p className="text-sm text-muted-foreground">
+          Your CloudBox staff email and password. Your authenticator app comes next.
+        </p>
+      </div>
+      <Field data-invalid={errors.email ? true : undefined}>
+        <FieldLabel htmlFor="staff-email">Email</FieldLabel>
+        <Input
+          id="staff-email"
+          type="email"
+          autoComplete="username"
+          inputMode="email"
+          autoFocus
+          aria-invalid={errors.email ? true : undefined}
+          {...form.register("email")}
+        />
+        <FieldError errors={errors.email ? [{ message: "Enter a valid email address." }] : []} />
+      </Field>
+      <Field data-invalid={errors.password ? true : undefined}>
+        <FieldLabel htmlFor="staff-password">Password</FieldLabel>
+        <Input
+          id="staff-password"
+          type="password"
+          autoComplete="current-password"
+          aria-invalid={errors.password ? true : undefined}
+          {...form.register("password")}
+        />
+        <FieldError errors={errors.password ? [{ message: "Enter your password." }] : []} />
+      </Field>
+      <Honeypot {...form.register("website")} />
+      {error ? <ErrorLine>{error}</ErrorLine> : null}
+      <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+        {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
+        Continue
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Forgot your password? Ask a CloudBox super admin to set a new initial password.
+      </p>
+    </form>
+  );
+}
+
+function StaffCodeStep({ email, onRestart }: { email: string; onRestart: () => void }) {
+  const finish = useFinish();
+  const [useBackup, setUseBackup] = useState(false);
+  const [code, setCode] = useState("");
+  const [backup, setBackup] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  async function submit(run: () => Promise<unknown>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await run();
+      await finish();
+    } catch (cause) {
+      setCode("");
+      setBackup("");
+      if (
+        cause instanceof ApiError &&
+        ["too_many_attempts_request_new_code", "invalid_two_factor_cookie"].includes(cause.error)
+      ) {
+        onRestart();
+        return;
+      }
+      setError(describeAuthError(cause));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (useBackup && backup.trim()) void submit(() => verifyBackupCode(backup.trim()));
+        else if (!useBackup && code.length === 6) void submit(() => verifyTotp(code));
+      }}
+    >
+      <div>
+        <h1 className="text-base font-semibold">
+          {useBackup ? "Enter a backup code" : "Enter your authenticator code"}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {useBackup ? (
+            <>Each backup code works once.</>
+          ) : (
+            <>
+              The six-digit code for <span className="font-medium text-foreground">{email}</span>{" "}
+              from your authenticator app.
+            </>
+          )}
+        </p>
+      </div>
+      <Field data-invalid={error ? true : undefined}>
+        {useBackup ? (
+          <>
+            <FieldLabel htmlFor="backup-code">Backup code</FieldLabel>
+            <Input
+              id="backup-code"
+              autoComplete="one-time-code"
+              autoFocus
+              spellCheck={false}
+              className="font-mono"
+              value={backup}
+              onChange={(event) => setBackup(event.target.value)}
+              aria-invalid={error ? true : undefined}
+            />
+          </>
+        ) : (
+          <CodeBoxes
+            id="totp"
+            label="Six-digit authenticator code"
+            value={code}
+            onChange={setCode}
+            onComplete={(value) => void submit(() => verifyTotp(value))}
+            disabled={busy}
+            invalid={Boolean(error)}
+          />
+        )}
+        {error ? (
+          <FieldError>{error}</FieldError>
+        ) : useBackup ? null : (
+          <FieldDescription>It submits by itself on the sixth digit.</FieldDescription>
+        )}
+      </Field>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={busy || (useBackup ? !backup.trim() : code.length !== 6)}
+      >
+        {busy ? <Loader2 className="animate-spin" /> : null}
+        {busy ? "Checking…" : "Sign in"}
+      </Button>
+      <div className="flex items-center justify-between text-sm">
+        <button
+          type="button"
+          className="text-muted-foreground underline-offset-4 hover:underline"
+          onClick={onRestart}
+        >
+          Start again
+        </button>
+        <button
+          type="button"
+          className="text-muted-foreground underline-offset-4 hover:underline"
+          onClick={() => {
+            setUseBackup((value) => !value);
+            setError(null);
+          }}
+        >
+          {useBackup ? "Use the authenticator app" : "Use a backup code"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── Customers ──────────────────────────────────────────────────────────────────────────────
+
 const EmailForm = z.object({ email: Email, website: z.string() });
 type EmailForm = z.input<typeof EmailForm>;
 
-function LoginPage() {
+function CustomerSignIn() {
   const [email, setEmail] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState("");
-
-  return (
-    <main className="flex min-h-svh items-start justify-center bg-background px-4 pt-[18vh]">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Box className="size-4" />
-          </div>
-          <span className="text-sm font-semibold">CloudBox</span>
-        </div>
-        {email === null ? (
-          <EmailStep
-            onSent={(sentTo, hp) => {
-              setHoneypot(hp);
-              setEmail(sentTo);
-            }}
-          />
-        ) : (
-          <CodeStep email={email} honeypot={honeypot} onChangeEmail={() => setEmail(null)} />
-        )}
-      </div>
-    </main>
+  return email === null ? (
+    <EmailStep
+      onSent={(sentTo, hp) => {
+        setHoneypot(hp);
+        setEmail(sentTo);
+      }}
+    />
+  ) : (
+    <CodeStep email={email} honeypot={honeypot} onChangeEmail={() => setEmail(null)} />
   );
 }
 
@@ -83,8 +358,11 @@ function EmailStep({ onSent }: { onSent: (email: string, honeypot: string) => vo
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
       <div>
-        <h1 className="text-base font-semibold">Sign in</h1>
-        <p className="text-sm text-muted-foreground">We will email you a six-digit code.</p>
+        <h1 className="text-base font-semibold">Customer sign-in</h1>
+        <p className="text-sm text-muted-foreground">
+          Enter the email your organisation registered. If it can sign in, we email it a six-digit
+          code.
+        </p>
       </div>
       <Field data-invalid={emailError ? true : undefined}>
         <FieldLabel htmlFor="email">Email</FieldLabel>
@@ -99,23 +377,11 @@ function EmailStep({ onSent }: { onSent: (email: string, honeypot: string) => vo
         />
         <FieldError errors={emailError ? [{ message: "Enter a valid email address." }] : []} />
       </Field>
-      {/* Honeypot: invisible to people, filled by bots; the server rejects any value. */}
-      <input
-        type="text"
-        tabIndex={-1}
-        autoComplete="new-password"
-        aria-hidden="true"
-        className="absolute -left-[10000px] h-px w-px overflow-hidden opacity-0"
-        {...form.register("website")}
-      />
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      <Honeypot {...form.register("website")} />
+      {error ? <ErrorLine>{error}</ErrorLine> : null}
       <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
         {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
-        Send code
+        Continue
       </Button>
     </form>
   );
@@ -141,9 +407,7 @@ function CodeStep({
   honeypot: string;
   onChangeEmail: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const { redirect: target } = Route.useSearch();
+  const finish = useFinish();
   const [code, setCode] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
@@ -160,8 +424,7 @@ function CodeStep({
     setNotice(null);
     try {
       await verifyOtp(email, value, honeypot);
-      queryClient.removeQueries({ queryKey: sessionQuery.queryKey });
-      await navigate({ href: safeRedirect(target), replace: true });
+      await finish();
     } catch (cause) {
       setError(describeAuthError(cause));
       setCode("");
@@ -178,7 +441,8 @@ function CodeStep({
     try {
       await sendOtp(email, honeypot);
       setCode("");
-      setNotice("A new code is on its way. Earlier codes no longer work.");
+      // Nothing here may reveal whether the address exists (closed sign-in, ADR 0009).
+      setNotice("If this address can sign in, the code is on its way again.");
       countdown.restart();
     } catch (cause) {
       setError(describeAuthError(cause));
@@ -203,34 +467,15 @@ function CodeStep({
         </p>
       </div>
       <Field data-invalid={error ? true : undefined}>
-        <FieldLabel htmlFor="otp" className="sr-only">
-          Six-digit code
-        </FieldLabel>
-        <InputOTP
+        <CodeBoxes
           id="otp"
-          maxLength={6}
-          pattern={REGEXP_ONLY_DIGITS}
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          autoFocus
+          label="Six-digit code"
           value={code}
           onChange={setCode}
-          onComplete={(value: string) => void verify(value)}
+          onComplete={(value) => void verify(value)}
           disabled={verifying}
-          aria-invalid={error ? true : undefined}
-          containerClassName="gap-2"
-        >
-          <InputOTPGroup>
-            {[0, 1, 2, 3, 4, 5].map((index) => (
-              <InputOTPSlot
-                key={index}
-                index={index}
-                aria-invalid={error ? true : undefined}
-                className="size-11 text-lg"
-              />
-            ))}
-          </InputOTPGroup>
-        </InputOTP>
+          invalid={Boolean(error)}
+        />
         {error ? (
           <FieldError>{error}</FieldError>
         ) : notice ? (

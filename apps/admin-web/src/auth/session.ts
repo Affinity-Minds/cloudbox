@@ -1,6 +1,6 @@
 // Owner: WT-1. Session access for routes and components. The server is the authority; this only
 // decides where to send the browser.
-import type { StaffRole } from "@cloudbox/contracts";
+import type { SessionResponse, StaffRole } from "@cloudbox/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
 import { sessionQuery } from "@/api/auth";
@@ -42,4 +42,13 @@ export async function requireSession(queryClient: QueryClient, href: string) {
     }
     throw error;
   }
+}
+
+/** Where a staff account with pending first-sign-in steps must go (ADR 0009), or null. */
+export function pendingSetupPath(
+  session: SessionResponse,
+): "/setup-password" | "/setup-authenticator" | null {
+  if (session.setup?.passwordChangeRequired) return "/setup-password";
+  if (session.setup?.authenticatorRequired) return "/setup-authenticator";
+  return null;
 }

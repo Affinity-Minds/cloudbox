@@ -101,7 +101,7 @@ describe("review L-1 / L-3", () => {
     const inDev = await app.request(
       "/api/v1/auth/logout",
       { method: "POST", headers: { cookie: signedIn.cookie, origin: "http://localhost:5173" } },
-      env,
+      { ...env, ENVIRONMENT: "development" as const },
     );
     expect(inDev.status).toBe(204);
   });
