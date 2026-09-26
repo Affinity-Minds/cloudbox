@@ -20,10 +20,11 @@ Owner: WT-4. Applies to: `CloudBox.Agent.exe` built by `.github/workflows/build-
 1. **Download the build.** GitHub → Affinity-Minds/cloudbox → PR "WT-4: Windows Agent service…" → Checks →
    *Build Windows components* → run summary → Artifacts → `CloudBox.Agent-win-x64` (zip). Extract to
    `C:\Users\<you>\Downloads\CloudBox.Agent-win-x64\`. It contains `CloudBox.Agent.exe` and `CloudBox.Status.exe`.
-   If SmartScreen/Mark-of-the-Web blocks it: right-click → Properties → Unblock (the dev build is unsigned).
+   The dev build is unsigned; clear the download mark once (step 2) so Windows does not block it.
 2. **Open an elevated PowerShell** (Start → type `PowerShell` → *Run as administrator*) and go to the folder:
    ```powershell
    cd $env:USERPROFILE\Downloads\CloudBox.Agent-win-x64
+   Get-ChildItem | Unblock-File
    .\CloudBox.Agent.exe verify-clean     # should print CLEAN before the first install
    ```
 3. **Install and enroll:**
@@ -55,7 +56,6 @@ Owner: WT-4. Applies to: `CloudBox.Agent.exe` built by `.github/workflows/build-
    sc.exe query CloudBoxAgent        # STATE: RUNNING again (recovery: restart after 5 s)
    sc.exe qfailure CloudBoxAgent     # RESTART 5000 / 10000 / 60000, reset 86400
    ```
-   Note: `taskkill /im` also matches the copy in the download folder only if it is running; it is not.
 8. **Reboot (optional, Slice 2.1 acceptance):** reboot, sign in, wait ~2 min (Delayed Start), run `status` again.
 9. **Uninstall** (from the download folder, still elevated):
    ```powershell

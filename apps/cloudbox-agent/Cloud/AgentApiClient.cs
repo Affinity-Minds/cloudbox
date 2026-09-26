@@ -59,13 +59,16 @@ public sealed class AgentApiClient(HttpClient http, Func<bool>? networkAvailable
 {
     private readonly Func<bool> _networkAvailable = networkAvailable ?? NetworkInterface.GetIsNetworkAvailable;
 
-    public static HttpClient CreateHttpClient() => new(new SocketsHttpHandler
+    public static HttpClient CreateHttpClient()
     {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-    })
-    {
-        Timeout = TimeSpan.FromSeconds(30),
-    };
+        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        // Identify the agent; edge bot checks can reject requests without a User-Agent.
+        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("CloudBox.Agent", AgentPaths.AgentVersion));
+        return http;
+    }
 
     public async Task<EnrollResponse> EnrollAsync(Uri baseUrl, string token, EnrollDevice device, CancellationToken ct)
     {
