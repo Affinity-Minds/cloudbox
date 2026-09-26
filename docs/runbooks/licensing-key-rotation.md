@@ -2,7 +2,7 @@
 
 **Owner:** WT-5
 **Phase:** 3
-**Status:** Implemented (issuer, `ensureSigningKey`, generator). Deploy-workflow step to push the secret: requested from WT-0 (see "Wiring the secret").
+**Status:** Implemented (issuer, `ensureSigningKey`, generator). Deploy-workflow step syncs the secret into Wrangler (added by WT-0, 2026-09-27).
 **Format:** ADR 0004 (`docs/decisions/0004-entitlement-format.md`)
 
 ## What exists
@@ -98,6 +98,7 @@ Rotation is additive; no device is ever stranded.
 
 | kid | Created | Activated (signer) | Retired | Notes |
 |---|---|---|---|---|
+| BvYXJ4zdX7-kThGesLBGj4hvrXp-OCPQt6oIrgwLIN0 | ES256 | 2026-09-27 01:18 IST | active | `{"kty":"EC","crv":"P-256","x":"zCMUCeQ1DIPICjOUffUSRF5Jtp7642-PJl0CfGC9tnI","y":"wirynHCLCUXJ6v_CVHTuX_e1E2_gekB6o64ToXRAG60"}` |
 | _(owner fills after step 1)_ | | | | |
 
 ## References
