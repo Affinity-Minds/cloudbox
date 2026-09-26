@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------------------------------------------
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using CloudBox.Agent.State;
 using Microsoft.Win32;
 
@@ -50,6 +51,7 @@ public sealed class ManifestEntry
     public JsonObject? Spec { get; init; }
     public string Status { get; set; } = "pending";
 
+    [JsonIgnore]
     public bool PriorExisted => PriorState?["existed"]?.GetValue<bool>() ?? false;
 }
 

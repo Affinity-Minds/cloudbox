@@ -319,7 +319,7 @@ public sealed class RegistryValueStep(string kind) : IInstallStep
         if (e.PriorExisted)
         {
             var kind = Enum.Parse<RegistryValueKind>(e.PriorState!["valueKind"]!.GetValue<string>());
-            Write(e.Id, e.PriorState["value"]?.DeepClone(), kind);
+            Write(e.Id, e.PriorState!["value"]?.DeepClone(), kind);
             return RevertOutcome.Restored;
         }
 

@@ -130,7 +130,8 @@ public sealed class Uninstaller(
             {
                 try
                 {
-                    (deleteDataFolder ?? DeleteIfExists)(folder);
+                    if (deleteDataFolder is not null) deleteDataFolder(folder);
+                    else DeleteIfExists(folder);
                     Security.Log.Warning("Customer data folder {Folder} purged", folder);
                     security.Add($"purged {folder}");
                 }

@@ -47,7 +47,7 @@ public sealed class CngDeviceKeyStore(string keyName, bool allowTpm = true) : ID
 {
     private IEnumerable<(CngProvider Provider, string Protection)> Providers()
     {
-        if (allowTpm) yield return (CngProvider.MicrosoftPlatformCryptoProvider, "tpm");
+        if (allowTpm) yield return (new CngProvider("Microsoft Platform Crypto Provider"), "tpm");
         yield return (CngProvider.MicrosoftSoftwareKeyStorageProvider, "software");
     }
 
