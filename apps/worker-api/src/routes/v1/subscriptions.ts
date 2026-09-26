@@ -26,7 +26,10 @@ export const validate = <T extends ZodType>(target: "json" | "query", schema: T)
       return c.json(
         {
           error: "invalid_request",
-          detail: result.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+          detail: result.error.issues.map((issue) => ({
+            path: issue.path,
+            message: issue.message,
+          })),
         },
         400,
       );
@@ -110,7 +113,10 @@ tenantSubscriptions.post(
         .select({ id: subscriptionsTable.id })
         .from(subscriptionsTable)
         .where(
-          and(eq(subscriptionsTable.tenantId, tenantId), ne(subscriptionsTable.status, "cancelled")),
+          and(
+            eq(subscriptionsTable.tenantId, tenantId),
+            ne(subscriptionsTable.status, "cancelled"),
+          ),
         )
         .limit(1),
     ]);

@@ -320,7 +320,10 @@ export async function verifyEntitlement({
     "sha256",
   );
   if (claims.device_key_thumbprint !== thumbprint) {
-    throw new EntitlementError("device_mismatch", "entitlement was issued to a different device key");
+    throw new EntitlementError(
+      "device_mismatch",
+      "entitlement was issued to a different device key",
+    );
   }
 
   return { claims, kid };

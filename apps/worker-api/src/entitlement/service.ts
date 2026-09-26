@@ -234,7 +234,9 @@ export async function issueForDevice(
         entityId: licenseId,
         actor: { type: "user", id: actor.id },
         before:
-          latest === undefined ? null : { generation: latest.generation, revokedAt: latest.revokedAt },
+          latest === undefined
+            ? null
+            : { generation: latest.generation, revokedAt: latest.revokedAt },
         after: { ...record, claims },
         correlationId: actor.correlationId,
         source: "api",

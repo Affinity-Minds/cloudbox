@@ -41,7 +41,10 @@ export function parseSigningSecret(secret: string | undefined): ServerSigningKey
     throw new EntitlementError("invalid_input", "ENTITLEMENT_SIGNING_JWK is not JSON", { cause });
   }
   if (jwk.kty !== "EC" || jwk.crv !== "P-256" || !jwk.d || !jwk.x || !jwk.y) {
-    throw new EntitlementError("invalid_input", "ENTITLEMENT_SIGNING_JWK is not a P-256 private JWK");
+    throw new EntitlementError(
+      "invalid_input",
+      "ENTITLEMENT_SIGNING_JWK is not a P-256 private JWK",
+    );
   }
   if (typeof jwk.kid !== "string" || jwk.kid.length === 0) {
     throw new EntitlementError("invalid_input", "ENTITLEMENT_SIGNING_JWK has no kid");

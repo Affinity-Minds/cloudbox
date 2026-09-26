@@ -75,7 +75,13 @@ export type UpdateSubscriptionRequest = z.infer<typeof UpdateSubscriptionRequest
  * `validUntil`, `expiring` within `renewalWarningDays`, `inactive` when the status is not
  * trial/active (past_due, suspended, cancelled), otherwise `active`.
  */
-export const SubscriptionExpiry = z.enum(["active", "expiring", "expired", "scheduled", "inactive"]);
+export const SubscriptionExpiry = z.enum([
+  "active",
+  "expiring",
+  "expired",
+  "scheduled",
+  "inactive",
+]);
 export type SubscriptionExpiry = z.infer<typeof SubscriptionExpiry>;
 
 const Derived = {

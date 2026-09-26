@@ -1,12 +1,10 @@
 // Owner: WT-5. Plans, subscriptions, entitlement issuance/renewal/revocation, subscription screens.
-//
-// Authorization: WT-1 implements `requirePermission`. Until its spine is merged, the middleware is
-// mocked here with a header-driven stand-in so the handlers are exercised; the real permission
-// boundary per key is `test.todo` at the bottom and becomes live once `signInAs` exists.
+// Every request goes through the real WT-1 middleware with a real Better Auth session (signInAs).
 import { env } from "cloudflare:test";
 import type {
   AuditEntry,
   IssueEntitlementResponse,
+  StaffRole,
   SubscriptionDetailScreen,
   SubscriptionsScreen,
 } from "@cloudbox/contracts";
@@ -16,66 +14,42 @@ import {
   verifyEntitlement,
 } from "@cloudbox/licensing-contracts";
 import { eq } from "drizzle-orm";
-import type { MiddlewareHandler } from "hono";
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, type JWK } from "jose";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/db/client";
 import { auditLog, devices, entitlements, signingKeys, tenants } from "../src/db/schema";
 import { currentEntitlementForDevice } from "../src/entitlement/service";
-import type { AppEnv } from "../src/env";
+import app from "../src/index";
+import { type SignedIn, signInAs } from "./auth-fixtures";
 import { countingD1 } from "./fixtures";
-
-vi.mock("../src/authz/permissions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/authz/permissions")>();
-  return {
-    ...actual,
-    // Stand-in for WT-1: grants exactly the keys listed in `x-test-permissions`.
-    requirePermission:
-      (key: string): MiddlewareHandler<AppEnv> =>
-      async (c, next) => {
-        const granted = (c.req.header("x-test-permissions") ?? "").split(",");
-        if (!granted.includes(key)) return c.json({ error: "forbidden" }, 403);
-        c.set("user", { id: "usr_test", email: "t@example.test", name: "T", staffRole: null });
-        await next();
-      },
-  };
-});
-
-const ALL = [
-  "subscription.view",
-  "subscription.manage",
-  "license.issue",
-  "license.renew",
-  "license.revoke",
-].join(",");
 
 let server: ServerSigningKey;
 let testEnv: typeof env;
-// The pool evaluates `main` (src/index.ts) before this file's mock is registered, so the app is
-// re-imported from a fresh module registry to pick the stand-in up.
-let app: (typeof import("../src/index"))["default"];
+let admin: SignedIn;
+/** Session lookup + staff grants per request (measured, as in screens.test.ts). */
+let AUTH_ROUND_TRIPS = 0;
 
 beforeAll(async () => {
-  vi.resetModules();
-  app = (await import("../src/index")).default;
   server = await generateServerSigningKey();
   testEnv = { ...env, ENTITLEMENT_SIGNING_JWK: JSON.stringify(server.privateJwk) };
+  admin = await signInAs(env, { email: "wt5-super@example.test", staffRole: "super_admin" });
+  const counted = countingD1(env.DB);
+  await app.request("/api/v1/auth/session", { headers: admin.headers }, { ...env, DB: counted });
+  AUTH_ROUND_TRIPS = counted.roundTrips;
 });
 
 function call(
   method: string,
   path: string,
   body?: unknown,
-  opts: { permissions?: string; env?: typeof env } = {},
+  opts: { as?: SignedIn | null; env?: typeof env } = {},
 ) {
+  const who = opts.as === undefined ? admin : opts.as;
   return app.request(
     `/api/v1${path}`,
     {
       method,
-      headers: {
-        "content-type": "application/json",
-        "x-test-permissions": opts.permissions ?? ALL,
-      },
+      headers: { "content-type": "application/json", ...(who?.headers ?? {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
     opts.env ?? testEnv,
@@ -192,7 +166,7 @@ describe("subscriptions", () => {
       eventType: "SUBSCRIPTION_CHANGED",
       action: "created",
       actorType: "user",
-      actorId: "usr_test",
+      actorId: admin.userId,
       before: null,
       after: { id: subscription.id, status: "active" },
     });
@@ -212,8 +186,14 @@ describe("subscriptions", () => {
     expect(unknownPlan.status).toBe(400);
     expect(await unknownPlan.json()).toEqual({ error: "invalid_request", detail: "unknown_plan" });
     expect(
-      (await bad({ planCode: "cloudbox-6", status: "cancelled", validFrom: iso(0), validUntil: iso(5) }))
-        .status,
+      (
+        await bad({
+          planCode: "cloudbox-6",
+          status: "cancelled",
+          validFrom: iso(0),
+          validUntil: iso(5),
+        })
+      ).status,
     ).toBe(400);
     expect(
       (
@@ -236,9 +216,9 @@ describe("subscriptions", () => {
     const id = await createSubscription(tenantId);
 
     expect((await call("PATCH", `/subscriptions/${id}`, {})).status).toBe(400);
-    expect(
-      (await call("PATCH", `/subscriptions/${id}`, { validUntil: iso(-30) })).status,
-    ).toBe(400);
+    expect((await call("PATCH", `/subscriptions/${id}`, { validUntil: iso(-30) })).status).toBe(
+      400,
+    );
 
     const extended = iso(730);
     const patched = await call("PATCH", `/subscriptions/${id}`, {
@@ -307,7 +287,7 @@ describe("entitlement issuance", () => {
       deviceId: device.deviceId,
       subscriptionId,
       generation: 1,
-      issuedBy: "usr_test",
+      issuedBy: admin.userId,
       revokedAt: null,
     });
     expect(body.claims).toMatchObject({
@@ -337,7 +317,10 @@ describe("entitlement issuance", () => {
 
     const events = await auditFor(body.entitlement.id);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ eventType: "LICENSE_ISSUED", after: { claims: body.claims } });
+    expect(events[0]).toMatchObject({
+      eventType: "LICENSE_ISSUED",
+      after: { claims: body.claims },
+    });
     expect(JSON.stringify(events[0])).not.toContain(row?.token ?? "missing");
 
     // ensureSigningKey recorded the public half once.
@@ -426,7 +409,9 @@ describe("entitlement issuance", () => {
       generations: [2, 1],
     });
 
-    const again = await call("POST", `/devices/${deviceId}/entitlements/revoke`, { reason: "x".repeat(5) });
+    const again = await call("POST", `/devices/${deviceId}/entitlements/revoke`, {
+      reason: "x".repeat(5),
+    });
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: "no_active_entitlement" });
     expect((await call("POST", `/devices/${deviceId}/entitlements/renew`, {})).status).toBe(409);
@@ -514,7 +499,7 @@ describe("subscription screens", () => {
       env: { ...testEnv, DB: counted },
     });
     expect(response.status).toBe(200);
-    expect(counted.roundTrips).toBeLessThanOrEqual(1);
+    expect(counted.roundTrips).toBeLessThanOrEqual(1 + AUTH_ROUND_TRIPS);
     const screen = (await response.json()) as SubscriptionsScreen;
     const item = screen.items.find((i) => i.id === subscriptionId);
     expect(item).toMatchObject({
@@ -546,7 +531,7 @@ describe("subscription screens", () => {
       env: { ...testEnv, DB: counted },
     });
     expect(response.status).toBe(200);
-    expect(counted.roundTrips).toBeLessThanOrEqual(1);
+    expect(counted.roundTrips).toBeLessThanOrEqual(1 + AUTH_ROUND_TRIPS);
     const text = await response.text();
     expect(text).not.toMatch(/"token"/);
     const detail = JSON.parse(text) as SubscriptionDetailScreen;
@@ -565,7 +550,8 @@ describe("subscription screens", () => {
   });
 });
 
-describe("authorization (stand-in middleware until WT-1)", () => {
+describe("authorization boundary (real WT-1 middleware, seed matrix of migration 0003)", () => {
+  // [permission, method, path, body]
   const routes: [string, string, string, unknown?][] = [
     ["subscription.view", "GET", "/plans"],
     ["subscription.view", "GET", "/screens/subscriptions"],
@@ -578,30 +564,66 @@ describe("authorization (stand-in middleware until WT-1)", () => {
     ["license.renew", "POST", "/devices/dev_x/entitlements/renew", {}],
     ["license.revoke", "POST", "/devices/dev_x/entitlements/revoke", {}],
   ];
-
-  it.each(routes)("%s gates %s %s before validation or D1", async (key, method, path, body) => {
-    const others = ALL.split(",")
-      .filter((k) => k !== key)
-      .join(",");
-    const counted = countingD1(env.DB);
-    const denied = await call(method, path, body, {
-      permissions: others,
-      env: { ...testEnv, DB: counted },
-    });
-    expect(denied.status).toBe(403);
-    expect(counted.roundTrips).toBe(0);
-    const allowed = await call(method, path, body, { permissions: key });
-    expect(allowed.status).not.toBe(403);
+  const VIEW_ONLY = new Set(["subscription.view"]);
+  const grants: Record<StaffRole | "none", (key: string) => boolean> = {
+    super_admin: () => true,
+    admin: (key) => key !== "license.revoke",
+    support: (key) => VIEW_ONLY.has(key),
+    read_only: (key) => VIEW_ONLY.has(key),
+    none: () => false,
+  };
+  const sessions = new Map<string, SignedIn>();
+  beforeAll(async () => {
+    for (const role of Object.keys(grants) as (StaffRole | "none")[]) {
+      sessions.set(
+        role,
+        await signInAs(env, {
+          email: `wt5-boundary-${role}@example.test`,
+          staffRole: role === "none" ? undefined : role,
+        }),
+      );
+    }
   });
-});
 
-describe("authorization boundary (real WT-1 middleware)", () => {
-  // Un-todo once WT-1's requirePermission and test/auth-fixtures.ts signInAs(env, {email, staffRole})
-  // are merged into phase-1/identity. Seed matrix (migration 0003): admin lacks license.revoke;
-  // support and read_only have every *.view only.
-  it.todo("anonymous → 401 on every WT-5 route");
-  it.todo("read_only: GET /plans and screens 200; POST/PATCH subscriptions 403");
-  it.todo("support: subscription.view only; license.issue/renew/revoke 403");
-  it.todo("admin: subscription.manage, license.issue, license.renew allowed; license.revoke 403");
-  it.todo("super_admin: every WT-5 route allowed, including license.revoke");
+  it.each(routes)("anonymous → 401 on %s %s %s", async (_key, method, path, body) => {
+    const response = await call(method, path, body, { as: null });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthenticated" });
+  });
+
+  for (const role of Object.keys(grants) as (StaffRole | "none")[]) {
+    it.each(routes)(`${role}: %s gates %s %s`, async (key, method, path, body) => {
+      const counted = countingD1(env.DB);
+      const response = await call(method, path, body, {
+        as: sessions.get(role) ?? null,
+        env: { ...testEnv, DB: counted },
+      });
+      if (grants[role](key)) {
+        // Past the gate: the handler answers (200/400/404/409), never 401/403.
+        expect([401, 403]).not.toContain(response.status);
+      } else {
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({ error: "forbidden" });
+        // Refused before validation or any handler query.
+        expect(counted.roundTrips).toBeLessThanOrEqual(AUTH_ROUND_TRIPS);
+      }
+    });
+  }
+
+  it("refuses a cross-site write even with a valid super-admin session", async () => {
+    const response = await app.request(
+      "/api/v1/devices/dev_x/entitlements/revoke",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: admin.cookie,
+          origin: "https://evil.example",
+        },
+        body: JSON.stringify({ reason: "cross-site" }),
+      },
+      testEnv,
+    );
+    expect(response.status).toBe(403);
+  });
 });

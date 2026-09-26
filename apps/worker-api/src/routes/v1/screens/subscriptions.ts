@@ -162,10 +162,7 @@ export async function loadSubscriptionDetail(
       .where(
         inArray(
           entitlements.deviceId,
-          db
-            .select({ id: devices.id })
-            .from(devices)
-            .where(sql`${devices.tenantId} = ${tenantOf}`),
+          db.select({ id: devices.id }).from(devices).where(sql`${devices.tenantId} = ${tenantOf}`),
         ),
       )
       .orderBy(desc(entitlements.issuedAt), desc(entitlements.generation)),

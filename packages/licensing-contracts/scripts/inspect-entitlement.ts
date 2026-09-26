@@ -11,7 +11,9 @@ import { EntitlementError, verifyEntitlement } from "../src/entitlement.ts";
 
 const [devicePath, serverPath] = process.argv.slice(2);
 if (!devicePath || !serverPath) {
-  process.stderr.write("usage: inspect-entitlement.ts <device-private.jwk> <server-public.jwk(s)>\n");
+  process.stderr.write(
+    "usage: inspect-entitlement.ts <device-private.jwk> <server-public.jwk(s)>\n",
+  );
   process.exit(2);
 }
 

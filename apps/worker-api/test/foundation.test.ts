@@ -73,8 +73,6 @@ describe("CloudBox API foundation", () => {
       enrollment: "/api/v1/tenants/ten_x/enrollment-tokens",
       devices: "/api/v1/devices",
       agent: "/api/v1/agent",
-      subscriptions: "/api/v1/subscriptions",
-      entitlements: "/api/v1/devices/dev_x/entitlements",
       audit: "/api/v1/audit",
     };
     for (const [module, path] of Object.entries(paths)) {

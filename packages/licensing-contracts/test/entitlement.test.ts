@@ -14,7 +14,11 @@ import {
   issueEntitlement,
   verifyEntitlement,
 } from "../src/entitlement.ts";
-import { generateServerSigningKey, parseSigningSecret, type ServerSigningKey } from "../src/keys.ts";
+import {
+  generateServerSigningKey,
+  parseSigningSecret,
+  type ServerSigningKey,
+} from "../src/keys.ts";
 
 type DeviceKey = { publicJwk: JWK; privateJwk: JWK; thumbprint: string };
 
