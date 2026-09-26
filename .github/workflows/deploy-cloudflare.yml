@@ -1,0 +1,53 @@
+name: Deploy CloudBox
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudbox-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_ORIGIN: https://box.affinityminds.in
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm ci
+
+      - name: Stamp build
+        shell: bash
+        run: |
+          node -e 'const fs=require("fs"); const p="apps/worker-api/wrangler.jsonc"; let s=fs.readFileSync(p,"utf8"); s=s.replace('"'"'"BUILD_SHA": "development"'"'"', '"'"'"BUILD_SHA": "'"'"' + process.env.GITHUB_SHA + '"'"'"'"'"'); s=s.replace('"'"'"BUILD_TIME": "development"'"'"', '"'"'"BUILD_TIME": "'"'"' + new Date().toISOString() + '"'"'"'"'"'); fs.writeFileSync(p,s);'
+
+      - name: Deploy Worker and static assets
+        working-directory: apps/worker-api
+        run: pnpm wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$PRODUCTION_ORIGIN/api/health" | tee /tmp/health.json
+          curl --fail --silent --show-error "$PRODUCTION_ORIGIN/api/version" | tee /tmp/version.json
+          node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("/tmp/version.json","utf8")); if(v.gitSha!==process.env.GITHUB_SHA){console.error(`Expected ${process.env.GITHUB_SHA}, got ${v.gitSha}`); process.exit(1)}'
