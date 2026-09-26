@@ -104,7 +104,8 @@ describe("POST /api/v1/me/active-tenant", () => {
       body: JSON.stringify({ tenantId: tenant.id }),
     });
     expect(
-      ((await (await call("/api/v1/auth/session", person)).json()) as SessionResponse).activeTenantId,
+      ((await (await call("/api/v1/auth/session", person)).json()) as SessionResponse)
+        .activeTenantId,
     ).toBe(tenant.id);
 
     await env.DB.prepare(

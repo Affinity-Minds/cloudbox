@@ -48,7 +48,9 @@ router.get("/tenants", requireUser(), async (c) => {
     })
     .from(tenantMemberships)
     .innerJoin(tenants, eq(tenantMemberships.tenantId, tenants.id))
-    .where(and(eq(tenantMemberships.userId, c.var.user.id), eq(tenantMemberships.status, "active")));
+    .where(
+      and(eq(tenantMemberships.userId, c.var.user.id), eq(tenantMemberships.status, "active")),
+    );
 
   return c.json(rows);
 });

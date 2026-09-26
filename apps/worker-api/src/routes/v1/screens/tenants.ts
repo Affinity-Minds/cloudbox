@@ -4,16 +4,16 @@
 import {
   type Subscription,
   type TenantDetailScreen,
-  TenantsScreenQuery,
   type TenantsScreen,
+  TenantsScreenQuery,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { requirePermission } from "../../../authz/permissions";
-import { auditLog } from "../../../db/schema";
 import { createDb, type Db } from "../../../db/client";
 import {
+  auditLog,
   devices,
   subscriptions,
   tenantMemberships,
@@ -91,7 +91,10 @@ export async function loadTenantsScreen(db: Db, query: TenantsScreenQuery): Prom
       })
       .from(tenants)
       .groupBy(tenants.planCode),
-    db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(tenants).where(where),
+    db
+      .select({ n: sql<number>`count(*)`.mapWith(Number) })
+      .from(tenants)
+      .where(where),
   ]);
 
   return {
@@ -106,7 +109,10 @@ export async function loadTenantsScreen(db: Db, query: TenantsScreenQuery): Prom
   };
 }
 
-export async function loadTenantDetailScreen(db: Db, tenantId: string): Promise<TenantDetailScreen | null> {
+export async function loadTenantDetailScreen(
+  db: Db,
+  tenantId: string,
+): Promise<TenantDetailScreen | null> {
   const [tenantRows, membershipRows, deviceRows, subscriptionRows, auditRows] = await db.batch([
     db.select().from(tenants).where(eq(tenants.id, tenantId)),
     db

@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import type { Tenant, TenantDetailScreen, TenantsScreen } from "@cloudbox/contracts";
 import { beforeAll, describe, expect, it } from "vitest";
 import app from "../src/index";
-import { countingD1 } from "./counting-d1";
 import { type SignedIn, signInAs } from "./auth-fixtures";
+import { countingD1 } from "./counting-d1";
 
 let admin: SignedIn;
 let reader: SignedIn;
@@ -77,7 +77,9 @@ describe("POST /api/v1/tenants", () => {
   });
 
   it("appears in the screens/tenants loader in at most three D1 round trips", async () => {
-    const created = (await (await createTenant(admin, { displayName: "Loader Org" })).json()) as Tenant;
+    const created = (await (
+      await createTenant(admin, { displayName: "Loader Org" })
+    ).json()) as Tenant;
 
     const counted = countingD1(env.DB);
     const response = await app.request(

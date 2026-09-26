@@ -14,9 +14,9 @@ import { zValidator } from "@hono/zod-validator";
 import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { audit } from "../../audit";
 import { authFor } from "../../auth";
 import { guard } from "../../auth/middleware";
-import { audit } from "../../audit";
 import { getTenantStanding } from "../../authz/permissions";
 import { createDb } from "../../db/client";
 import { tenantMemberships, tenants } from "../../db/schema";
@@ -70,7 +70,9 @@ router.post(
     const before = await db
       .select()
       .from(tenantMemberships)
-      .where(and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.userId, authUser.id)))
+      .where(
+        and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.userId, authUser.id)),
+      )
       .get();
 
     if (before?.status === "active") {
@@ -89,7 +91,11 @@ router.post(
     };
 
     const mutation = before
-      ? db.update(tenantMemberships).set(values).where(eq(tenantMemberships.id, membershipId)).returning()
+      ? db
+          .update(tenantMemberships)
+          .set(values)
+          .where(eq(tenantMemberships.id, membershipId))
+          .returning()
       : db
           .insert(tenantMemberships)
           .values({ id: membershipId, tenantId, userId: authUser.id, createdAt: now, ...values })
@@ -172,7 +178,11 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
   if (before.status === "revoked") return c.json(before);
 
   const [[updated]] = await db.batch([
-    db.update(tenantMemberships).set({ status: "revoked" }).where(eq(tenantMemberships.id, membershipId)).returning(),
+    db
+      .update(tenantMemberships)
+      .set({ status: "revoked" })
+      .where(eq(tenantMemberships.id, membershipId))
+      .returning(),
     audit(db, {
       eventType: "USER_REMOVED",
       entityType: "membership",

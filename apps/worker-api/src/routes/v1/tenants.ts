@@ -6,11 +6,11 @@ import { zValidator } from "@hono/zod-validator";
 import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
+import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
 import { devices, subscriptions, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
-import { requirePermission } from "../../authz/permissions";
 
 const router = new Hono<AppEnv>();
 
@@ -102,9 +102,12 @@ router.patch(
     const patch: Partial<typeof tenants.$inferInsert> = { updatedAt: now };
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.legalName !== undefined) patch.legalName = input.legalName;
-    if (input.primaryContactEmail !== undefined) patch.primaryContactEmail = input.primaryContactEmail;
-    if (input.supportContactEmail !== undefined) patch.supportContactEmail = input.supportContactEmail;
-    if (input.billingContactEmail !== undefined) patch.billingContactEmail = input.billingContactEmail;
+    if (input.primaryContactEmail !== undefined)
+      patch.primaryContactEmail = input.primaryContactEmail;
+    if (input.supportContactEmail !== undefined)
+      patch.supportContactEmail = input.supportContactEmail;
+    if (input.billingContactEmail !== undefined)
+      patch.billingContactEmail = input.billingContactEmail;
     if (input.timezone !== undefined) patch.timezone = input.timezone;
     if (input.renewalWarningDays !== undefined) patch.renewalWarningDays = input.renewalWarningDays;
     if (input.planCode !== undefined) patch.planCode = input.planCode;

@@ -9,7 +9,10 @@ let staffReadOnly: SignedIn;
 
 beforeAll(async () => {
   staffAdmin = await signInAs(env, { email: "mem-staff-admin@example.test", staffRole: "admin" });
-  staffReadOnly = await signInAs(env, { email: "mem-staff-reader@example.test", staffRole: "read_only" });
+  staffReadOnly = await signInAs(env, {
+    email: "mem-staff-reader@example.test",
+    staffRole: "read_only",
+  });
 });
 
 const call = (path: string, who: SignedIn | null, init: RequestInit = {}) =>
@@ -116,8 +119,12 @@ describe("POST /api/v1/tenants/:tenantId/memberships", () => {
     const tenant = await seedTenant("Guarded Org");
     const path = `/api/v1/tenants/${tenant.id}/memberships`;
     expect(
-      (await call(path, null, { method: "POST", body: JSON.stringify({ email: "a@b.test", standing: "user" }) }))
-        .status,
+      (
+        await call(path, null, {
+          method: "POST",
+          body: JSON.stringify({ email: "a@b.test", standing: "user" }),
+        })
+      ).status,
     ).toBe(401);
     const denied = await call(path, staffReadOnly, {
       method: "POST",
@@ -169,10 +176,14 @@ describe("PATCH /api/v1/tenants/:tenantId/memberships/:id", () => {
       })
     ).json()) as Membership;
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/memberships/${invited.id}`, staffAdmin, {
-      method: "PATCH",
-      body: JSON.stringify({ standing: "admin" }),
-    });
+    const response = await call(
+      `/api/v1/tenants/${tenant.id}/memberships/${invited.id}`,
+      staffAdmin,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ standing: "admin" }),
+      },
+    );
     expect(response.status).toBe(200);
     expect(((await response.json()) as Membership).standing).toBe("admin");
 
@@ -192,10 +203,14 @@ describe("PATCH /api/v1/tenants/:tenantId/memberships/:id", () => {
       })
     ).json()) as Membership;
 
-    const response = await call(`/api/v1/tenants/${tenantB.id}/memberships/${invited.id}`, staffAdmin, {
-      method: "PATCH",
-      body: JSON.stringify({ standing: "admin" }),
-    });
+    const response = await call(
+      `/api/v1/tenants/${tenantB.id}/memberships/${invited.id}`,
+      staffAdmin,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ standing: "admin" }),
+      },
+    );
     expect(response.status).toBe(404);
   });
 });
@@ -210,9 +225,13 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
       })
     ).json()) as Membership;
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/memberships/${invited.id}`, staffAdmin, {
-      method: "DELETE",
-    });
+    const response = await call(
+      `/api/v1/tenants/${tenant.id}/memberships/${invited.id}`,
+      staffAdmin,
+      {
+        method: "DELETE",
+      },
+    );
     expect(response.status).toBe(200);
     expect(((await response.json()) as Membership).status).toBe("revoked");
 
