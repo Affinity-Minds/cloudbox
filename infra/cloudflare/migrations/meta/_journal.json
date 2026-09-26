@@ -8,6 +8,20 @@
       "when": 1790447088751,
       "tag": "0003_identity_tenancy_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790464480129,
+      "tag": "0009_plans_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790464514897,
+      "tag": "0010_self_onboarding",
+      "breakpoints": true
     }
   ]
 }
