@@ -272,19 +272,25 @@ describe("email OTP sign-in", () => {
     expect((await verifyCode("resend@example.test", first, box.env, nextIp())).status).toBe(200);
   });
 
-  it("three wrong codes burn the code, even the right one then fails", async () => {
+  it("five wrong codes from clients that requested it burn the code; foreign guesses do not (T-2)", async () => {
     await known("attempts@example.test");
     const box = withMailbox();
-    await sendCode("attempts@example.test", box.env, nextIp());
+    // Five requesting clients (the per-IP sign-in limit is 3 / 60 s, so one guess each).
+    const requesters = Array.from({ length: 5 }, () => nextIp());
+    for (const ip of requesters) await sendCode("attempts@example.test", box.env, ip);
     const good = box.codeFor("attempts@example.test");
     const wrong = good === "000000" ? "111111" : "000000";
-    // Separate IPs so the per-IP sign-in limit (3 / 10 s) is not what stops us.
-    for (let i = 0; i < 3; i += 1) {
+    // Guesses from clients that never asked for the code do not spend its attempts…
+    for (let i = 0; i < 6; i += 1) {
       expect((await verifyCode("attempts@example.test", wrong, box.env, nextIp())).status).toBe(
         400,
       );
     }
-    const locked = await verifyCode("attempts@example.test", good, box.env, nextIp());
+    // …the requesters' own wrong entries do, five of them burn it.
+    for (const ip of requesters) {
+      expect((await verifyCode("attempts@example.test", wrong, box.env, ip)).status).toBe(400);
+    }
+    const locked = await verifyCode("attempts@example.test", good, box.env, requesters[0] ?? "");
     expect(locked.status).toBe(403);
   });
 

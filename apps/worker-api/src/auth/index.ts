@@ -6,6 +6,7 @@ import { Email, OtpSendRequest } from "@cloudbox/contracts";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getIP, getSessionFromCtx } from "better-auth/api";
+import { constantTimeEqual, symmetricDecrypt } from "better-auth/crypto";
 import { emailOTP, twoFactor } from "better-auth/plugins";
 import { and, count, eq, gt, sql } from "drizzle-orm";
 import type { Context } from "hono";
@@ -14,6 +15,7 @@ import { createDb, type Db } from "../db/client";
 import * as schema from "../db/schema";
 import { sendOtpEmail } from "../email";
 import type { AppEnv, Bindings } from "../env";
+import { accountBudgetKey, OTP_ACCOUNT_BUDGET } from "./challenge";
 import {
   bumpCounter,
   COUNTER_HORIZON_SECONDS,
@@ -167,6 +169,11 @@ const INVALID_EMAIL_OR_PASSWORD = {
  */
 export const PASSWORD_FAILURE_CAP = { windowSeconds: 15 * 60, max: 5 };
 
+/** Attempts per emailed code, spendable only by clients that requested it (review T-2). */
+export const OTP_ATTEMPTS_PER_CODE = 5;
+/** How long a client that requested a code for an address counts as its requester (T-2). */
+const OTP_REQUESTER_SECONDS = 30 * 60;
+
 /** A sign-in authenticator code is refused if already accepted within this time (review S-3). */
 const TOTP_REUSE_WINDOW_SECONDS = 120;
 
@@ -281,6 +288,24 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
   let actor: Actor | null = null;
   // True while the disable pre-check runs its nested authenticator verification.
   let disabling = false;
+
+  /**
+   * A failed customer code check: counts against the client (S-6) and the account budget (T-1),
+   * and is audited per attempt for an existing customer, once per window otherwise (M-3).
+   */
+  async function recordOtpFailure(email: string, reason: string, client: string) {
+    if (email !== "invalid") {
+      await bumpCounter(
+        db,
+        await counterKey("otp-fail", email, client),
+        OTP_FAILURE_CAP.windowSeconds,
+      );
+      await bumpCounter(db, await accountBudgetKey(email), OTP_ACCOUNT_BUDGET.windowSeconds);
+    }
+    const account = email === "invalid" ? null : await accountByEmail(db, email);
+    if ((!account || account.staffRole) && (await recentFailure(db, email, "email_otp"))) return;
+    await auditLoginFailure(db, email, { method: "email_otp", reason, client }, correlationId);
+  }
   return {
     baseURL: request.baseURL,
     basePath: "/api/auth",
@@ -308,7 +333,9 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
       customRules: { "/cloudbox-counter-horizon": { window: COUNTER_HORIZON_SECONDS, max: 1 } },
     },
     advanced: {
-      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
+      // A client is an IPv4 address or an IPv6 /48 (review T-1): a routed /48 is one party, not
+      // 65,536 /64s. Every per-IP limit and every per-client counter uses this key.
+      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"], ipv6Subnet: 48 },
       // Session + user in one D1 round trip (the relations are in db/schema.ts).
       database: { joins: true },
       // Send the email after answering, so a known address does not answer measurably slower than
@@ -348,6 +375,12 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
               await ctx.context.runInBackgroundOrAwait(record);
               return ctx.json({ success: true });
             }
+            // This client asked for the code, so its guesses may spend the code's attempts (T-2).
+            await bumpCounter(
+              db,
+              await counterKey("otp-requested", email, client),
+              OTP_REQUESTER_SECONDS,
+            );
             return;
           }
           case SIGN_IN_OTP_PATH: {
@@ -362,16 +395,32 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
             ) {
               throw APIError.from("BAD_REQUEST", INVALID_OTP);
             }
-            // A staff address never holds a code; refuse it exactly like a wrong code.
-            if ((await accountByEmail(db, email.data))?.staffRole) {
-              await bumpCounter(db, failures, OTP_FAILURE_CAP.windowSeconds);
-              await auditLoginFailure(
-                db,
-                email.data,
-                { method: "email_otp", reason: "INVALID_OTP", client },
-                correlationId,
-              );
+            const refuse = async (): Promise<never> => {
+              await recordOtpFailure(email.data, "INVALID_OTP", client);
               throw APIError.from("BAD_REQUEST", INVALID_OTP);
+            };
+            // A staff address never holds a code; refuse it exactly like a wrong code.
+            if ((await accountByEmail(db, email.data))?.staffRole) return refuse();
+            // A client that never requested a code for this address (T-2): check its guess without
+            // touching the code's attempt count, so other clients cannot burn the owner's code.
+            // Better Auth's own storage and primitives: its encryption, its constant-time compare.
+            const requested = await counterKey("otp-requested", email.data, client);
+            if ((await readCounter(db, requested, OTP_REQUESTER_SECONDS)) === 0) {
+              const otp = (ctx.body as { otp?: unknown } | undefined)?.otp;
+              const stored = await ctx.context.internalAdapter.findVerificationValue(
+                `sign-in-otp-${email.data}`,
+              );
+              const storedCode = stored?.value.slice(0, stored.value.lastIndexOf(":"));
+              const matches =
+                typeof otp === "string" &&
+                stored &&
+                storedCode &&
+                stored.expiresAt > new Date() &&
+                constantTimeEqual(
+                  await symmetricDecrypt({ key: ctx.context.secretConfig, data: storedCode }),
+                  otp,
+                );
+              if (!matches) return refuse();
             }
             return;
           }
@@ -508,30 +557,13 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
               );
               return;
             }
-            const body = ctx.body as { email?: unknown } | undefined;
-            const parsedEmail = Email.safeParse(body?.email);
-            const email = parsedEmail.success ? parsedEmail.data : "invalid";
-            if (parsedEmail.success) {
-              await bumpCounter(
-                db,
-                await counterKey("otp-fail", email, client),
-                OTP_FAILURE_CAP.windowSeconds,
-              );
-            }
-            // An address with no user row can only ever fail; record it once per window, not per
-            // attempt, so anonymous callers cannot grow the append-only log without bound (M-3).
-            if (
-              (!parsedEmail.success ||
-                !(await ctx.context.internalAdapter.findUserByEmail(email))) &&
-              (await recentFailure(db, email, "email_otp"))
-            ) {
-              return;
-            }
-            await auditLoginFailure(
-              db,
-              email,
-              { method: "email_otp", reason: errorCode(returned), client },
-              correlationId,
+            const parsedEmail = Email.safeParse(
+              (ctx.body as { email?: unknown } | undefined)?.email,
+            );
+            await recordOtpFailure(
+              parsedEmail.success ? parsedEmail.data : "invalid",
+              errorCode(returned),
+              client,
             );
             return;
           }
@@ -660,7 +692,9 @@ export function authOptions(env: Bindings, request: AuthRequestContext = {}, sel
         // Never create a user at sign-in; rows come only from admin actions (src/auth/users.ts).
         disableSignUp: true,
         expiresIn: 5 * 60,
-        allowedAttempts: 3,
+        // Only clients that requested the code can spend these (T-2): anyone else's wrong guess is
+        // checked without consuming an attempt (before hook).
+        allowedAttempts: OTP_ATTEMPTS_PER_CODE,
         // A resend re-sends the code that is still valid (extending its expiry, keeping its attempt
         // count) instead of replacing it, so nobody else's send request can invalidate the code in
         // the owner's inbox (review H-1). Reuse needs a recoverable form: Better Auth's encryption

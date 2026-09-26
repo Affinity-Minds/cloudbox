@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeAuthError } from "@/api/auth";
+import { challengeSiteKey, describeAuthError } from "@/api/auth";
 import { ApiError } from "@/api/client";
 import { safeRedirect } from "./session";
 
@@ -24,5 +24,15 @@ describe("describeAuthError", () => {
     expect(describeAuthError(new ApiError(400, "otp_expired"))).toMatch(/expired/);
     expect(describeAuthError(new ApiError(403, "too_many_attempts"))).toMatch(/new one/);
     expect(describeAuthError(new ApiError(429, "http_429", { retryAfter: 42 }))).toMatch(/42 s/);
+  });
+});
+
+describe("Turnstile step-up (review T-1)", () => {
+  it("recognises the challenge answer and the cooldown fallback", () => {
+    const challenge = new ApiError(403, "challenge_required", { siteKey: "0x4AAA" });
+    expect(challengeSiteKey(challenge)).toBe("0x4AAA");
+    expect(challengeSiteKey(new ApiError(403, "challenge_required", { siteKey: null }))).toBeNull();
+    expect(challengeSiteKey(new ApiError(400, "invalid_otp"))).toBeNull();
+    expect(describeAuthError(new ApiError(429, "account_cooldown"))).toMatch(/15 minutes/);
   });
 });
