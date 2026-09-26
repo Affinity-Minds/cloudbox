@@ -38,7 +38,6 @@ jobs:
         shell: bash
         env:
           TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
-        env:
           BOOTSTRAP_SUPER_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_SUPER_ADMIN_EMAIL }}
         run: |
           node - <<'NODE'
