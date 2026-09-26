@@ -126,3 +126,55 @@ Recommended before merge: P2-2 and P2-5 (Medium). The rest can follow.
 - **P2-5 mail-bomb economics** (Turnstile solver cost) and the real siteverify behaviour are outside the Workers pool.
 - **Timing side channels on Connect:** not measured. The status and body oracles above are already enough to make the point.
 - **P2-1 at production concurrency:** the reproduction runs three concurrent in-process activations against local D1. Production D1 has more latency between the steps, which makes the race window wider, not narrower.
+
+---
+
+# Phase 2 verdict
+
+Reviewed commit: `origin/phase-2/devices` @ `694b495`, which includes WT-14's fix commit `8c388e1` and WT-13's plan designer. It is merged into `review/phase-1-security`.
+New test file: `apps/worker-api/test/review/phase-2-verdict.test.ts`. None of the earlier review tests were modified (`git diff af7a749..HEAD -- test/review` is empty).
+
+```
+pnpm --filter @cloudbox/worker-api test
+Test Files  1 failed | 32 passed (33)
+Tests       1 failed | 606 passed (607)
+```
+Every earlier review test now passes, including P2-1…P2-4 and W-1. The single failure is V2-4's timezone case (Low, below).
+
+## Fix verification
+| Finding | Verdict | Evidence |
+|---|---|---|
+| **P2-1** `max_devices` race | **Closed.** The device-limit count is now inside a single `INSERT … SELECT … WHERE (count of other live, enrolled devices on the tenant) < max_devices`, `meta.changes` is checked, and the audit is written only after a successful insert. | V2-1: 8 servers activating at once on a 1-device plan gives exactly 1 `licensed` and 7 `device_limit_reached`. On a 3-device plan, exactly 3 and 5. The count of distinct licensed devices and the `LICENSE_ISSUED` rows both equal `max_devices`. |
+| **P2-2** Connect oracle | **Closed** (status and body). Our per-client limit (3 / 60 s) is checked before the membership lookup on both paths. Member-path failures, including Better Auth's own 429, are rewritten to the shared `CONNECT_INVALID`. A member's send answers `{success:true}` whatever Better Auth returned. | V2-2, for send-code and for verify: 5 calls from one client after first draining Better Auth's per-IP buckets on that client. Member and stranger get identical `status + body` byte strings, across the 429 boundary. |
+| **P2-5** start-path mail bombing | **Closed.** New addresses get at most 10 code emails per 24 h across all clients. Above that, the same 200 and no mail. `AUTH_START_CEILING` is audited once per day. | V2-3: 12 sends from 12 clients with valid tokens deliver ≤ 10 mails and write exactly 1 ceiling row. |
+| **P2-3** testing keys | Closed: accepted only when `ENVIRONMENT === "development"`. | P2-3 test passes |
+| **P2-4** grants for inactive tenants | Closed: grants only for `provisioning`, `active` and `trial`; any other status gets 403 `tenant_not_active`. | P2-4 test passes |
+| **P2-6** tenant sprawl | Closed: at most 5 self-created tenants without a plan per customer. The sequential-code leak remains and is accepted. | V2-4: the 6th creation gets 409 |
+| **P2-8** typed keys | Closed: the key is canonicalised (case, spaces and dashes) before the pattern check and the hash. | V2-4: a lower-case, space-separated key redeems (201) |
+| **W-1** (Phase 1) `OPS_BASE_PATH` | Closed: `/api`, `/assets`, `/login`, `/portal` and `/start` are reserved. | fifth-pass V-2 passes |
+| **P2-7** Drizzle metadata | **Still open (Low).** `drizzle-kit generate` still emits a `subscriptions` rebuild (from 0010) and now also a `plans` rebuild (from 0009, whose CHECKs are triggers in SQL but `check()` in `db/schema.ts`). The SQL migrations are correct; only `meta/` lags, so the next `db:generate` would emit a spurious migration. Probe files deleted, nothing committed. | `drizzle-kit generate` probe |
+
+## WT-13 plan routes: spot check (holds)
+V2-5 checks the following:
+- A `read_only` staff member gets 403 on `POST /plans`.
+- `termDays` 0 and 3651 get 400; the contracts allow 1…3650, and the 0009 triggers repeat that range in the database.
+- `PATCH` cannot change `code`: the row keeps its code, because the field is not in `UpdatePlanRequest` and the `UPDATE` never sets it.
+- After retiring, `POST /tenants/:id/subscriptions` on that plan gets 409 `plan_retired` (tenant create and PATCH have the same check).
+- A tenant that already had a subscription on the retired plan still activates and gets its licence.
+- Listing retired plans (`GET /plans?include=retired`) additionally needs `subscription.manage`.
+
+Note: a plan's `maxDevices` is read live through the join in `issueForDevice`. Lowering it in the plan designer does not revoke existing licences, but it blocks new ones for every tenant on that plan. This looks intended; the plan designer UI should say so.
+
+## New finding
+- **V2-L1 (Low): self-service tenant timezone is not validated.**
+  - **Where:** `TimeZone` in `packages/contracts/src/onboarding.ts` is only a trimmed string of 1–64 characters, used by `POST /onboarding/tenants` and `/onboarding/redeem`. The staff routes, by contrast, check against `Intl.supportedValuesOf("timeZone")` (`routes/v1/tenants.ts:42-51`).
+  - **Impact:** a customer can store `Not/AZone`. That is a data-integrity problem, and it could break any later code that formats dates with the tenant's timezone.
+  - **Fix:** reuse `isValidTimezone` in the contract or in the handler.
+  - **Test:** `V2-4 (Low) a self-created tenant with a non-IANA timezone is refused` fails (201).
+- **Not measured:** response timing on Connect. The member path does Better Auth work and the stranger path does two counter writes. Status and body now match byte for byte. For timing parity, pad both paths to a fixed floor or move the member work into `waitUntil`. Not blocking.
+
+## Verdict
+**Phase 2 may merge to main. No Critical or High findings are open.** P2-1, the only blocker, is closed and holds at 8-way concurrency on both 1- and 3-device plans. Follow-ups, none blocking:
+- V2-L1 timezone validation.
+- Regenerating the P2-7 Drizzle metadata (still lagging, now for 0009 as well).
+- Connect timing parity.
