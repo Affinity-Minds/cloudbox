@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { Device } from "./devices";
+import { Membership } from "./memberships";
+import { Subscription } from "./subscriptions";
+import { Tenant } from "./tenants";
 
 /** `GET /api/v1/screens/overview`: real counts only, zero when empty. */
 export const OverviewScreen = z.object({
@@ -32,3 +36,14 @@ export const AuditScreen = z.object({
   nextCursor: z.string().nullable(),
 });
 export type AuditScreen = z.infer<typeof AuditScreen>;
+
+/** `GET /api/v1/screens/tenants/:tenantId`: everything the detail page's first paint needs. */
+export const TenantDetailScreen = z.object({
+  tenant: Tenant,
+  memberships: z.array(Membership),
+  devices: z.array(Device),
+  subscriptions: z.array(Subscription),
+  /** Last 20 audit events for this entity, newest first. */
+  auditEvents: z.array(AuditEntry),
+});
+export type TenantDetailScreen = z.infer<typeof TenantDetailScreen>;

@@ -6,12 +6,14 @@ import audit from "./audit";
 import fleet from "./fleet";
 import overview from "./overview";
 import subscriptions from "./subscriptions";
+import tenants from "./tenants";
 
 const screens = new Hono<AppEnv>();
 
 screens.route("/overview", overview);
 screens.route("/audit", audit);
 screens.route("/fleet", fleet); // WT-3
+screens.route("/tenants", tenants); // WT-2
 screens.route("/subscriptions", subscriptions); // WT-5
 
 export default screens;

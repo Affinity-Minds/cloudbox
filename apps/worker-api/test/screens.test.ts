@@ -7,13 +7,24 @@ import app from "../src/index";
 import { type SignedIn, signInAs } from "./auth-fixtures";
 import { countingD1 } from "./fixtures";
 
-/** Session lookup (Better Auth) + one staff-grants query, per request. Measured below. */
+/**
+ * Session lookup (Better Auth) + one staff-grants query: the generic `guard()` overhead every
+ * permission-gated route pays before its own query. Measured by hitting a guarded route with a
+ * non-staff session, which is denied (403) before the route's own query ever runs — isolating
+ * this from `GET /api/v1/auth/session`'s own extra active-tenant lookup (WT-2).
+ */
 let AUTH_ROUND_TRIPS = 0;
 let staff: SignedIn;
 beforeAll(async () => {
   staff = await signInAs(env, { email: "screens-reader@example.test", staffRole: "read_only" });
+  const nonStaff = await signInAs(env, { email: "screens-auth-baseline@example.test" });
   const counted = countingD1(env.DB);
-  await app.request("/api/v1/auth/session", { headers: staff.headers }, { ...env, DB: counted });
+  const denied = await app.request(
+    "/api/v1/screens/audit",
+    { headers: nonStaff.headers },
+    { ...env, DB: counted },
+  );
+  expect(denied.status).toBe(403);
   AUTH_ROUND_TRIPS = counted.roundTrips;
   expect(AUTH_ROUND_TRIPS).toBeLessThanOrEqual(2);
 });

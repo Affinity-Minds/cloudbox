@@ -25,9 +25,6 @@ v1.get("/", (c) => c.json({ name: "CloudBox API", version: "v1", status: "founda
 // staff, so a stub filled in later without its own guard cannot ship open. Exact paths, not
 // wildcards; the owner deletes its line when the real, guarded router lands.
 for (const stub of [
-  "/tenants", // WT-2
-  "/tenants/:tenantId/memberships", // WT-2
-  "/me", // WT-2
   "/audit", // WT-0
 ]) {
   v1.use(stub, requireStaff());
