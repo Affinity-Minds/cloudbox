@@ -17,28 +17,22 @@ import { nowIso } from "../../ids";
 const activeTenantKey = (userId: string) => `active_tenant:${userId}`;
 
 /**
- * The signed-in user's active tenant, or null. Re-validates the stored id against a live active
- * membership on every read (never trust the settings row alone: the membership may have since
- * been revoked). Used by `GET /api/v1/auth/session` (WT-1) to fill `activeTenantId`.
+ * The signed-in user's active tenant, or null. One D1 round trip: the settings row and its
+ * live-membership re-validation (never trust the settings row alone: the membership may have
+ * since been revoked) are joined in a single query. Used by `GET /api/v1/auth/session` (WT-1) to
+ * fill `activeTenantId`.
  */
 export async function getActiveTenantId(db: Db, userId: string): Promise<string | null> {
   const row = await db.get<{ tenantId: string | null }>(sql`
-    select json_extract(value_json, '$.tenantId') as tenantId from settings where key = ${activeTenantKey(userId)}
+    select tm.tenant_id as tenantId
+    from settings s
+    join tenant_memberships tm
+      on tm.tenant_id = json_extract(s.value_json, '$.tenantId')
+      and tm.user_id = ${userId}
+      and tm.status = 'active'
+    where s.key = ${activeTenantKey(userId)}
   `);
-  if (!row?.tenantId) return null;
-
-  const membership = await db
-    .select({ id: tenantMemberships.id })
-    .from(tenantMemberships)
-    .where(
-      and(
-        eq(tenantMemberships.tenantId, row.tenantId),
-        eq(tenantMemberships.userId, userId),
-        eq(tenantMemberships.status, "active"),
-      ),
-    )
-    .get();
-  return membership ? row.tenantId : null;
+  return row?.tenantId ?? null;
 }
 
 const router = new Hono<AppEnv>();

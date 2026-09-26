@@ -16,21 +16,18 @@ const router = new Hono<AppEnv>();
 
 /**
  * Atomically allocates the next `CBX-00001`-style code from the `settings.tenants.next_code`
- * counter row in one D1 round trip: a single INSERT-or-UPDATE-RETURNING statement, so two
- * concurrent creates can never be handed the same number (agent-notes fast-data-hydration —
- * "no read-modify-write through D1").
+ * counter row (migration 0003 seeds it to the bare JSON scalar `'1'`) in one D1 round trip: a
+ * single INSERT-or-UPDATE-RETURNING statement, so two concurrent creates can never be handed the
+ * same number (agent-notes fast-data-hydration — "no read-modify-write through D1").
  */
 async function allocateNextTenantCode(db: Db, now: string): Promise<string> {
   const row = await db.get<{ allocated: number }>(sql`
     insert into settings (key, value_json, updated_at)
-    values ('tenants.next_code', json_object('next', 2), ${now})
+    values ('tenants.next_code', '1', ${now})
     on conflict(key) do update set
-      value_json = json_object(
-        'next',
-        cast(json_extract(settings.value_json, '$.next') as integer) + 1
-      ),
+      value_json = cast((cast(settings.value_json as integer) + 1) as text),
       updated_at = ${now}
-    returning cast(json_extract(value_json, '$.next') as integer) - 1 as allocated
+    returning cast(value_json as integer) - 1 as allocated
   `);
   const allocated = row?.allocated ?? 1;
   return `CBX-${String(allocated).padStart(5, "0")}`;
