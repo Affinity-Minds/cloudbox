@@ -67,8 +67,6 @@ describe("CloudBox API foundation", () => {
 
   it("mounts every module stub under /api/v1", async () => {
     const paths = {
-      auth: "/api/v1/auth",
-      staff: "/api/v1/staff",
       tenants: "/api/v1/tenants",
       memberships: "/api/v1/tenants/ten_x/memberships",
       me: "/api/v1/me",

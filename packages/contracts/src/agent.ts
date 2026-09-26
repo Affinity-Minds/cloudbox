@@ -30,6 +30,8 @@ const State = z.string().min(1).max(64);
  * Normalised agent health document (master spec §29). Keys are snake_case on the wire because
  * the Windows agent serialises them that way. Sections the agent cannot report yet are omitted.
  */
+// Unknown values are null (the Windows Agent sends null for numbers/booleans it cannot determine yet;
+// unknown *states* are the string "unknown"). Consumers render null as "unknown", never as 0.
 export const AgentHealth = z.object({
   device: z.string(),
   agent: z.object({ version: z.string(), healthy: z.boolean() }),
@@ -37,17 +39,17 @@ export const AgentHealth = z.object({
     .object({ state: State, days_remaining: z.number().int().nullable().optional() })
     .optional(),
   network: z.object({ state: State }).optional(),
-  rdp: z.object({ state: State, listener: z.boolean() }).optional(),
+  rdp: z.object({ state: State, listener: z.boolean().nullable() }).optional(),
   users: z
     .object({
-      configured: z.number().int().min(0),
-      limit: z.number().int().min(0),
-      active_sessions: z.number().int().min(0),
+      configured: z.number().int().min(0).nullable(),
+      limit: z.number().int().min(0).nullable(),
+      active_sessions: z.number().int().min(0).nullable(),
     })
     .optional(),
   backup: z.object({ state: State, last_success: z.string().nullable().optional() }).optional(),
-  storage: z.object({ free_bytes: z.number().int().min(0) }).optional(),
-  updates: z.object({ state: State, reboot_required: z.boolean() }).optional(),
+  storage: z.object({ free_bytes: z.number().int().min(0).nullable() }).optional(),
+  updates: z.object({ state: State, reboot_required: z.boolean().nullable() }).optional(),
   security: z.object({ device_key: KeyProtection, tamper: State }).optional(),
 });
 export type AgentHealth = z.infer<typeof AgentHealth>;

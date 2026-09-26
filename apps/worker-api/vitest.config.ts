@@ -16,7 +16,11 @@ export default defineConfig(async () => {
           // The pool's workerd is older than wrangler's; pin a date it supports (agent-notes #15).
           compatibilityDate: "2026-08-01",
           d1Databases: ["DB", "UPGRADE_DB"],
-          bindings: { TEST_MIGRATIONS: migrations },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            // Test-only secret (never deployed); Better Auth refuses to start without one.
+            BETTER_AUTH_SECRET: "test-only-better-auth-secret-0123456789abcdef",
+          },
         },
       }),
     ],
