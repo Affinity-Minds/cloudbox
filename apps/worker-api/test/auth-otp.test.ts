@@ -2,7 +2,8 @@ import { env } from "cloudflare:test";
 import type { SessionResponse } from "@cloudbox/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { audit } from "../src/audit";
-import { assertAuthConfig, createAuth, HONEYPOT_HEADER } from "../src/auth";
+import { assertAuthConfig, createAuth, HONEYPOT_HEADER, OTP_FAILURE_CAP } from "../src/auth";
+import { bumpCounter, counterKey } from "../src/auth/counters";
 import { ensureUserByEmail } from "../src/auth/users";
 import { createDb } from "../src/db/client";
 import { sendOtpEmail } from "../src/email";
@@ -192,7 +193,7 @@ describe("email OTP sign-in", () => {
     expect(ghost.headers.get("set-cookie")).toBeNull();
     expect(await countRows("user", "email", "ghost@example.test")).toBe(0);
     expect(await auditRows("AUTH_LOGIN_FAILED", "ghost@example.test")).toEqual([
-      { method: "email_otp", reason: "INVALID_OTP" },
+      { method: "email_otp", reason: "INVALID_OTP", client: expect.any(String) },
     ]);
   });
 
@@ -225,7 +226,9 @@ describe("email OTP sign-in", () => {
     expect(response.status).toBe(400);
     expect(response.headers.get("set-cookie")).toBeNull();
     const failures = await auditRows("AUTH_LOGIN_FAILED", "invalid@example.test");
-    expect(failures).toEqual([{ method: "email_otp", reason: "INVALID_OTP" }]);
+    expect(failures).toEqual([
+      { method: "email_otp", reason: "INVALID_OTP", client: expect.any(String) },
+    ]);
     expect(JSON.stringify(failures)).not.toContain(wrong);
   });
 
@@ -253,7 +256,7 @@ describe("email OTP sign-in", () => {
     const response = await verifyCode("expired@example.test", code, box.env, ip);
     expect(response.status).toBe(400);
     expect(await auditRows("AUTH_LOGIN_FAILED", "expired@example.test")).toEqual([
-      { method: "email_otp", reason: "OTP_EXPIRED" },
+      { method: "email_otp", reason: "OTP_EXPIRED", client: expect.any(String) },
     ]);
   });
 
@@ -324,21 +327,31 @@ describe("email OTP sign-in", () => {
     expect(verified.status).toBe(200);
   });
 
-  it("the per-email ceiling answers the same 200 and sends nothing, known or unknown", async () => {
+  it("S-2: no per-email ceiling: after many sends from other clients the owner still gets a code", async () => {
     await known("bombed@example.test");
-    for (let i = 0; i < 30; i += 1) {
-      await seedSend("bombed@example.test", `10.1.0.${i}`);
-      await seedSend("bombed-unknown@example.test", `10.1.0.${i}`);
-    }
+    for (let i = 0; i < 40; i += 1) await seedSend("bombed@example.test", `10.1.0.${i}`);
     const box = withMailbox();
-    const ip = nextIp();
-    const knownResponse = await sendCode("bombed@example.test", box.env, ip);
-    const unknownResponse = await sendCode("bombed-unknown@example.test", box.env, ip);
-    expect(knownResponse.status).toBe(200);
-    expect(await knownResponse.text()).toBe(await unknownResponse.text());
-    expect(box.sent).toHaveLength(0);
-    // Suppressed requests write nothing.
-    expect(await auditRows("AUTH_OTP_SENT", "bombed@example.test")).toHaveLength(30);
+    const response = await sendCode("bombed@example.test", box.env, nextIp());
+    expect(response.status).toBe(200);
+    expect(box.sent.map((m) => m.to)).toEqual(["bombed@example.test"]);
+  });
+
+  it("S-6: ten failed codes from one client for an address fail every further code from it", async () => {
+    await known("guessed@example.test");
+    const box = withMailbox();
+    const guesser = nextIp();
+    const db = createDb(env.DB);
+    const key = await counterKey("otp-fail", "guessed@example.test", guesser);
+    for (let i = 0; i < 10; i += 1) await bumpCounter(db, key, OTP_FAILURE_CAP.windowSeconds);
+
+    await sendCode("guessed@example.test", box.env, nextIp());
+    const code = box.codeFor("guessed@example.test");
+    // From the guessing client even the right code fails like a wrong one, and is not consumed…
+    const blocked = await verifyCode("guessed@example.test", code, box.env, guesser);
+    expect(blocked.status).toBe(400);
+    await expect(blocked.json()).resolves.toMatchObject({ code: "INVALID_OTP" });
+    // …so the owner, elsewhere, still signs in with it.
+    expect((await verifyCode("guessed@example.test", code, box.env, nextIp())).status).toBe(200);
   });
 
   it("M-3: anonymous callers cannot write audit rows without bound", async () => {
