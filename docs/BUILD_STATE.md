@@ -5,7 +5,7 @@ Phase 1 — Identity, tenancy and devices (integration branch `phase-1/identity`
 Foundation commit (WT-0) — shared files for the Phase 1–3 fan-out. Contract: `docs/handoffs/foundation.md`.
 
 # Status
-All Phase 1 slices integrated on `phase-1/identity` (13186f4): 469 worker tests, 16 crypto tests, 5 UI tests green; WT-8 fifth pass running; merge to `main` next, then live verification and the owner's first sign-in at `/ops/login`.
+All Phase 1 slices integrated on `phase-1/identity` (13186f4): 469 worker tests, 16 crypto tests, 5 UI tests green; WT-8 fifth pass verdict: merge approved (no Critical/High; Lows W-1, W-2 as follow-ups); merge to `main` next, then live verification and the owner's first sign-in at `/ops/login`.
 
 # Demo path
 1. Fresh clone, checkout `phase-1/identity`.
