@@ -108,7 +108,6 @@ const releaseInput = z.object({
   sha: z.string().min(1).max(128),
 });
 
-
 /** Length-hiding constant-time comparison for short secrets (compares SHA-256 digests). */
 async function constantTimeEqual(a: string, b: string): Promise<boolean> {
   const enc = new TextEncoder();
