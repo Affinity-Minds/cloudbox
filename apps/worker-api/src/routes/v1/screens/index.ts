@@ -3,11 +3,13 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../../env";
 import audit from "./audit";
+import fleet from "./fleet";
 import overview from "./overview";
 
 const screens = new Hono<AppEnv>();
 
 screens.route("/overview", overview);
 screens.route("/audit", audit);
+screens.route("/fleet", fleet); // WT-3
 
 export default screens;

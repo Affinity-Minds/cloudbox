@@ -1,10 +1,266 @@
 // Owner: WT-3. Module `agent`, mounted at `/api/v1/agent` in routes/v1/index.ts.
-// Routes (docs/handoffs/foundation.md): POST /enroll, POST /heartbeat, GET /entitlement, POST /uninstalled (Bearer deviceToken except /enroll; client WT-4).
+// Routes: POST /enroll (unauthenticated, token-gated), POST /heartbeat, GET /entitlement (Bearer
+// device-token via requireDevice(), which 401s once revoked), POST /uninstalled (Bearer
+// device-token via its own idempotent lookup — see below).
+//
+// Agent API contract is fixed (packages/contracts/src/agent.ts) — the Windows agent (WT-4) is
+// built against it in parallel. `AgentHealth`'s nullable fields (merged from origin/phase-1/identity)
+// mean "the agent cannot determine this yet"; heartbeat stores the document as-is and callers must
+// render null as "unknown", never 0 or "Offline" (see apps/admin-web fleet detail health tab).
+import {
+  type AgentEntitlementResponse,
+  type AgentHealth,
+  EnrollRequest,
+  type EnrollResponse,
+  HeartbeatRequest,
+  type HeartbeatResponse,
+} from "@cloudbox/contracts";
+import { zValidator } from "@hono/zod-validator";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import type { AppEnv } from "../../env";
+import { calculateJwkThumbprint } from "jose";
+import { audit } from "../../audit";
+import { isUniqueConstraintError, randomOpaqueToken, sha256Hex } from "../../crypto";
+import { createDb, type Db } from "../../db/client";
+import { deviceCredentials, devices, entitlements, enrollmentTokens, tenants } from "../../db/schema";
+import { checkEnrollRateLimit } from "../../devices/enroll-rate-limit";
+import { nextDeviceName } from "../../devices/naming";
+import { bearerToken, requireDevice, resolveDevice } from "../../devices/require-device";
+import type { AppDevice, AppEnv } from "../../env";
+import { newId, nowIso } from "../../ids";
+
+const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
+
+type EnrollOutcome =
+  | { ok: true; response: EnrollResponse }
+  | { ok: false; status: 400 | 409; error: string };
+
+export async function enrollDevice(db: Db, input: EnrollRequest): Promise<EnrollOutcome> {
+  const tokenHash = await sha256Hex(input.token);
+  const [tokenRow] = await db
+    .select({
+      id: enrollmentTokens.id,
+      tenantId: enrollmentTokens.tenantId,
+      expiresAt: enrollmentTokens.expiresAt,
+      redeemedAt: enrollmentTokens.redeemedAt,
+      revokedAt: enrollmentTokens.revokedAt,
+      tenantCode: tenants.publicCode,
+    })
+    .from(enrollmentTokens)
+    .innerJoin(tenants, eq(tenants.id, enrollmentTokens.tenantId))
+    .where(eq(enrollmentTokens.tokenHash, tokenHash));
+
+  const now = nowIso();
+  if (
+    !tokenRow ||
+    tokenRow.expiresAt <= now ||
+    tokenRow.redeemedAt !== null ||
+    tokenRow.revokedAt !== null
+  ) {
+    return { ok: false, status: 400, error: INVALID_TOKEN_ERROR };
+  }
+
+  const thumbprint = await calculateJwkThumbprint(input.device.publicKeyJwk, "sha256");
+  const deviceId = newId("device");
+  const deviceName = await nextDeviceName(db);
+
+  // Conditional update run alone, then checked, before anything else touches the database
+  // (agent-notes cloudflare-workers "a transaction cannot be made conditional on one row changed"):
+  // `db.batch` would still commit even if this WHERE matched zero rows.
+  const [redeemed] = await db
+    .update(enrollmentTokens)
+    .set({ redeemedAt: now, redeemedDeviceId: deviceId })
+    .where(
+      and(
+        eq(enrollmentTokens.id, tokenRow.id),
+        isNull(enrollmentTokens.redeemedAt),
+        isNull(enrollmentTokens.revokedAt),
+      ),
+    )
+    .returning({ id: enrollmentTokens.id });
+
+  if (!redeemed) {
+    // Someone else redeemed/revoked it between our read and this write.
+    return { ok: false, status: 400, error: INVALID_TOKEN_ERROR };
+  }
+
+  const deviceToken = randomOpaqueToken();
+  try {
+    await db.batch([
+      db.insert(devices).values({
+        id: deviceId,
+        tenantId: tokenRow.tenantId,
+        name: deviceName,
+        status: "enrolled",
+        devicePublicKeyJwk: JSON.stringify(input.device.publicKeyJwk),
+        deviceKeyThumbprint: thumbprint,
+        keyProtection: input.device.keyProtection,
+        hostname: input.device.hostname,
+        windowsBuild: input.device.windowsBuild,
+        agentVersion: input.device.agentVersion,
+        enrolledAt: now,
+      }),
+      db.insert(deviceCredentials).values({
+        id: newId("deviceCredential"),
+        deviceId,
+        tokenHash: await sha256Hex(deviceToken),
+        createdAt: now,
+      }),
+      audit(db, {
+        eventType: "DEVICE_ENROLLED",
+        entityType: "device",
+        entityId: deviceId,
+        actor: { type: "device", id: deviceId, tenantId: tokenRow.tenantId },
+        before: null,
+        after: { hostname: input.device.hostname, name: deviceName },
+        source: "agent",
+      }),
+    ]);
+  } catch (error) {
+    // Compensate: give the token back so a genuine retry (not a duplicate key) can redeem it.
+    await db
+      .update(enrollmentTokens)
+      .set({ redeemedAt: null, redeemedDeviceId: null })
+      .where(eq(enrollmentTokens.id, tokenRow.id));
+
+    if (isUniqueConstraintError(error, "device_key_thumbprint")) {
+      return { ok: false, status: 409, error: "device_already_enrolled" };
+    }
+    throw error;
+  }
+
+  return {
+    ok: true,
+    response: {
+      deviceId,
+      tenantId: tokenRow.tenantId,
+      tenantCode: tokenRow.tenantCode,
+      deviceName,
+      deviceToken,
+    },
+  };
+}
+
+export async function recordHeartbeat(
+  db: Db,
+  device: AppDevice,
+  health: AgentHealth,
+): Promise<HeartbeatResponse> {
+  const now = nowIso();
+  const [, entitlementRows] = await db.batch([
+    db
+      .update(devices)
+      .set({
+        lastSeenAt: now,
+        lastHealthJson: JSON.stringify(health),
+        agentVersion: health.agent.version,
+      })
+      .where(eq(devices.id, device.id)),
+    db
+      .select({ generation: entitlements.generation })
+      .from(entitlements)
+      .where(and(eq(entitlements.deviceId, device.id), isNull(entitlements.revokedAt)))
+      .orderBy(desc(entitlements.generation))
+      .limit(1),
+  ]);
+
+  return {
+    serverTime: now,
+    entitlementGeneration: entitlementRows[0]?.generation ?? null,
+    commands: [],
+  };
+}
+
+export async function getLatestEntitlement(
+  db: Db,
+  deviceId: string,
+): Promise<AgentEntitlementResponse | null> {
+  const [row] = await db
+    .select({ entitlement: entitlements.token, generation: entitlements.generation })
+    .from(entitlements)
+    .where(and(eq(entitlements.deviceId, deviceId), isNull(entitlements.revokedAt)))
+    .orderBy(desc(entitlements.generation))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> {
+  const [current] = await db
+    .select({ status: devices.status })
+    .from(devices)
+    .where(eq(devices.id, device.id));
+  if (!current || current.status === "revoked") return; // idempotent
+
+  const now = nowIso();
+  await db.batch([
+    db.update(devices).set({ status: "revoked", revokedAt: now }).where(eq(devices.id, device.id)),
+    db
+      .update(deviceCredentials)
+      .set({ revokedAt: now })
+      .where(and(eq(deviceCredentials.deviceId, device.id), isNull(deviceCredentials.revokedAt))),
+    audit(db, {
+      eventType: "DEVICE_UNINSTALLED",
+      entityType: "device",
+      entityId: device.id,
+      actor: { type: "device", id: device.id, tenantId: device.tenantId },
+      before: { status: current.status },
+      after: { status: "revoked" },
+      source: "agent",
+    }),
+  ]);
+}
 
 const agent = new Hono<AppEnv>();
 
-agent.get("/", (c) => c.json({ module: "agent", status: "stub" }));
+agent.post(
+  "/enroll",
+  zValidator("json", EnrollRequest, (result, c) => {
+    if (!result.success) return c.json({ error: "invalid_request" }, 400);
+  }),
+  async (c) => {
+    const db = createDb(c.env.DB);
+    const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? "unknown";
+    const withinLimit = await checkEnrollRateLimit(db, ip);
+    if (!withinLimit) return c.json({ error: "rate_limited" }, 429);
+
+    const outcome = await enrollDevice(db, c.req.valid("json"));
+    if (!outcome.ok) return c.json({ error: outcome.error }, outcome.status);
+    return c.json(outcome.response, 201);
+  },
+);
+
+agent.post(
+  "/heartbeat",
+  requireDevice(),
+  zValidator("json", HeartbeatRequest, (result, c) => {
+    if (!result.success) return c.json({ error: "invalid_request" }, 400);
+  }),
+  async (c) => {
+    const { health } = c.req.valid("json");
+    const response = await recordHeartbeat(createDb(c.env.DB), c.var.device, health);
+    return c.json(response);
+  },
+);
+
+agent.get("/entitlement", requireDevice(), async (c) => {
+  const entitlement = await getLatestEntitlement(createDb(c.env.DB), c.var.device.id);
+  if (!entitlement) return c.json({ error: "not_found" }, 404);
+  return c.json(entitlement);
+});
+
+// Not requireDevice(): a retried uninstall call must still 204 after the device (and its
+// credential) are already revoked, so the lookup here tolerates a revoked-but-real credential —
+// see resolveDevice()'s `allowRevoked` doc comment.
+agent.post("/uninstalled", async (c) => {
+  const db = createDb(c.env.DB);
+  const token = bearerToken(c.req.header("authorization"));
+  if (!token) return c.json({ error: "unauthenticated" }, 401);
+
+  const device = await resolveDevice(db, token, { allowRevoked: true });
+  if (!device) return c.json({ error: "unauthenticated" }, 401);
+
+  await uninstallDevice(db, device);
+  return c.body(null, 204);
+});
 
 export default agent;
