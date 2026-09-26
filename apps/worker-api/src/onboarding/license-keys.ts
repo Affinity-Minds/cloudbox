@@ -30,9 +30,19 @@ export function formatLicenseKey(): string {
   return `CBX-LIC-${s.slice(0, 5)}-${s.slice(5, 10)}-${s.slice(10, 15)}-${s.slice(15)}`;
 }
 
-/** Hash of the canonical form (upper-case, no spaces), so a key typed in lower case still matches. */
-export const hashLicenseKey = (code: string) =>
-  sha256Hex(code.trim().toUpperCase().replace(/\s+/g, ""));
+/**
+ * The canonical `CBX-LIC-XXXXX-XXXXX-XXXXX-XXXXX` for a key as typed: upper-cased, spaces and
+ * dashes dropped, then re-grouped (review P2-8); null when it cannot be a key.
+ */
+export function canonicalLicenseKey(raw: string): string | null {
+  const s = raw.toUpperCase().replace(/[\s-]+/g, "");
+  if (!/^CBXLIC[0-9A-HJKMNP-TV-Z]{20}$/.test(s)) return null;
+  const k = s.slice(6);
+  return `CBX-LIC-${k.slice(0, 5)}-${k.slice(5, 10)}-${k.slice(10, 15)}-${k.slice(15)}`;
+}
+
+/** Hash of the canonical form, so a key typed in lower case or with odd spacing still matches. */
+export const hashLicenseKey = (code: string) => sha256Hex(canonicalLicenseKey(code) ?? code);
 
 /**
  * Rows per INSERT. D1 allows 100 bound parameters per statement, so the rows travel as one JSON
@@ -254,9 +264,10 @@ export async function redeemLicenseKey(
   now = new Date(),
 ): Promise<{ tenantId: string; tenantCode: string; subscriptionId: string }> {
   const invalid = new LicenseKeyRefusal(400, "invalid_license_key");
-  if (!LICENSE_KEY_PATTERN.test(input.code)) throw invalid;
+  const code = canonicalLicenseKey(input.code);
+  if (!code || !LICENSE_KEY_PATTERN.test(code)) throw invalid;
   const at = now.toISOString();
-  const codeHash = await hashLicenseKey(input.code);
+  const codeHash = await sha256Hex(code);
   const [claimed] = await db
     .update(licenseKeys)
     .set({ status: "redeemed", redeemedAt: at, redeemedByEmail: input.email })

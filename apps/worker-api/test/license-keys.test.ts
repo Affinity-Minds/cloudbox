@@ -187,8 +187,9 @@ describe("licence key redemption at onboarding", () => {
     const key = batch.keys[0];
     if (!key) throw new Error("no key");
     const buyer = await signInAs(env, { email: "lk-buyer@example.test" });
-    // Case and spacing as typed from a card do not matter.
-    const res = await redeem(buyer.headers, ` ${key.code.toLowerCase()} `);
+    // Case, spacing and dashes as typed from a card do not matter (review P2-8).
+    const typed = ` ${key.code.toLowerCase().replaceAll("-", " ").replace("cbx lic", "cbxlic")} `;
+    const res = await redeem(buyer.headers, typed);
     expect(res.status).toBe(201);
     const { tenantId, tenantCode } = (await res.json()) as CreateOwnTenantResponse;
     expect(tenantCode).toMatch(/^CBX-\d{5}$/);

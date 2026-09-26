@@ -124,4 +124,14 @@ export const queries: RegisteredQuery[] = [
     sql: `select "license_keys"."id", "tenants"."public_code" from "license_keys" left join "tenants" on "tenants"."id" = "license_keys"."redeemed_tenant_id" where "license_keys"."code_last4" = ? order by "license_keys"."created_at" desc, "license_keys"."id" limit ?`,
     params: ["ABCD", 1000],
   },
+  {
+    name: "onboarding.tenants: self-created tenants without a plan (lifetime cap, review P2-6)",
+    sql: `SELECT count(*) AS n FROM tenant_memberships m WHERE m.user_id = ? AND m.status = 'active' AND m.standing = 'owner' AND m.invited_by = ? AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.tenant_id = m.tenant_id AND s.status <> 'cancelled')`,
+    params: ["u_test", "u_test"],
+  },
+  {
+    name: "auth.start: codes sent to an address in 24 h + ceiling already audited (review P2-5)",
+    sql: `SELECT (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_OTP_SENT' AND created_at > ? AND json_extract(after_json, '$.outcome') IN ('sent', 'send_failed')) AS sent, (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_START_CEILING' AND created_at > ?) AS ceiling`,
+    params: ["e@example.test", "2026-01-01", "e@example.test", "2026-01-01"],
+  },
 ];

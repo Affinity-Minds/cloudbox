@@ -10,10 +10,18 @@ import type { AppEnv, Bindings } from "./env";
 export const DEFAULT_OPS_BASE_PATH = "/ops";
 const VALID_BASE = /^\/[A-Za-z0-9_-]{1,128}$/;
 
-/** The configured base, or the default when unset or malformed (never a multi-segment path). */
+/** First segments the Worker or the customer SPA already own (review W-1): never an ops base. */
+const RESERVED_BASES = new Set(["/api", "/assets", "/login", "/portal", "/start"]);
+
+/**
+ * The configured base, or the default when unset, malformed (never a multi-segment path) or
+ * colliding with a path the Worker or the customer surface already serves (review W-1).
+ */
 export function opsBasePath(env: Pick<Bindings, "OPS_BASE_PATH">): string {
   const base = env.OPS_BASE_PATH?.trim();
-  return base && VALID_BASE.test(base) ? base : DEFAULT_OPS_BASE_PATH;
+  return base && VALID_BASE.test(base) && !RESERVED_BASES.has(base.toLowerCase())
+    ? base
+    : DEFAULT_OPS_BASE_PATH;
 }
 
 /** Console routes of the staff SPA (apps/admin-web/src/routes), relative to the base. */

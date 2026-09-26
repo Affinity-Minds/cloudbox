@@ -767,7 +767,7 @@ describe("Connect sign-in contract", () => {
       "/api/auth/connect/verify",
       { tenantCode, email: "connect-verify@example.test", code },
       {},
-      ip,
+      nextIp(), // our per-client Connect limit (3 / 60 s) is spent by the three refusals above
     );
     expect(ok.status).toBe(200);
     expect(await ok.json()).toMatchObject({ tenantId, tenantCode, user: { id: owner.userId } });
@@ -826,5 +826,75 @@ describe("Turnstile testing keys and the staff route for licence keys", () => {
   it("/ops/licences is a console route (ops shell), the customer /start is not", () => {
     expect(isOpsDocument("/ops/licences", "/ops")).toBe(true);
     expect(isOpsDocument("/start", "/ops")).toBe(false);
+  });
+});
+
+// ─── WT-8 phase-2 review follow-ups (docs/reviews/phase-2-onboarding-security.md) ────────────
+
+describe("review follow-ups", () => {
+  it("P2-5: an address with no account gets at most 10 start codes a day, then the same 200", async () => {
+    turnstileOk();
+    const email = "p2-5-flood@example.test";
+    const answers: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const res = await post(
+        "/api/auth/start/send-code",
+        { email },
+        { "x-cloudbox-turnstile": `f${i}` },
+      );
+      answers.push(`${res.status} ${await res.text()}`);
+    }
+    expect(new Set(answers)).toEqual(new Set([`200 ${JSON.stringify({ success: true })}`]));
+    expect(mailsTo(email)).toBe(10);
+    expect(await auditRows("AUTH_START_CEILING", email)).toHaveLength(1);
+  });
+
+  it("P2-2: Connect verify answers the member path's refusals with our exact body", async () => {
+    const { tenantCode } = await ownerWithTenant("p2-2-member@example.test");
+    const ip = nextIp();
+    const member = await post(
+      "/api/auth/connect/verify",
+      { tenantCode, email: "p2-2-member@example.test", code: "000000" },
+      {},
+      ip,
+    );
+    expect(member.status).toBe(400);
+    expect(await member.text()).toBe(JSON.stringify(CONNECT_INVALID));
+  });
+
+  it("P2-4: owners of suspended, past_due, cancelled or archived tenants get 403 tenant_not_active", async () => {
+    for (const status of ["suspended", "past_due", "cancelled", "archived"] as const) {
+      const tenant = await seedTenant(env.DB, { status });
+      const owner = await signInAs(testEnv, { email: `p2-4-${status}@example.test` });
+      await seedMembership(env.DB, {
+        tenantId: tenant.tenantId,
+        userId: owner.userId,
+        standing: "owner",
+      });
+      const res = await grant(owner.headers, tenant.tenantId);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "tenant_not_active" });
+    }
+  });
+
+  it("P2-6: at most 5 self-created tenants without a plan per customer; a plan frees a slot", async () => {
+    const owner = await signInAs(testEnv, { email: "p2-6-cap@example.test" });
+    const create = (i: number) =>
+      post(
+        "/api/v1/onboarding/tenants",
+        { displayName: `Cap ${i}`, timezone: "UTC" },
+        owner.headers,
+      );
+    const created: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const res = await create(i);
+      expect(res.status).toBe(201);
+      created.push(((await res.json()) as CreateOwnTenantResponse).tenantId);
+    }
+    const sixth = await create(5);
+    expect(sixth.status).toBe(409);
+    expect(await sixth.json()).toEqual({ error: "tenant_limit_reached" });
+    await assignPlan(created[0] as string);
+    expect((await create(6)).status).toBe(201);
   });
 });

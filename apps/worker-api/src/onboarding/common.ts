@@ -42,6 +42,13 @@ export const LIMITS = {
   startVerifyPerClient: { kind: "start-verify-client", max: 30, windowSeconds: 60 * 60 },
   /** Connect send for a non-member: bounds the anonymous audit rows (closed-sign-in note). */
   connectUnknownAudit: { kind: "connect-unknown", max: 1, windowSeconds: 15 * 60 },
+  /**
+   * Connect, per client, applied before the membership lookup and no looser than Better Auth's
+   * per-IP rule (3 / 60 s), so ours is the limit that answers for members and strangers alike
+   * (review P2-2).
+   */
+  connectSendPerClient: { kind: "connect-send-client", max: 3, windowSeconds: 60 },
+  connectVerifyPerClient: { kind: "connect-verify-client", max: 3, windowSeconds: 60 },
   /** Tenant self-creation per customer. */
   tenantsPerUser: { kind: "self-tenant", max: 10, windowSeconds: 60 * 60 },
   /** Activation grants per customer. */

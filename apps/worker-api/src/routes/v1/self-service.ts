@@ -56,6 +56,14 @@ import { validate } from "./subscriptions";
 /** Self-activation grants live 15 minutes (owner decision C). */
 export const ACTIVATION_GRANT_TTL_MINUTES = 15;
 
+const GRANTABLE_TENANT_STATUSES = new Set(["provisioning", "active", "trial"]);
+
+/**
+ * Lifetime cap on self-created tenants that still have no plan, per customer (review P2-6): a
+ * throwaway identity cannot mint tenant codes without limit. Attaching a plan frees the slot.
+ */
+export const SELF_TENANTS_WITHOUT_PLAN_MAX = 5;
+
 const router = new Hono<AppEnv>();
 const rateLimited = { error: "rate_limited" as const };
 
@@ -112,6 +120,15 @@ router.post(
     const user = c.var.user;
     if (!(await withinLimit(db, LIMITS.tenantsPerUser, user.id))) {
       return c.json(rateLimited, 429);
+    }
+    const owned = await db.get<{ n: number }>(sql`
+      SELECT count(*) AS n FROM tenant_memberships m
+      WHERE m.user_id = ${user.id} AND m.status = 'active' AND m.standing = 'owner'
+        AND m.invited_by = ${user.id}
+        AND NOT EXISTS (SELECT 1 FROM subscriptions s
+                        WHERE s.tenant_id = m.tenant_id AND s.status <> 'cancelled')`);
+    if ((owned?.n ?? 0) >= SELF_TENANTS_WITHOUT_PLAN_MAX) {
+      return c.json({ error: "tenant_limit_reached" }, 409);
     }
     const now = nowIso();
     const tenantId = newId("tenant");
@@ -189,8 +206,10 @@ router.post(
       .from(tenants)
       .where(eq(tenants.id, input.tenantId));
     if (!tenant) return c.json({ error: "not_found" }, 404);
-    if (tenant.status === "archived" || tenant.status === "cancelled") {
-      return c.json({ error: "tenant_inactive" }, 409);
+    // Only a tenant being set up or in service can enroll servers (review P2-4): suspended,
+    // past_due, cancelled and archived tenants are refused.
+    if (!GRANTABLE_TENANT_STATUSES.has(tenant.status)) {
+      return c.json({ error: "tenant_not_active" }, 403);
     }
     if (!(await withinLimit(db, LIMITS.grantsPerUser, user.id))) {
       return c.json(rateLimited, 429);

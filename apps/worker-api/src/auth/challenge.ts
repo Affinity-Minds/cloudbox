@@ -47,11 +47,11 @@ export async function verifyTurnstile(
       hostname?: string;
       metadata?: { result_with_testing_key?: boolean };
     };
-    // Cloudflare's published testing keys always answer hostname "example.com"; outside
-    // production they stand in for a solved challenge (local demos, WT-14). Production never
-    // accepts them: there the hostname must be ours.
+    // Cloudflare's published testing keys always answer hostname "example.com"; only an explicit
+    // `ENVIRONMENT=development` lets them stand in for a solved challenge (local demos, WT-14).
+    // Unset or production fails closed: the hostname must be ours (review P2-3).
     const testingKey =
-      env.ENVIRONMENT !== "production" && outcome.metadata?.result_with_testing_key === true;
+      env.ENVIRONMENT === "development" && outcome.metadata?.result_with_testing_key === true;
     return outcome.success === true && (outcome.hostname === request.host || testingKey);
   } catch (error) {
     console.error("turnstile siteverify failed", error);
