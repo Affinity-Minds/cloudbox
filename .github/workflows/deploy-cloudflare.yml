@@ -39,13 +39,20 @@ jobs:
 
       - name: Stamp build
         shell: bash
+        env:
+          BOOTSTRAP_SUPER_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_SUPER_ADMIN_EMAIL }}
         run: |
           node - <<'NODE'
           const fs = require("fs");
           const path = "apps/worker-api/wrangler.jsonc";
+          const bootstrapEmail = process.env.BOOTSTRAP_SUPER_ADMIN_EMAIL;
+          if (!bootstrapEmail) throw new Error("Repository variable BOOTSTRAP_SUPER_ADMIN_EMAIL is not set");
           let source = fs.readFileSync(path, "utf8");
           source = source.replace('"BUILD_SHA": "development"', `"BUILD_SHA": "${process.env.GITHUB_SHA}"`);
           source = source.replace('"BUILD_TIME": "development"', `"BUILD_TIME": "${new Date().toISOString()}"`);
+          source = source.replace('"ENVIRONMENT": "development"', '"ENVIRONMENT": "production"');
+          source = source.replace('"BOOTSTRAP_SUPER_ADMIN_EMAIL": "bootstrap@example.invalid"', `"BOOTSTRAP_SUPER_ADMIN_EMAIL": ${JSON.stringify(bootstrapEmail)}`);
+          if (!source.includes('"ENVIRONMENT": "production"')) throw new Error("ENVIRONMENT stamp failed");
           fs.writeFileSync(path, source);
           NODE
 
@@ -76,6 +83,17 @@ jobs:
       - name: Apply D1 migrations
         working-directory: apps/worker-api
         run: pnpm wrangler d1 migrations apply cloudbox-db --remote
+
+      - name: Ensure BETTER_AUTH_SECRET exists (set once, never rotated by deploy)
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "BETTER_AUTH_SECRET")' >/dev/null; then
+            echo "BETTER_AUTH_SECRET already set"
+          else
+            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put BETTER_AUTH_SECRET
+          fi
 
       - name: Deploy Worker
         working-directory: apps/worker-api

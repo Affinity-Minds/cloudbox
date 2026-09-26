@@ -1,15 +1,13 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { changeFoundationRelease, loadFoundation } from "./db/audit";
+import { createDb } from "./db/client";
+import type { AppEnv, Bindings } from "./env";
+import { changeFoundationRelease, loadFoundation } from "./foundation";
+import { apiVersion, correlationId } from "./http";
+import v1 from "./routes/v1";
 
-export type Bindings = {
-  DB: D1Database;
-  ARTIFACTS: R2Bucket;
-  FLEET_PRESENCE: DurableObjectNamespace;
-  BUILD_SHA?: string;
-  BUILD_TIME?: string;
-  PHASE0_ADMIN_KEY?: string;
-};
+export type { Bindings } from "./env";
 
 export class FleetPresence {
   constructor(
@@ -24,7 +22,10 @@ export class FleetPresence {
   }
 }
 
-const app = new Hono<{ Bindings: Bindings }>();
+const app = new Hono<AppEnv>();
+
+app.use("/api/*", correlationId());
+app.use("/api/v1/*", apiVersion());
 
 app.get("/api/health", (c) =>
   c.json({
@@ -38,25 +39,15 @@ app.get("/api/version", (c) =>
     service: "cloudbox-control-plane",
     gitSha: c.env.BUILD_SHA ?? "development",
     builtAt: c.env.BUILD_TIME ?? "development",
+    environment: c.env.ENVIRONMENT ?? "development",
   }),
 );
 
-app.use("/api/v1/*", async (c, next) => {
-  await next();
-  c.header("X-API-Version", "v1");
-});
-
-app.get("/api/v1", (c) =>
-  c.json({
-    name: "CloudBox API",
-    version: "v1",
-    status: "foundation",
-  }),
-);
+// WT-1 mounts the Better Auth handler here: app.on(["GET", "POST"], "/api/auth/*", …).
 
 app.get("/api/v1/foundation", async (c) => {
   try {
-    const foundation = await loadFoundation(c.env.DB);
+    const foundation = await loadFoundation(createDb(c.env.DB));
     return c.json({
       version: {
         gitSha: c.env.BUILD_SHA ?? "development",
@@ -88,14 +79,23 @@ app.patch("/api/v1/foundation/release", async (c) => {
     return c.json({ error: "invalid_request" }, 400);
   }
 
-  const result = await changeFoundationRelease(c.env.DB, parsed.data, {
-    type: "bootstrap-admin",
-    id: "github-actions",
+  const result = await changeFoundationRelease(createDb(c.env.DB), parsed.data, {
+    actor: { type: "bootstrap-admin", id: "github-actions" },
+    correlationId: c.var.correlationId,
   });
 
   return c.json(result);
 });
 
+app.route("/api/v1", v1);
+
+app.onError((error, c) => {
+  if (error instanceof HTTPException) return error.getResponse();
+  console.error("unhandled", c.var.correlationId, error);
+  return c.json({ error: "internal_error" }, 500);
+});
+
+// Return directly: calling c.notFound() in here recurses (agent-notes cloudflare-workers #6).
 app.notFound((c) => {
   if (new URL(c.req.url).pathname.startsWith("/api/")) {
     return c.json({ error: "not_found" }, 404);
