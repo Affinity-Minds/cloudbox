@@ -1,6 +1,8 @@
-ENVIRONMENT=development
 # Local development only. Copy to .dev.vars (gitignored). Never put production values here.
-BETTER_AUTH_SECRET=dev-only-change-me-0123456789abcdef0123456789
+ENVIRONMENT=development
+STAFF_AUTH_SECRET=dev-only-staff-change-me-0123456789abcdef0123
+CUSTOMER_AUTH_SECRET=dev-only-customer-change-me-0123456789abcdef
+# OPS_BASE_PATH=/ops   # the discreet staff console path (single segment)
 OTP_DEV_ECHO=1
 BOOTSTRAP_SUPER_ADMIN_EMAIL=admin@example.invalid
 BOOTSTRAP_SUPER_ADMIN_PASSWORD=dev-only-initial-password

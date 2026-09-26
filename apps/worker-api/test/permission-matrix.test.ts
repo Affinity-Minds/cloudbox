@@ -130,3 +130,85 @@ describe("permission-boundary matrix", () => {
     expect(failures, failures.join("\n")).toEqual([]);
   });
 });
+
+// WT-1 (owner decision, ADR 0002): staff and customers are two identity systems with nothing
+// shared — separate tables, secrets, cookies and Better Auth mounts. A session of one never
+// satisfies a route of the other, and neither mount exposes the other's endpoints.
+describe("two identity systems never cross", () => {
+  const TEST_ORIGIN = "http://localhost";
+
+  it("staff cookie on /api/v1/me → 401; customer cookie on staff routes → 401", async () => {
+    const staff = await signInAs(env, {
+      email: "matrix.staff@example.test",
+      staffRole: "super_admin",
+    });
+    const customer = await signInAs(env, { email: "matrix.customer@example.test" });
+
+    const me = await app.request("/api/v1/me/tenants", { headers: staff.headers }, env);
+    expect(me.status).toBe(401);
+    for (const [method, path] of [
+      ["GET", "/api/v1/screens/tenants"],
+      ["POST", "/api/v1/tenants"],
+      ["GET", "/api/v1/staff"],
+      ["GET", "/api/v1/screens/audit"],
+    ] as const) {
+      const response = await app.request(path, { method, headers: customer.headers }, env);
+      expect(response.status, `${method} ${path}`).toBe(401);
+    }
+    // Each side still works with its own session.
+    expect(
+      (await app.request("/api/v1/me/tenants", { headers: customer.headers }, env)).status,
+    ).toBe(200);
+    expect(
+      (await app.request("/api/v1/screens/tenants", { headers: staff.headers }, env)).status,
+    ).toBe(200);
+  });
+
+  it("the customer mount has no staff endpoint and the staff mount no customer endpoint", async () => {
+    const post = (path: string) =>
+      app.request(
+        path,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: TEST_ORIGIN },
+          body: JSON.stringify({ email: "x@example.test", password: "p".repeat(12), otp: "1" }),
+        },
+        env,
+      );
+    for (const path of [
+      "/api/auth/sign-in/email",
+      "/api/auth/two-factor/enable",
+      "/api/auth/two-factor/verify-totp",
+      "/api/auth/change-password",
+    ]) {
+      expect((await post(path)).status, path).toBe(404);
+    }
+    for (const path of [
+      "/api/ops/auth/email-otp/send-verification-otp",
+      "/api/ops/auth/sign-in/email-otp",
+    ]) {
+      expect((await post(path)).status, path).toBe(404);
+    }
+  });
+
+  it("a staff session is never minted through the customer mount", async () => {
+    // The staff identity exists only in staff_users; the customer system has no such person and
+    // no password endpoint, so neither a code nor a password yields a staff (or any) session.
+    await signInAs(env, { email: "matrix.staff2@example.test", staffRole: "admin" });
+    const response = await app.request(
+      "/api/auth/sign-in/email-otp",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: TEST_ORIGIN },
+        body: JSON.stringify({ email: "matrix.staff2@example.test", otp: "123456" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const customers = await env.DB.prepare(
+      "SELECT count(*) AS n FROM customer_users WHERE email = 'matrix.staff2@example.test'",
+    ).first<{ n: number }>();
+    expect(customers?.n).toBe(0);
+  });
+});

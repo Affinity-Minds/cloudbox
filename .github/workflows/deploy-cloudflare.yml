@@ -109,7 +109,37 @@ jobs:
         working-directory: apps/worker-api
         run: pnpm wrangler d1 migrations apply cloudbox-db --remote
 
-      - name: Ensure BETTER_AUTH_SECRET exists (set once, never rotated by deploy)
+      - name: Ensure STAFF_AUTH_SECRET exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Better Auth secret of the staff identity system (/api/ops/auth) (ADR 0002: two identity systems, nothing shared).
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "STAFF_AUTH_SECRET")' >/dev/null; then
+            echo "STAFF_AUTH_SECRET already set"
+          else
+            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put STAFF_AUTH_SECRET
+          fi
+
+      - name: Ensure CUSTOMER_AUTH_SECRET exists (set once, never rotated by deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/worker-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Better Auth secret of the customer identity system (/api/auth) (ADR 0002: two identity systems, nothing shared).
+          if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "CUSTOMER_AUTH_SECRET")' >/dev/null; then
+            echo "CUSTOMER_AUTH_SECRET already set"
+          else
+            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put CUSTOMER_AUTH_SECRET
+          fi
+
+      - name: Retire BETTER_AUTH_SECRET (replaced by STAFF_AUTH_SECRET and CUSTOMER_AUTH_SECRET)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -118,9 +148,9 @@ jobs:
         run: |
           set -euo pipefail
           if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "BETTER_AUTH_SECRET")' >/dev/null; then
-            echo "BETTER_AUTH_SECRET already set"
+            pnpm wrangler secret delete BETTER_AUTH_SECRET --force
           else
-            openssl rand -base64 48 | tr -d '\n' | pnpm wrangler secret put BETTER_AUTH_SECRET
+            echo "BETTER_AUTH_SECRET not present"
           fi
 
       - name: Ensure PROVIDER_SECRETS_KEY exists (set once, never rotated by deploy)
@@ -131,8 +161,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # AES-256-GCM key for email_providers.secret_ciphertext (WT-12). Same pattern as
-          # BETTER_AUTH_SECRET above: created once, rotating it would strand existing ciphertext.
+          # AES-256-GCM key for email_providers.secret_ciphertext (WT-12). Same pattern as the auth
+          # secrets above: created once, rotating it would strand existing ciphertext.
           if pnpm wrangler secret list --format json | jq -e 'any(.[]; .name == "PROVIDER_SECRETS_KEY")' >/dev/null; then
             echo "PROVIDER_SECRETS_KEY already set"
           else
