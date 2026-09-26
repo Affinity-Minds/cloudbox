@@ -17,7 +17,7 @@ from D1 rows per request; every auth state change is audited.
 
 - Branch `wt/p1-auth` (parent `phase-1/identity`). Earlier phases merged as PR #4 (`dd29e12`) and
   PR #6, closed sign-in + staff 2FA + first review merged as PR #9 (`a3fc5f0`). Second-pass review
-  fixes: **draft PR #10** https://github.com/Affinity-Minds/cloudbox/pull/10 (never merged by me).
+  fixes merged as PR #10. Third pass (T-1/T-2): new draft PR (see below; never merged by me).
 - `pnpm run verify`: green (check 132 files, admin-web 3/3, licensing-contracts 16/16, worker-api
   314/314, build ok).
 
@@ -172,7 +172,7 @@ Every other `/api/auth/*` path is 404 `{error:"not_found"}`. Every POST there ne
 
 ---
 
-## Tests (worker-api 320/320, admin-web 4/4, licensing-contracts 16/16)
+## Tests (worker-api 373/373 after merging WT-3/WT-4, admin-web 4/4, licensing-contracts 16/16)
 
 Third pass (T-1/T-2): `auth-stepup.test.ts` (5: /48 shares limits and counters; every failed check
 counts toward the budget; challenge_required for known and unknown alike, valid token passes send and
