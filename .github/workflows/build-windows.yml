@@ -59,6 +59,19 @@ jobs:
         shell: pwsh
         run: Get-ChildItem publish -Recurse -File | Format-Table FullName, Length -AutoSize
 
+      # Evidence only: Status against sample pipe documents, Setup welcome screen, on the runner's desktop.
+      - name: UI screenshots (evidence)
+        continue-on-error: true
+        shell: pwsh
+        run: ./apps/cloudbox-status/screenshots.ps1 -Publish publish -Out screenshots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: screenshots/*.png
+          if-no-files-found: warn
+
       - uses: actions/upload-artifact@v4
         with:
           name: CloudBox.Agent-win-x64
