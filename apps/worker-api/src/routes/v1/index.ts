@@ -13,6 +13,7 @@ import enrollment from "./enrollment";
 import entitlements from "./entitlements";
 import me from "./me";
 import memberships from "./memberships";
+import releases from "./releases";
 import screens from "./screens";
 import selfService from "./self-service";
 import staff from "./staff";
@@ -45,6 +46,7 @@ v1.route("/tenants/:tenantId/subscriptions", tenantSubscriptions); // WT-5
 v1.route("/subscriptions", subscriptions); // WT-5
 v1.route("/devices/:deviceId/entitlements", entitlements); // WT-5
 v1.route("/settings/email-providers", emailProviders); // WT-12
+v1.route("/releases", releases); // WT-18
 v1.route("/screens", screens); // WT-0 (+ one line per screen owner in screens/index.ts)
 v1.route("/audit", audit); // WT-0
 v1.route("/", selfService); // WT-14: /onboarding/*, /connect/*, /license-keys/*

@@ -6,6 +6,7 @@ import audit from "./audit";
 import fleet from "./fleet";
 import overview from "./overview";
 import plans from "./plans";
+import releases from "./releases";
 import subscriptions from "./subscriptions";
 import tenants from "./tenants";
 
@@ -17,5 +18,6 @@ screens.route("/fleet", fleet); // WT-3
 screens.route("/tenants", tenants); // WT-2
 screens.route("/subscriptions", subscriptions); // WT-5
 screens.route("/plans", plans); // WT-13
+screens.route("/releases", releases); // WT-18
 
 export default screens;
