@@ -230,5 +230,5 @@ users, validity" — do not merge without a human decision, per the standing ins
   `07-tenant-detail-subscription-tab.png` (7 files).
 - Test output: see "Tests run and results" above; reproduce with `corepack pnpm run verify` from
   the repo root.
-- Not deployed to `box.affinityminds.in` — this worktree never deploys; that happens after merge
+- Not deployed to `box.affinity.ai.in` — this worktree never deploys; that happens after merge
   via the existing GitHub Actions workflow.

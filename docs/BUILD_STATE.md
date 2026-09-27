@@ -8,9 +8,9 @@ Phase 2 — Physical device enrollment and Windows acceptance (integration branc
 Phase 2 cloud side MERGED to `main` (PR #22, production SHA ed59dcf, 2026-09-27 09:37 UTC) and live-verified; the owner's lab run is the remaining Phase 2 exit item. In progress: plan pricing/add-on users (WT-13 follow-up). Follow-ups: W-2 (fleet principal-type check), Staff management screen, real SMTP relay send verification, pin actions by SHA, plan-designer note that lowering max_devices blocks new licences, Connect timing parity, ownership transfer in the portal.
 
 # Demo path
-1. Staff: https://box.affinityminds.in/ops/login → email + initial password → forced password change → authenticator QR → console.
+1. Staff: https://box.affinity.ai.in/ops/login → email + initial password → forced password change → authenticator QR → console.
 2. Tenants → New tenant → Enrollment → New enrollment code (shown once).
-3. Lab PC (elevated PowerShell, artifact extracted): `CloudBox.Agent.exe install --base-url https://box.affinityminds.in --enroll-token <code>` → Fleet shows the device Online.
+3. Lab PC (elevated PowerShell, artifact extracted): `CloudBox.Agent.exe install --base-url https://box.affinity.ai.in --enroll-token <code>` → Fleet shows the device Online.
 4. Subscriptions → New subscription (cloudbox-6) → device → Issue → Agent `status` shows generation 1.
 5. `CloudBox.Agent.exe uninstall` → `verify-clean` exits 0 → Fleet shows revoked, Audit shows DEVICE_UNINSTALLED.
 
@@ -19,6 +19,9 @@ Phase 2 cloud side MERGED to `main` (PR #22, production SHA ed59dcf, 2026-09-27 
 
 # Blockers
 None on the cloud side.
+
+# Pending ops change (not yet merged)
+`fix/production-domain` (worktree `wt-domain`, ADR `docs/decisions/0014-production-domain-box-affinity-ai-in.md`): moves the production hostname from `box.affinityminds.in` to `box.affinity.ai.in` and removes every `affinityminds.in` reference from the repo, to fully free that zone. PR open against `main`, not merged. Two dashboard prerequisites before/at merge: the `affinity.ai.in` zone must be in the Worker's Cloudflare account, and the Turnstile widget's hostname allow-list must include `box.affinity.ai.in`. After the deploy that lands this: verify the old `box.affinityminds.in` custom domain is gone from the Worker (Wrangler drops routes no longer in `wrangler.jsonc`), and verify no DNS record for `box` survives under `affinityminds.in` in the dashboard — delete it by hand if it does.
 
 # Completed phases
 ## Phase 1 — Identity, tenancy, devices, entitlements — DONE 2026-09-27 03:15 IST
@@ -36,7 +39,7 @@ None on the cloud side.
 - Merged to `main` via PR #1 (fix commit `584aa9e`) and deploy hotfix PR #3 (`89fc59c`); production SHA `8f16cde9a904bc8c21328d0e6fbef1fc7e351f2e`.
 - Deploy run: GitHub Actions "Deploy CloudBox" succeeded; D1 `cloudbox-db` recreated in APAC while empty; R2 binding deferred with a workflow warning until R2 is enabled on the account.
 - Live verification (curl, 00:24 IST): `GET /api/health` 200 `{"status":"ok"}`; `GET /api/version` gitSha equals `main`; `GET /api/v1` carries `X-API-Version: v1`; `GET /api/v1/foundation` returns `release.status=deployed`, `release.sha` = main SHA, and the audited `foundation.release.changed` row by `github-actions` with before/after; `GET /` serves the SPA shell (200, text/html).
-- Rendered evidence: `docs/evidence/phase-0/live-shell.png` (Playwright Chromium against https://box.affinityminds.in, shows Release deployed, Build and Audited SHA `8f16cde9a904`, 2 audit records).
+- Rendered evidence: `docs/evidence/phase-0/live-shell.png` (Playwright Chromium against https://box.affinity.ai.in, shows Release deployed, Build and Audited SHA `8f16cde9a904`, 2 audit records).
 - Exit criteria per spec: staging/production deployable ✓, versioned ✓, testable (`pnpm run verify`, 5 tests at the time) ✓, every later slice has a home ✓, audited administrative state change proven live ✓.
 - Deferred: R2 bucket (account-level enablement), Windows physical checks (none required by Phase 0).
 

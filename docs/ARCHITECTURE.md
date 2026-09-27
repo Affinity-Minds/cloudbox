@@ -13,7 +13,7 @@ CloudBox has four deployment zones:
 - Windows privileged actions go through the Agent.
 - Customer UIs see CloudBox concepts, not upstream VPN/RDP implementation details.
 - API contract begins at `/api/v1/*`.
-- Production origin is `https://box.affinityminds.in`.
+- Production origin is `https://box.affinity.ai.in`.
 
 ## Phase 0 deployment
 

@@ -97,7 +97,7 @@ Manifest entry JSON: contract fields `kind, id, createdAt, priorState` plus addi
 
 ## Demo path
 `docs/runbooks/agent-install-dev.md` (owner, lab PC, elevated PowerShell in the extracted artifact folder):
-`verify-clean` → `install --base-url https://box.affinityminds.in --enroll-token <token>` → `status` (enrolled,
+`verify-clean` → `install --base-url https://box.affinity.ai.in --enroll-token <token>` → `status` (enrolled,
 service Running; `CloudBox.Status.exe` unelevated) → Fleet Online with key protection → issue entitlement → `status`
 shows `entitlementGeneration: 1` → `taskkill /f /im CloudBox.Agent.exe`, `sc.exe query CloudBoxAgent` RUNNING again →
 `uninstall` → `verify-clean` prints CLEAN, exit 0 → Fleet revoked, Audit `DEVICE_UNINSTALLED`.

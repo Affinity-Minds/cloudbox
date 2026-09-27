@@ -27,8 +27,8 @@
 
 | Who | URL |
 |---|---|
-| Customers | `https://box.affinityminds.in/login` → `/portal` |
-| Staff | `https://box.affinityminds.in/ops/login` → console at `https://box.affinityminds.in/ops` |
+| Customers | `https://box.affinity.ai.in/login` → `/portal` |
+| Staff | `https://box.affinity.ai.in/ops/login` → console at `https://box.affinity.ai.in/ops` |
 
 Staff: until `OPS_BASE_PATH` is changed to a random slug, the console stays at `/ops`. Nothing on the customer surface links to it.
 
@@ -110,14 +110,14 @@ Counters live in each system's rate-limit table under SHA-256 keys (`src/auth/co
 ### Ops recommendations (edge; the Worker's limits stay authoritative)
 
 1. **WAF rate-limiting rule on the auth endpoints**
-   - Paths: `box.affinityminds.in/api/auth/sign-in/*`, `/api/auth/email-otp/*`, `/api/ops/auth/*`.
+   - Paths: `box.affinity.ai.in/api/auth/sign-in/*`, `/api/auth/email-otp/*`, `/api/ops/auth/*`.
    - Counting characteristic: IP, with IPv6 grouped by /48.
    - For example 30 requests per 10 min, then block for 10 min.
 2. **WAF custom rule for the staff surface**
    - Paths: `${OPS_BASE_PATH}` and `${OPS_BASE_PATH}/*`, and `/api/ops/*`.
    - Either an **IP / country allowlist** (managed challenge or block for everything else), or at least a managed challenge on first visit.
    - Pre-clearance must stay **off** (agent-notes cloudflare-workers trap 1).
-3. **Turnstile widget** for `box.affinityminds.in` only, managed mode, pre-clearance off.
+3. **Turnstile widget** for `box.affinity.ai.in` only, managed mode, pre-clearance off.
 
 ## Tests (worker-api 469/469, admin-web 5/5, licensing-contracts 16/16)
 

@@ -115,7 +115,7 @@ See `docs/slices/2.6-self-onboarding.md` (full table). Summary:
 
 ## Exact calls for WT-10 (Setup app) and WT-11 (Connect)
 
-All POSTs send `Content-Type: application/json` and `Origin: https://box.affinityminds.in` (the
+All POSTs send `Content-Type: application/json` and `Origin: https://box.affinity.ai.in` (the
 customer auth writes refuse anything else, login-CSRF rule); keep the `cbx_session` cookie
 (`__Secure-cbx_session` on https) between calls.
 

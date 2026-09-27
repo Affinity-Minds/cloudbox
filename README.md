@@ -2,7 +2,7 @@
 
 CloudBox is a managed SaaS appliance platform that turns a physical Windows PC into a centrally licensed, privately networked, remotely accessible, backed-up, self-updating business application server.
 
-Production hostname: `https://box.affinityminds.in`
+Production hostname: `https://box.affinity.ai.in`
 
 ## Governing documents
 

@@ -453,5 +453,5 @@ and this change touches only `tenants.ts`, the contracts schema, and the create 
 - Screenshots: `docs/evidence/wt-p1-tenants/01-login-staff.png` through `13-tenant-archived.png`.
 - Test output: see "Tests run and results" above (full `pnpm run verify` output not saved to a
   file; re-run `pnpm run verify` from the repo root to reproduce — takes about 2 minutes).
-- Not deployed to `box.affinityminds.in` — this worktree never deploys; that happens after merge
+- Not deployed to `box.affinity.ai.in` — this worktree never deploys; that happens after merge
   into `phase-1/identity` via the existing GitHub Actions workflow.

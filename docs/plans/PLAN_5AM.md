@@ -8,7 +8,7 @@ Deadline: 05:00 IST 2026-09-27 (about 6 hours). Orchestrator: this session (Fabl
 |---|---|
 | Full spec, first commercial milestone (Section 0.12: physical CloudBox, Netmaker mesh, Connect, backup+restore, OTA, break-glass) | **8–10 weeks** calendar with 4–6 parallel agent worktrees. Dominated by physical Windows tests, self-hosted Netmaker, RDP Wrapper legal inventory, and restore drills. No amount of parallelism removes those. |
 | Cloud control plane only, Phases 0–3 cloud halves | **1–2 days** |
-| **Tonight (6 h)** | Phase 0 live on box.affinityminds.in; Phase 1 complete (OTP login, staff roles, tenants, memberships) and deployed; Phase 2 cloud side (enrollment tokens, device registry, fleet table); Phase 3 cloud side (plans, subscriptions, signed+encrypted entitlement issuance); Windows Agent installed on the owner's lab machine, enrolled for real, heartbeating into the fleet table, and **uninstalled back to original state** (Slice 2.1, 2.2, 2.3, new 2.5). |
+| **Tonight (6 h)** | Phase 0 live on box.affinity.ai.in; Phase 1 complete (OTP login, staff roles, tenants, memberships) and deployed; Phase 2 cloud side (enrollment tokens, device registry, fleet table); Phase 3 cloud side (plans, subscriptions, signed+encrypted entitlement issuance); Windows Agent installed on the owner's lab machine, enrolled for real, heartbeating into the fleet table, and **uninstalled back to original state** (Slice 2.1, 2.2, 2.3, new 2.5). |
 
 "Working product by 5 AM" therefore means: a real admin can log in with email OTP on the production URL, create a tenant, mint an enrollment token, install the Agent on the real Windows machine, see it enrolled and online in the fleet table, attach a subscription and issue a machine-bound entitlement that the Agent downloads, then run the uninstaller and prove nothing CloudBox remains. All audited, all server-authorised, all deployed.
 
@@ -20,7 +20,7 @@ Deadline: 05:00 IST 2026-09-27 (about 6 hours). Orchestrator: this session (Fabl
 - Deploy workflow line 75 has broken JSON quoting in `--data "{"status":...}"`. It would send garbage and fail the audited-release step.
 - `wrangler.jsonc` omits D1 `database_id` and R2 `bucket_name`; wrangler 4.135 accepts this in dry-run (auto-provision on deploy). Keep a fallback step that creates `cloudbox-db` / `cloudbox-artifacts` and injects ids if the first deploy refuses.
 - GitHub org secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist with visibility `all`. The `production` environment does not exist yet; GitHub creates it on first run.
-- The `affinityminds.in` zone is on Cloudflare nameservers but is **not** in either account this machine's wrangler login can see. Production deploys go through GitHub Actions only. `box.affinityminds.in` is NXDOMAIN until the first deploy provisions the custom domain.
+- The `affinity.ai.in` zone is on Cloudflare nameservers but is **not** in either account this machine's wrangler login can see. Production deploys go through GitHub Actions only. `box.affinity.ai.in` is NXDOMAIN until the first deploy provisions the custom domain.
 - This Linux machine has node 24, pnpm via corepack, git, gh. **No dotnet, no Windows.** Windows components compile only on the `windows-latest` CI runner tonight.
 - Pinned package versions all exist on npm. Latest useful: better-auth 1.7.6, jose 6.2.12, resend 6.30.0, @tanstack/react-router 1.170, @tanstack/react-table 9.2, shadcn 4.21, tailwindcss 4.3, input-otp 1.5, @cloudflare/vitest-pool-workers 0.22.
 - agent-notes routing table read. Binding shortcuts from it are applied in Section 4.
@@ -31,7 +31,7 @@ Deadline: 05:00 IST 2026-09-27 (about 6 hours). Orchestrator: this session (Fabl
 2. **Bootstrap super admin** = `soren@affinityminds.net`. Already set as GitHub repo variable `BOOTSTRAP_SUPER_ADMIN_EMAIL`. First login with that email is seeded as Super Admin; every other staff role is an audited grant.
 3. **A Windows machine exists.** WT-4 ships a self-contained `CloudBox.Agent.exe` CI artifact; the owner downloads it on the lab machine and runs the install, enrollment, heartbeat and uninstall demo path from `docs/runbooks/agent-install-dev.md`.
 4. **Uninstaller is in scope tonight** (new Slice 2.5, WT-4): remove literally everything CloudBox created and return the machine to its pre-install state, driven by an install manifest. Customer business-application data is never deleted by uninstall unless `--purge-data` is given with a typed confirmation, per spec §3.4.
-5. If the first deploy fails on custom-domain provisioning, the org Cloudflare token needs Zone:DNS:Edit on `affinityminds.in`.
+5. If the first deploy fails on custom-domain provisioning, the org Cloudflare token needs Zone:DNS:Edit on `affinity.ai.in`.
 
 ## 4. Shortcuts (use the existing wheel)
 
@@ -77,7 +77,7 @@ Eight worktrees is above the spec's 3–4 early-phase guidance. The reason is ex
 | 23:30–00:20 | Create `phase-1/identity`. Land **foundation commit**: migration `0003_identity_tenancy_devices.sql` with every Phase 1–3 table, Drizzle schema, Better Auth generated tables, permission catalogue seed, `audit()` helper, route index, contracts package, admin-web stack install (Tailwind, shadcn, TanStack, RHF, input-otp), nav config, API client, route stubs. Push. Publish exact table/column names in `docs/handoffs/foundation.md`. | |
 | 00:20 | Fan out WT-1, WT-2, WT-3, WT-5, WT-6 from `phase-1/identity`. | |
 | 00:20–02:30 | Answer contract questions, keep `WORKTREE_REGISTRY` current, pre-merge small green branches. | All implementation worktrees. |
-| 02:30–03:30 | Integrate WT-1 + WT-2 (+ WT-6 harness). Run full suite. WT-8 review. Fix. Merge Phase 1 to `main`. Deploy. **Live OTP login on box.affinityminds.in.** | WT-3, WT-5 finish. |
+| 02:30–03:30 | Integrate WT-1 + WT-2 (+ WT-6 harness). Run full suite. WT-8 review. Fix. Merge Phase 1 to `main`. Deploy. **Live OTP login on box.affinity.ai.in.** | WT-3, WT-5 finish. |
 | 03:30–04:30 | Integrate WT-3, WT-5, WT-4. Deploy. Owner runs the Agent artifact on the Windows machine: install → enroll → Online in Fleet → entitlement downloaded → uninstall → machine clean. | WT-7 finalises docs. |
 | 04:30–05:00 | Buffer. `BUILD_STATE.md`, evidence, handoffs, `ISSUE_LOG`. | |
 

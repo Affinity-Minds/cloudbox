@@ -40,7 +40,7 @@ public static class Cli
     public const string Usage = """
         CloudBox.Agent.exe <verb> [options]   (run from an elevated prompt)
 
-          install --base-url https://box.affinityminds.in --enroll-token CBX-ENROLL-...
+          install --base-url https://box.affinity.ai.in --enroll-token CBX-ENROLL-...
           status
           repair
           uninstall [--purge-data] [--keep-logs] [--offline]

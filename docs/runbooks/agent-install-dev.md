@@ -1,7 +1,7 @@
 # Runbook — install the CloudBox Agent on a lab PC (dev build)
 
 Owner: WT-4. Applies to: `CloudBox.Agent.exe` built by `.github/workflows/build-windows.yml`
-(artifact **`CloudBox.Agent-win-x64`**). Cloud: `https://box.affinityminds.in`.
+(artifact **`CloudBox.Agent-win-x64`**). Cloud: `https://box.affinity.ai.in`.
 
 > Everything the Agent changes on the machine is recorded in `C:\ProgramData\CloudBox\install-manifest.json`
 > (plus a DPAPI copy in `HKLM\SOFTWARE\CloudBox\ManifestBackup`) **before** it happens, so `uninstall` returns the
@@ -10,7 +10,7 @@ Owner: WT-4. Applies to: `CloudBox.Agent.exe` built by `.github/workflows/build-
 
 ## Prerequisites
 
-- Windows 10/11 or Server 2019+ x64, a local administrator account, outbound HTTPS to `box.affinityminds.in`.
+- Windows 10/11 or Server 2019+ x64, a local administrator account, outbound HTTPS to `box.affinity.ai.in`.
 - A fresh enrollment token (single use, short TTL) from the console **Enrollment** page. Every install needs a new
   token; a token that was already used returns "invalid, expired or already used".
 - No .NET install is needed: the exe is self-contained.
@@ -29,7 +29,7 @@ Owner: WT-4. Applies to: `CloudBox.Agent.exe` built by `.github/workflows/build-
    ```
 3. **Install and enroll:**
    ```powershell
-   .\CloudBox.Agent.exe install --base-url https://box.affinityminds.in --enroll-token <token from the Enrollment page>
+   .\CloudBox.Agent.exe install --base-url https://box.affinity.ai.in --enroll-token <token from the Enrollment page>
    ```
    Expected: `device key: tpm` (or `software … DEGRADED` when the PC has no usable TPM), `enrolled: CLOUDBOX-000NN
    (dev_…) tenant CBX-…`, `CloudBox Agent installed. Service CloudBoxAgent is running (Automatic, Delayed Start).`
@@ -93,7 +93,7 @@ Alternative uninstall path: Settings → Apps → Installed apps (or Control Pan
 | `This device key is already enrolled` (409) | Key reused from a previous install | `uninstall`, then install with a new token (uninstall deletes the key). |
 | `Leftover CloudBox artefacts found` | Earlier install partially removed | Run `uninstall` (cleans well-known artefacts even without a manifest), then install. |
 | `cloud: network_unavailable` | No network/DNS on the PC | Check connectivity. |
-| `cloud: cloud_unavailable` | Network fine, cloud 5xx/unreachable | Check `https://box.affinityminds.in/api/health`. |
+| `cloud: cloud_unavailable` | Network fine, cloud 5xx/unreachable | Check `https://box.affinity.ai.in/api/health`. |
 | `cloud: unauthorized` | Device revoked in console | Uninstall and re-enroll. |
 | `Tamper: DEVICE_BINDING_FAILED` | State file does not match this machine's key | Uninstall and re-enroll. |
 

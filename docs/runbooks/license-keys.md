@@ -1,7 +1,7 @@
 # Runbook — server licence keys (resellers)
 
 Server licence keys let a PC store sell CloudBox with a machine. The buyer signs up at
-`https://box.affinityminds.in/start`, chooses **Have a licence key?**, and the key creates their
+`https://box.affinity.ai.in/start`, chooses **Have a licence key?**, and the key creates their
 organisation with the key's plan attached as *pending*. The plan's term starts when their first
 server is activated (ADR 0011). Keys look like `CBX-LIC-XXXXX-XXXXX-XXXXX-XXXXX`.
 

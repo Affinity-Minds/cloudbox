@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCTION_ORIGIN: https://box.affinityminds.in
+  PRODUCTION_ORIGIN: https://box.affinity.ai.in
 
 jobs:
   deploy:

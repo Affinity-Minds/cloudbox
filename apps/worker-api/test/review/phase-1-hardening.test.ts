@@ -89,7 +89,7 @@ describe("F-8: session cookie attributes on https", () => {
     const s = await signInAs(env, { email: "cookie-attrs@example.test" });
     // Refreshing through get-session on the production origin re-issues the cookie.
     const res = await app.request(
-      "https://box.affinityminds.in/api/auth/get-session?disableCookieCache=true",
+      "https://box.affinity.ai.in/api/auth/get-session?disableCookieCache=true",
       { headers: { cookie: s.cookie.replace(/(^|; )better-auth/g, "$1__Secure-better-auth") } },
       env,
     );

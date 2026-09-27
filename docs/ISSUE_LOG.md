@@ -95,7 +95,7 @@ Newest first. Record only non-obvious failures or fixes with meaningful blast ra
 
 **Cause:** (1) The org `CLOUDFLARE_API_TOKEN` lacked D1/R2/Workers/zone permissions. (2) R2 is an account-level product that must be enabled once in the dashboard; no API token permission unlocks it. (3) `wrangler d1 create` without `--location` picks a region from the runner's vantage point (GitHub's US runners → WNAM), not from where users are.
 
-**Fix:** Owner regenerated the token with Workers Scripts/D1/R2/Account Settings + zone DNS/Workers Routes on `affinityminds.in`. Workflow now creates D1 with `--location apac` and recreates an *empty* database found elsewhere; the R2 step degrades to a warning and strips the binding until R2 is enabled.
+**Fix:** Owner regenerated the token with Workers Scripts/D1/R2/Account Settings + zone DNS/Workers Routes on `affinity.ai.in`. Workflow now creates D1 with `--location apac` and recreates an *empty* database found elsewhere; the R2 step degrades to a warning and strips the binding until R2 is enabled.
 
 **Blast radius:** Deploy workflow only. The recreate-if-empty branch must never fire on a populated database (it checks `num_tables == 0`); remove that branch once the database has data.
 

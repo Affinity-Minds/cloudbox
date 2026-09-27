@@ -10,7 +10,7 @@ Guide for enrolling a CloudBox device into the SaaS platform. This runbook cover
 
 ## Prerequisites
 
-- CloudBox SaaS accessible (https://box.affinityminds.in)
+- CloudBox SaaS accessible (https://box.affinity.ai.in)
 - Super Admin privileges
 - Windows machine prepared for CloudBox installation
 - CloudBox.Server.Setup.exe available (from CI artifacts)

@@ -803,7 +803,7 @@ describe("Turnstile testing keys and the staff route for licence keys", () => {
         metadata: { result_with_testing_key: true },
       }),
     );
-    const request = { host: "box.affinityminds.in", ip: null };
+    const request = { host: "box.affinity.ai.in", ip: null };
     expect(
       await verifyTurnstile(
         { TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA", ENVIRONMENT: "development" },
