@@ -48,7 +48,7 @@ describe("revokeDevice (handler logic, bypassing the staff gate)", () => {
     const { deviceId } = await enrollFreshDevice("devices-unit-1");
     const db = createDb(env.DB);
 
-    const first = await revokeDevice(db, { deviceId, actorId: "u1" });
+    const first = await revokeDevice(env, db, { deviceId, actorId: "u1" });
     expect(first).toBe("revoked");
 
     const [device] = await db.select().from(devices).where(eq(devices.id, deviceId));
@@ -59,13 +59,13 @@ describe("revokeDevice (handler logic, bypassing the staff gate)", () => {
       .where(and(eq(deviceCredentials.deviceId, deviceId), isNull(deviceCredentials.revokedAt)));
     expect(activeCreds).toHaveLength(0);
 
-    const second = await revokeDevice(db, { deviceId, actorId: "u1" });
+    const second = await revokeDevice(env, db, { deviceId, actorId: "u1" });
     expect(second).toBe("already_revoked");
   });
 
   it("reports not_found for an unknown device id", async () => {
     const db = createDb(env.DB);
-    const result = await revokeDevice(db, { deviceId: "dev_does-not-exist", actorId: "u1" });
+    const result = await revokeDevice(env, db, { deviceId: "dev_does-not-exist", actorId: "u1" });
     expect(result).toBe("not_found");
   });
 });

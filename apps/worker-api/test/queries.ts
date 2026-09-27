@@ -139,4 +139,25 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_OTP_SENT' AND created_at > ? AND json_extract(after_json, '$.outcome') IN ('sent', 'send_failed')) AS sent, (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_START_CEILING' AND created_at > ?) AS ceiling`,
     params: ["e@example.test", "2026-01-01", "e@example.test", "2026-01-01"],
   },
+  // ─── network/controller.ts (WT-9): one row per peer, looked up by its partial unique index ───
+  {
+    name: "network.controller: this device's peer rows for the Fleet Network tab",
+    sql: `select "id", "kind", "status", "netbird_peer_id", "created_at", "updated_at" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."device_id" = ?) order by "network_peers"."updated_at" desc`,
+    params: ["server", "dev_test"],
+  },
+  {
+    name: "network.controller: upsert lookup — server row by device id",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."device_id" = ?)`,
+    params: ["server", "dev_test"],
+  },
+  {
+    name: "network.controller: upsert lookup — client row by (tenant, user)",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."tenant_id" = ? and "network_peers"."user_id" = ?)`,
+    params: ["client", "ten_test", "u1"],
+  },
+  {
+    name: "network.controller: upsert lookup — support marker row by tenant",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."tenant_id" = ?)`,
+    params: ["support", "ten_test"],
+  },
 ];
