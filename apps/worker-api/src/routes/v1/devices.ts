@@ -7,12 +7,15 @@ import { audit } from "../../audit";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
 import { deviceCredentials, devices } from "../../db/schema";
-import type { AppEnv } from "../../env";
+import type { AppEnv, Bindings } from "../../env";
 import { nowIso } from "../../ids";
+// WT-9 (ADR 0007): removes the device's NetBird peer/setup key. No-op while NetBird is unconfigured.
+import { revokeDevicePeer } from "../../network/controller";
 
 export type RevokeDeviceResult = "revoked" | "already_revoked" | "not_found";
 
 export async function revokeDevice(
+  env: Bindings,
   db: Db,
   input: { deviceId: string; actorId: string; correlationId?: string | null },
 ): Promise<RevokeDeviceResult> {
@@ -46,13 +49,17 @@ export async function revokeDevice(
       source: "api",
     }),
   ]);
+  // Best-effort: an unreachable NetBird server must not fail the device revoke itself.
+  await revokeDevicePeer(env, db, input.deviceId).catch((error: unknown) => {
+    console.error("revokeDevice: peer revocation failed", input.deviceId, error);
+  });
   return "revoked";
 }
 
 const devicesRoute = new Hono<AppEnv>();
 
 devicesRoute.post("/:deviceId/revoke", requirePermission("device.manage"), async (c) => {
-  const result = await revokeDevice(createDb(c.env.DB), {
+  const result = await revokeDevice(c.env, createDb(c.env.DB), {
     deviceId: c.req.param("deviceId"),
     actorId: c.var.user.id,
     correlationId: c.var.correlationId,

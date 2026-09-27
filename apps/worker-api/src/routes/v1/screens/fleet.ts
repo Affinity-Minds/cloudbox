@@ -14,6 +14,8 @@ import { getPrincipal, setupPending } from "../../../auth/middleware";
 import { createDb, type Db } from "../../../db/client";
 import { auditLog, devices, entitlements, tenantMemberships, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
+// WT-9 (ADR 0007): the device's own NetBird peer rows for the Network tab — additive, same batch.
+import { deviceNetworkPeersQuery } from "../../../network/controller";
 import { newestPerTenant, tenantPlanQuery, toTenantPlan } from "../../../onboarding/plan";
 
 const ONLINE_WINDOW_MS = 2 * 60_000;
@@ -171,7 +173,7 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
     return "forbidden" as const;
   }
 
-  const [entitlementRows, auditRows, planRows] = await db.batch([
+  const [entitlementRows, auditRows, planRows, networkRows] = await db.batch([
     db
       .select({
         id: entitlements.id,
@@ -207,6 +209,8 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
       .limit(25),
     // WT-14: the tenant's plan state for the License tab (same round trip).
     tenantPlanQuery(db, [device.tenantId]),
+    // WT-9: this device's NetBird peer rows for the Network tab (same round trip).
+    deviceNetworkPeersQuery(db, deviceId),
   ]);
 
   const now = new Date().toISOString();
@@ -221,6 +225,7 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
     },
     entitlements: entitlementRows,
     plan: toTenantPlan(newestPerTenant(planRows).get(device.tenantId)),
+    network: networkRows,
     audit: auditRows.map(({ rowid: _rowid, beforeJson, afterJson, ...row }) => ({
       ...row,
       before: beforeJson ? JSON.parse(beforeJson) : null,

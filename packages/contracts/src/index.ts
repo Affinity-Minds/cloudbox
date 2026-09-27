@@ -8,6 +8,7 @@ export * from "./enrollment";
 export * from "./entitlement";
 export * from "./license-keys";
 export * from "./memberships";
+export * from "./network";
 export * from "./onboarding";
 export * from "./screens";
 export * from "./subscriptions";

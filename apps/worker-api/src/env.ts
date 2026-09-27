@@ -35,6 +35,12 @@ export type Bindings = {
   PHASE0_ADMIN_KEY?: string;
   /** 32 raw bytes, base64. AES-256-GCM key for `email_providers.secret_ciphertext` (WT-12). */
   PROVIDER_SECRETS_KEY?: string;
+  /** NetBird management API base URL, e.g. `https://net.affinityminds.in` (WT-9, ADR 0007). Unset
+   * in production until the self-hosted server exists — every network controller call becomes a
+   * no-op (`docs/runbooks/netbird-server.md`). */
+  NETBIRD_API_URL?: string;
+  /** NetBird service-user API token (Wrangler secret). Never logged. */
+  NETBIRD_API_TOKEN?: string;
 };
 
 /** Signed-in principal, set by `requireUser()` (WT-1). */

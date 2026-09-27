@@ -29,8 +29,11 @@ import { bearerToken, requireDevice, resolveDevice } from "../../devices/require
 // generation, or null if there is none or the highest one is revoked (never falls back to an
 // older generation). Heartbeat and GET /entitlement both read through this, not the table directly.
 import { currentEntitlementForDevice } from "../../entitlement/service";
-import type { AppDevice, AppEnv } from "../../env";
+import type { AppDevice, AppEnv, Bindings } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-9 (ADR 0007): mints this server's NetBird setup key at activation; revokes its peer/key on
+// uninstall. A no-op (see mintServerSetupKey/revokeDevicePeer) while NETBIRD_API_URL is unset.
+import { mintServerSetupKey, revokeDevicePeer } from "../../network/controller";
 // WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
 import { activateLicense } from "../../onboarding/activation";
 
@@ -177,7 +180,7 @@ export async function recordHeartbeat(
   };
 }
 
-export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> {
+export async function uninstallDevice(env: Bindings, db: Db, device: AppDevice): Promise<void> {
   const [current] = await db
     .select({ status: devices.status })
     .from(devices)
@@ -201,6 +204,10 @@ export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> 
       source: "agent",
     }),
   ]);
+  // Best-effort: an unreachable NetBird server must not fail the uninstall itself.
+  await revokeDevicePeer(env, db, device.id).catch((error: unknown) => {
+    console.error("uninstallDevice: peer revocation failed", device.id, error);
+  });
 }
 
 const agent = new Hono<AppEnv>();
@@ -230,11 +237,22 @@ agent.post(
       console.error("enroll: activation failed", deviceId, error);
       return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
     });
+    // WT-9: mint this server's NetBird setup key. Best-effort — a NetBird hiccup must not fail
+    // enrollment; the agent simply gets no `network` field and skips the Netclient install.
+    const network = await mintServerSetupKey(c.env, db, { deviceId, tenantId }).catch(
+      (error: unknown) => {
+        console.error("enroll: network provisioning failed", deviceId, error);
+        return { configured: false } as const;
+      },
+    );
     return c.json(
       {
         ...outcome.response,
         ...(licence.licenseState ? { licenseState: licence.licenseState } : {}),
         ...(licence.message ? { message: licence.message } : {}),
+        ...(network.configured
+          ? { network: { setupKey: network.setupKey, managementUrl: network.managementUrl } }
+          : {}),
       },
       201,
     );
@@ -289,7 +307,7 @@ agent.post("/uninstalled", async (c) => {
   const device = await resolveDevice(db, token, { allowRevoked: true });
   if (!device) return c.json({ error: "unauthenticated" }, 401);
 
-  await uninstallDevice(db, device);
+  await uninstallDevice(c.env, db, device);
   return c.body(null, 204);
 });
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AuditEntry } from "./common";
+import { FleetNetworkPeer } from "./network";
 import { TenantPlan } from "./onboarding";
 
 export const DeviceStatus = z.enum(["enrolled", "revoked", "transferred"]);
@@ -110,5 +111,9 @@ export const FleetDetailScreen = z.object({
   audit: z.array(AuditEntry),
   /** WT-14: the tenant's plan state (`no_active_plan` carries `NO_ACTIVE_PLAN_MESSAGE`). */
   plan: TenantPlan.optional(),
+  /** WT-9 (ADR 0007): this device's NetBird peer rows (normally one, `kind: "server"`), newest
+   * first. Empty when the controller has never touched this device (e.g. enrolled before
+   * `NETBIRD_API_URL` was set). */
+  network: z.array(FleetNetworkPeer).optional(),
 });
 export type FleetDetailScreen = z.infer<typeof FleetDetailScreen>;

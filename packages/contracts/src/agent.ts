@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { KeyProtection, RsaPublicJwk } from "./devices";
+import { AgentNetworkInfo } from "./network";
 
 /** `POST /api/v1/agent/enroll` body. */
 export const EnrollRequest = z.object({
@@ -39,6 +40,9 @@ export const EnrollResponse = z.object({
   licenseState: AgentLicenseState.optional(),
   /** Human text for a state that needs action (e.g. `NO_ACTIVE_PLAN_MESSAGE`); absent when licensed. */
   message: z.string().optional(),
+  /** WT-9 (ADR 0007): present only when the NetBird controller is configured; absent means the
+   * cloud has no private-mesh server yet, so the agent skips the Netclient install. */
+  network: AgentNetworkInfo.optional(),
 });
 export type EnrollResponse = z.infer<typeof EnrollResponse>;
 
