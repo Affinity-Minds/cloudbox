@@ -38,6 +38,9 @@ describe("ops shell", () => {
       "/ops/setup-authenticator",
       "/ops/staff", // WT-15
       "/ops/plans", // WT-13 (missing from OPS_ROUTES until this fix, see the WT-15 handoff)
+      "/ops/alerts", // WT-17
+      "/ops/backups", // WT-19
+      "/ops/updates", // WT-18
     ]) {
       const res = await get(path);
       expect(res.status, path).toBe(200);
