@@ -19,6 +19,10 @@ export const ID_PREFIX = {
   networkPeer: "npeer_",
   /** WT-11, ADR 0013: `rdp_session_grants` rows. */
   rdpSessionGrant: "rdpg_",
+  // WT-19 (migration 0017): backups.
+  backupJob: "bkj_",
+  backupArtifact: "bka_",
+  restoreTest: "rst_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

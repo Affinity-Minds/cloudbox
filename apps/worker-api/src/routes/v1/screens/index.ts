@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../../env";
 import audit from "./audit";
+import backups from "./backups";
 import fleet from "./fleet";
 import overview from "./overview";
 import plans from "./plans";
@@ -17,5 +18,6 @@ screens.route("/fleet", fleet); // WT-3
 screens.route("/tenants", tenants); // WT-2
 screens.route("/subscriptions", subscriptions); // WT-5
 screens.route("/plans", plans); // WT-13
+screens.route("/backups", backups); // WT-19
 
 export default screens;
