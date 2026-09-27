@@ -71,6 +71,13 @@
       "when": 1790509197640,
       "tag": "0016_releases_ota",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790518459873,
+      "tag": "p2_7_schema_fold_rdp_session_grants",
+      "breakpoints": true
     }
   ]
 }

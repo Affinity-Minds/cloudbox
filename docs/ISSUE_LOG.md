@@ -2,6 +2,42 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — P2-7: parallel worktrees hand-wrote migrations against a stale drizzle-kit snapshot chain
+**Symptom:** merging each schema-touching Phase 2 worktree (`wt/p9-backups-cloud`, `wt/p14-alerts`,
+`wt/p2-license-hold`, `wt/p10-releases`) into `phase-2/devices` in turn, the gate's
+`drizzle-kit generate --name probe` stopped reporting "No schema changes" and instead wrote a
+brand-new migration file every time, even though the tables it wanted to (re)create were already
+applied via that slice's own hand-written migration.
+
+**Cause:** Each worktree added its tables directly to `db/schema.ts` (or, for WT-11's
+`rdp_session_grants`, kept them in their own file per `_COMMON.md`'s "new tables land in their own
+file, folded in later" convention) and hand-wrote its migration SQL to match — but none of them
+regenerated `infra/cloudflare/migrations/meta/`'s snapshot chain, which stayed frozen at whatever
+the previous integration step last committed. `drizzle-kit generate` diffs the *current*
+`db/schema.ts` against the *last recorded snapshot*, so every previously-applied-but-unsnapshotted
+table reappeared as a "new" table on the next run.
+
+**Fix:** For each affected merge, ran the probe, verified its generated SQL was structurally
+identical to (same tables/columns/indexes/FKs as) the slice's own already-applied, hand-written
+migration file, then deleted the duplicate probe migration and re-tagged the newly generated
+snapshot's journal entry to that migration's name instead — advancing the snapshot chain without
+double-applying anything. At the final consolidation, folded `rdp_session_grants` into
+`db/schema.ts` itself (a one-line re-export shim left at `rdp/session-grants-table.ts` for its
+importers) and regenerated the snapshot the same way, so every table this phase added now has a
+real entry in the chain.
+
+**Blast radius:** Any future slice that adds a table directly to `db/schema.ts` (or, before folding
+in, to its own file per the "new tables land elsewhere, folded in later" convention) without also
+running `drizzle-kit generate` and committing the resulting snapshot will reproduce this the next
+time anyone runs the probe — the fix here is a one-time catch-up, not a structural prevention. If
+this recurs, check first whether the "new" tables the probe wants to create already exist in a
+committed, hand-written migration before assuming the schema actually changed.
+
+**Verification:** After each fix, `drizzle-kit generate --name probe` printed "No schema changes,
+nothing to migrate" with no new file written; `pnpm --filter @cloudbox/worker-api exec vitest run`
+stayed green throughout (the affected tables' own tests already exercised them against the
+real, hand-written migrations, never against a drizzle-kit-generated one).
+
 ## 2026-09-27 — Echoing a Hibernation WebSocket's own close code back to it throws (WT-16)
 **Symptom:** every test (and, would-be, every real client) that called `ws.close()` with no
 arguments crashed the Durable Object: `InvalidAccessError: Invalid WebSocket close code: 1005`,

@@ -1046,3 +1046,41 @@ export const alerts = sqliteTable(
     check("alerts_status_check", sql`${table.status} IN ('open', 'acknowledged', 'resolved')`),
   ],
 );
+
+// ─── RDP session grants (migration 0013, WT-11) ────────────────────────────────────────────────
+// Folded in from src/rdp/session-grants-table.ts at the phase-2/devices consolidation (docs/
+// ISSUE_LOG.md's P2-7): every table now lives here, per this file's own header comment; that file
+// keeps a one-line re-export so its (many) importers are unchanged. One minted managed-user
+// (`cloudNN`) credential grant for CloudBox Connect's RDP broker. The plaintext password is
+// returned to the caller exactly once (`POST /connect/devices/:deviceId/session`) and never
+// stored: `password_hash` (SHA-256) is kept only so a grant can be identified/audited without the
+// plaintext, and `password_ciphertext` is the compact JWE of `{"password":"…"}` encrypted to the
+// device's own enrolled RSA public key at grant time (the same key management scheme as the
+// entitlement envelope) — safe to store because only that device's private key (CNG-protected,
+// never leaves the machine) can open it. `delivered_at` marks the grant as already queued into a
+// heartbeat response so a slow-polling Agent isn't handed the same command twice.
+export const rdpSessionGrants = sqliteTable(
+  "rdp_session_grants",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    managedUser: text("managed_user").notNull(),
+    slot: integer("slot").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    passwordCiphertext: text("password_ciphertext").notNull(),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: createdAt(),
+    expiresAt: text("expires_at").notNull(),
+    deliveredAt: text("delivered_at"),
+    revokedAt: text("revoked_at"),
+  },
+  (table) => [
+    index("rdp_session_grants_device_idx").on(table.deviceId, table.expiresAt),
+    index("rdp_session_grants_pending_idx").on(table.deviceId, table.deliveredAt),
+  ],
+);
