@@ -16,6 +16,19 @@ export const ID_PREFIX = {
   emailProvider: "eprv_",
   licenseKey: "lkey_",
   licenseKeyBatch: "lkb_",
+  networkPeer: "npeer_",
+  /** WT-11, ADR 0013: `rdp_session_grants` rows. */
+  rdpSessionGrant: "rdpg_",
+  // WT-19 (migration 0017): backups.
+  backupJob: "bkj_",
+  backupArtifact: "bka_",
+  restoreTest: "rst_",
+  /** WT-17. */
+  alert: "alrt_",
+  // WT-18 (migration 0016): OTA releases.
+  release: "rel_",
+  releaseAssignment: "rla_",
+  releaseResult: "rlr_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

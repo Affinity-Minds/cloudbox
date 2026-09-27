@@ -1,11 +1,18 @@
 // Retire/reactivate confirmation (agent-notes ux-patterns "Confirmations"): names the specific
 // record and what else it affects — how many subscriptions are on this plan right now. Reversible
 // (reactivate undoes it), so this stops short of a typed-name confirmation.
-import type { Plan } from "@cloudbox/contracts";
+import { PLAN_RETIRE_REASON_CODES, type Plan } from "@cloudbox/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { toast } from "sonner";
 import { describeError } from "@/api/client";
 import { reactivatePlan, retirePlan } from "@/api/plans";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +22,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+const PLAN_RETIRE_REASON_LABELS: Record<(typeof PLAN_RETIRE_REASON_CODES)[number], string> = {
+  superseded: "Superseded by another plan",
+  pricing_change: "Pricing change",
+  discontinued: "Discontinued",
+  other: "Other",
+};
 
 export function RetirePlanDialog({
   plan,
@@ -27,9 +41,11 @@ export function RetirePlanDialog({
 }) {
   const queryClient = useQueryClient();
   const retiring = plan.status === "active";
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
 
   const mutation = useMutation({
-    mutationFn: () => (retiring ? retirePlan(plan.code) : reactivatePlan(plan.code)),
+    mutationFn: () =>
+      retiring ? retirePlan(plan.code, reasonRequestBody(reason)) : reactivatePlan(plan.code),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["screens", "plans"] });
       queryClient.invalidateQueries({ queryKey: ["plans", "active"] });
@@ -38,6 +54,7 @@ export function RetirePlanDialog({
           ? `${result.plan.name} retired — ${result.subscriptionCount} existing subscription${result.subscriptionCount === 1 ? "" : "s"} keep working`
           : `${result.plan.name} reactivated`,
       );
+      setReason({ code: "" });
       onOpenChange(false);
     },
     onError: (error) =>
@@ -78,6 +95,16 @@ export function RetirePlanDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {retiring ? (
+          <ReasonSelect
+            options={PLAN_RETIRE_REASON_CODES.map((code) => ({
+              code,
+              label: PLAN_RETIRE_REASON_LABELS[code],
+            }))}
+            value={reason}
+            onChange={setReason}
+          />
+        ) : null}
         {mutation.isError ? (
           <p role="alert" className="text-sm text-destructive">
             {describeError(mutation.error)}
@@ -86,7 +113,7 @@ export function RetirePlanDialog({
         <DialogFooter>
           <Button
             variant={retiring ? "destructive" : "default"}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || (retiring && !isReasonValid(reason))}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? "Saving…" : retiring ? "Retire plan" : "Reactivate plan"}

@@ -12,13 +12,29 @@ import { signInAs } from "./fixtures";
  *  - unversioned or index routes with no auth story of their own
  *  - `/api/auth/*`: Better Auth's own handler, not a `/api/v1` route
  *  - `/api/v1/agent/*`: device-Bearer auth, not staff/session auth — covered by WT-3's own tests
+ *  - `/api/v1/backups/jobs*`, `/api/v1/backups/policy`: same story, device-Bearer auth via
+ *    `requireDevice()` — covered by WT-19's own tests (`backups.test.ts`). `/api/v1/backups`
+ *    itself is not exempt: `POST /restore-tests` there is staff/`backup.restore`-gated.
+ *  - `/api/v1/releases/assigned`, `/:id/download`, `/:id/result`: device-Bearer auth mixed into
+ *    the same router as WT-18's staff routes (so a path-prefix exemption would also hide those) —
+ *    covered by test/releases.test.ts, same rationale as `/api/v1/agent/*` above
  *  - any route whose current handler is still the foundation's `{ module, status: 'stub' }`
  *    placeholder, which answers 200 to everything until its owner implements it
  */
+const DEVICE_BEARER_ROUTES = new Set([
+  "/api/v1/releases/assigned",
+  "/api/v1/releases/:id/download",
+  "/api/v1/releases/:id/result",
+]);
+
 function isAllowlisted(path: string): boolean {
   if (path === "/api/v1" || path === "/api/v1/") return true;
   // WT-14: `/api/v1/onboarding/config` is public by design (the /start page's Turnstile site key).
   if (path === "/api/v1/onboarding/config") return true;
+  // WT-19: device-Bearer routes, not staff/session-gated (see the doc comment above).
+  if (path === "/api/v1/backups/policy") return true;
+  if (path === "/api/v1/backups/jobs" || path.startsWith("/api/v1/backups/jobs/")) return true;
+  if (DEVICE_BEARER_ROUTES.has(path)) return true;
   return ["/api/health", "/api/version", "/api/auth", "/api/v1/agent"].some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );
@@ -42,6 +58,10 @@ const SELF_SERVICE_ROUTES = new Set([
   "POST /api/v1/onboarding/tenants",
   "POST /api/v1/onboarding/redeem",
   "POST /api/v1/onboarding/activation-grants",
+  // WT-11 (ADR 0013): CloudBox Connect's RDP credential broker. Customer session only (a staff
+  // session, read_only included, is 401 by the two-identity-systems rule); further gated by active
+  // membership in the device's own tenant, re-resolved server-side every call (rdp/session.ts).
+  "POST /api/v1/connect/devices/:deviceId/session",
 ]);
 
 type RouteUnderTest = { method: string; path: string };

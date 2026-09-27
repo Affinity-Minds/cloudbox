@@ -408,8 +408,12 @@ describe("entitlement issuance", () => {
     const revokeEvents = (await auditFor(items[0]?.id ?? "")).filter(
       (e) => e.eventType === "LICENSE_REVOKED",
     );
+    // The legacy bare `{ reason }` shape maps to reasonCode "other" (docs/handoffs/
+    // wt-p2-reason-dropdowns.md): the audited `reason` carries the code prefix.
     expect(revokeEvents[0]?.after).toMatchObject({
-      reason: "Customer returned the hardware",
+      reasonCode: "other",
+      reasonText: "Customer returned the hardware",
+      reason: "other: Customer returned the hardware",
       generations: [2, 1],
     });
 
@@ -423,6 +427,46 @@ describe("entitlement issuance", () => {
     // Re-licensing after revocation continues the sequence.
     const reissued = await call("POST", `/devices/${deviceId}/entitlements/issue`, {});
     expect(((await reissued.json()) as IssueEntitlementResponse).entitlement.generation).toBe(3);
+  });
+
+  it("revoke's reason-code shape: missing/invalid code and other-without-text are 400, a valid code+text audits both", async () => {
+    const tenantId = await seedTenant();
+    const { deviceId } = await seedDevice(tenantId);
+    await createSubscription(tenantId);
+    await call("POST", `/devices/${deviceId}/entitlements/issue`, {});
+
+    expect(
+      (await call("POST", `/devices/${deviceId}/entitlements/revoke`, { reasonText: "no code" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", `/devices/${deviceId}/entitlements/revoke`, {
+          reasonCode: "not_a_real_code",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await call("POST", `/devices/${deviceId}/entitlements/revoke`, { reasonCode: "other" }))
+        .status,
+    ).toBe(400);
+
+    const revoked = await call("POST", `/devices/${deviceId}/entitlements/revoke`, {
+      reasonCode: "device_replaced",
+      reasonText: "Swapped for a newer unit",
+    });
+    expect(revoked.status).toBe(200);
+
+    const history = await call("GET", `/devices/${deviceId}/entitlements`);
+    const items = ((await history.json()) as { items: { id: string; generation: number }[] }).items;
+    const revokeEvents = (await auditFor(items[0]?.id ?? "")).filter(
+      (e) => e.eventType === "LICENSE_REVOKED",
+    );
+    expect(revokeEvents[0]?.after).toMatchObject({
+      reasonCode: "device_replaced",
+      reasonText: "Swapped for a newer unit",
+      reason: "device_replaced: Swapped for a newer unit",
+    });
   });
 
   it("refuses revoked devices, over-limit devices, unknown devices and a missing signing key", async () => {

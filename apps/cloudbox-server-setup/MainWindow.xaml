@@ -1,0 +1,141 @@
+<Window x:Class="CloudBox.Server.Setup.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CloudBox Server Setup" Width="640" Height="560" ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen" Background="#F8FAFC" FontFamily="Segoe UI" FontSize="13">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="#0F172A" Padding="22,14">
+      <StackPanel>
+        <TextBlock Text="CloudBox Server Setup" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+        <TextBlock x:Name="StepCaption" Foreground="#94A3B8" Text="Welcome" />
+      </StackPanel>
+    </Border>
+    <TextBlock x:Name="ErrorText" DockPanel.Dock="Bottom" Foreground="#B91C1C" TextWrapping="Wrap" Margin="24,0,24,12" />
+    <Grid Margin="24,18,24,8">
+
+      <!-- 1. Welcome -->
+      <StackPanel x:Name="WelcomePanel">
+        <TextBlock Style="{StaticResource H1}" Text="Turn this PC into a CloudBox server" />
+        <TextBlock Style="{StaticResource Body}">
+          Setup installs the CloudBox Agent and Status app, turns on Remote Desktop for your team's CloudBox users,
+          adds the licence gate, and activates this PC for your organisation. Everything it changes is recorded, so
+          removing CloudBox from Apps &amp; Features puts this PC back exactly as it was.
+        </TextBlock>
+        <TextBlock Style="{StaticResource Body}" Text="You will sign in with your email and a six-digit code. No password." />
+        <Expander Header="Advanced" Margin="0,6,0,0">
+          <StackPanel Margin="0,8,0,0">
+            <TextBlock Text="CloudBox server address" Foreground="#475569" />
+            <TextBox x:Name="BaseUrlBox" Style="{StaticResource Field}" />
+          </StackPanel>
+        </Expander>
+        <TextBlock x:Name="PreflightText" Style="{StaticResource Body}" Foreground="#B45309" Margin="0,12,0,0" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+          <Button x:Name="WelcomeNext" Style="{StaticResource Primary}" Content="Next" Click="WelcomeNext_Click" IsDefault="True" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 2. Sign in -->
+      <StackPanel x:Name="SignInPanel" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource H1}" Text="Sign in to CloudBox" />
+        <TextBlock Style="{StaticResource Body}" Text="Use the email your CloudBox organisation knows you by. We will email you a six-digit code." />
+        <TextBlock Text="Email" Foreground="#475569" />
+        <DockPanel>
+          <Button x:Name="SendCodeButton" DockPanel.Dock="Right" Style="{StaticResource Primary}" Content="Send code"
+                  Margin="8,2,0,10" Click="SendCode_Click" IsDefault="True" />
+          <TextBox x:Name="EmailBox" Style="{StaticResource Field}" />
+        </DockPanel>
+        <StackPanel x:Name="CodePanel" Visibility="Collapsed" Margin="0,6,0,0">
+          <TextBlock x:Name="CodeSentText" Style="{StaticResource Body}" />
+          <StackPanel x:Name="DigitsPanel" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBox Style="{StaticResource Digit}" />
+            <TextBox Style="{StaticResource Digit}" />
+            <TextBox Style="{StaticResource Digit}" />
+            <TextBox Style="{StaticResource Digit}" />
+            <TextBox Style="{StaticResource Digit}" />
+            <TextBox Style="{StaticResource Digit}" />
+          </StackPanel>
+          <Button x:Name="VerifyButton" Style="{StaticResource Primary}" Content="Verify" HorizontalAlignment="Left" Click="Verify_Click" />
+        </StackPanel>
+        <Separator Margin="0,18,0,12" />
+        <TextBlock Style="{StaticResource Body}" Text="New to CloudBox, or asked for an extra check? Create or verify your account in a secure CloudBox page:" />
+        <Button Style="{StaticResource Secondary}" Content="Open the CloudBox sign-up page" HorizontalAlignment="Left" Click="WebSignIn_Click" />
+      </StackPanel>
+
+      <!-- 3. Organisation -->
+      <StackPanel x:Name="OrgPanel" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource H1}" Text="Choose the organisation" />
+        <RadioButton x:Name="ExistingOrgRadio" GroupName="Org" IsChecked="True" Content="Use one of my organisations" Margin="0,0,0,6" />
+        <ListBox x:Name="TenantList" Height="120" Margin="18,0,0,10" />
+        <RadioButton x:Name="NewOrgRadio" GroupName="Org" Content="Set up a new organisation" Margin="0,0,0,6" />
+        <Grid Margin="18,0,0,0" IsEnabled="{Binding IsChecked, ElementName=NewOrgRadio}">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="170" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition /><RowDefinition /><RowDefinition />
+          </Grid.RowDefinitions>
+          <TextBlock Grid.Row="0" Text="Organisation name" VerticalAlignment="Center" />
+          <TextBox Grid.Row="0" Grid.Column="1" x:Name="OrgNameBox" Style="{StaticResource Field}" />
+          <TextBlock Grid.Row="1" Text="Time zone" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TimeZoneBox" Margin="0,2,0,10" IsEditable="True" />
+          <TextBlock Grid.Row="2" Text="Licence key (optional)" VerticalAlignment="Center" />
+          <TextBox Grid.Row="2" Grid.Column="1" x:Name="LicenceKeyBox" Style="{StaticResource Field}" CharacterCasing="Upper" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+          <Button x:Name="OrgNext" Style="{StaticResource Primary}" Content="Next" Click="OrgNext_Click" IsDefault="True" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 4. Confirm -->
+      <StackPanel x:Name="ConfirmPanel" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource H1}" x:Name="ConfirmQuestion" />
+        <TextBlock Style="{StaticResource Body}">
+          This PC will be linked to that organisation, Remote Desktop will be turned on for CloudBox users only, and
+          remote access will follow the organisation's CloudBox plan. The local console always keeps working.
+        </TextBlock>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+          <Button Style="{StaticResource Secondary}" Content="Back" Margin="0,0,8,0" Click="ConfirmBack_Click" />
+          <Button x:Name="ConfirmYes" Style="{StaticResource Primary}" Content="Yes, activate" Click="ConfirmYes_Click" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 5. Install -->
+      <StackPanel x:Name="InstallPanel" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource H1}" Text="Installing CloudBox Server" />
+        <ProgressBar x:Name="InstallProgressBar" Height="6" Margin="0,0,0,12" Maximum="11" />
+        <StackPanel x:Name="StepList" />
+      </StackPanel>
+
+      <!-- 6. Summary -->
+      <StackPanel x:Name="SummaryPanel" Visibility="Collapsed">
+        <TextBlock x:Name="SummaryTitle" Style="{StaticResource H1}" />
+        <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="6" Padding="16,12" Margin="0,4,0,12">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Foreground="#64748B" Text="Tenant ID" Margin="0,3" />
+            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="SummaryTenant" FontWeight="SemiBold" FontSize="16" Margin="0,3" />
+            <TextBlock Grid.Row="1" Foreground="#64748B" Text="Server name" Margin="0,3" />
+            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="SummaryDevice" Margin="0,3" />
+            <TextBlock Grid.Row="2" Foreground="#64748B" Text="Licence" Margin="0,3" />
+            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="SummaryLicence" TextWrapping="Wrap" Margin="0,3" />
+            <TextBlock Grid.Row="3" Foreground="#64748B" Text="Remote users" Margin="0,3" />
+            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="SummaryUsers" Margin="0,3" />
+            <TextBlock Grid.Row="4" Foreground="#64748B" Text="Remote access" Margin="0,3" />
+            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="SummaryRdp" TextWrapping="Wrap" Margin="0,3" />
+          </Grid>
+        </Border>
+        <TextBlock x:Name="SummaryHint" Style="{StaticResource Body}" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Style="{StaticResource Primary}" Content="Finish" Click="Finish_Click" IsDefault="True" />
+        </StackPanel>
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</Window>

@@ -166,6 +166,69 @@ describe("staff management API", () => {
     expect((await grant(root, "short@example.test", "support", "too-short")).status).toBe(400);
   });
 
+  it("lists 2FA/must-change-password/last-sign-in (WT-15 staff screen fields)", async () => {
+    // root signed in via signInAs's test-utils shortcut (a real session, but not through the real
+    // /sign-in/* route), so it never produces an AUTH_LOGIN_SUCCEEDED audit row — lastSignInAt is
+    // honestly null, same as a brand-new staff member who has never signed in.
+    const before = await call("/api/v1/staff", root);
+    const beforeRow = ((await before.json()) as { items: StaffMember[] }).items.find(
+      (m) => m.userId === root.userId,
+    );
+    expect(beforeRow).toMatchObject({ mustChangePassword: false, twoFactorEnabled: true });
+    expect(beforeRow?.lastSignInAt).toBeNull();
+
+    // A brand-new staff member: never signed in, must change password.
+    const fresh = await grant(root, "never-signed-in@example.test", "read_only", INITIAL);
+    expect(fresh.status).toBe(201);
+    const freshMember = (await fresh.json()) as StaffMember;
+    expect(freshMember.lastSignInAt).toBeNull();
+    expect(freshMember.mustChangePassword).toBe(true);
+
+    // A real password sign-in (no authenticator registered yet, so it completes without a second
+    // factor) does audit AUTH_LOGIN_SUCCEEDED — lastSignInAt then reports it.
+    const signIn = await app.request(
+      "/api/ops/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.55",
+          origin: "http://localhost",
+        },
+        body: JSON.stringify({ email: "never-signed-in@example.test", password: INITIAL }),
+      },
+      env,
+    );
+    expect(signIn.status).toBe(200);
+    const after = await call("/api/v1/staff", root);
+    const afterRow = ((await after.json()) as { items: StaffMember[] }).items.find(
+      (m) => m.userId === freshMember.userId,
+    );
+    expect(typeof afterRow?.lastSignInAt).toBe("string");
+  });
+
+  it("revoke accepts an optional reason, kept only in the audit row", async () => {
+    const target = await signInAs(env, {
+      email: "revoke-reason@example.test",
+      staffRole: "read_only",
+    });
+    const revoked = await call(`/api/v1/staff/${target.userId}`, root, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: "role no longer needed" }),
+    });
+    expect(revoked.status).toBe(204);
+    const rows = await auditFor(target.userId);
+    const last = rows.at(-1);
+    expect(last?.event_type).toBe("STAFF_ROLE_REVOKED");
+    // Legacy bare {reason} maps to reasonCode "other" (packages/contracts/src/reasons.ts), so the
+    // audited `reason` is "other: <text>", not the bare text.
+    expect(JSON.parse(last?.after_json ?? "null")).toEqual({
+      reasonCode: "other",
+      reasonText: "role no longer needed",
+      reason: "other: role no longer needed",
+    });
+  });
+
   it("refuses a cross-site grant", async () => {
     const response = await app.request(
       "/api/v1/staff",

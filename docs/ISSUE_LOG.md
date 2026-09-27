@@ -2,6 +2,90 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — P2-7: parallel worktrees hand-wrote migrations against a stale drizzle-kit snapshot chain
+**Symptom:** merging each schema-touching Phase 2 worktree (`wt/p9-backups-cloud`, `wt/p14-alerts`,
+`wt/p2-license-hold`, `wt/p10-releases`) into `phase-2/devices` in turn, the gate's
+`drizzle-kit generate --name probe` stopped reporting "No schema changes" and instead wrote a
+brand-new migration file every time, even though the tables it wanted to (re)create were already
+applied via that slice's own hand-written migration.
+
+**Cause:** Each worktree added its tables directly to `db/schema.ts` (or, for WT-11's
+`rdp_session_grants`, kept them in their own file per `_COMMON.md`'s "new tables land in their own
+file, folded in later" convention) and hand-wrote its migration SQL to match — but none of them
+regenerated `infra/cloudflare/migrations/meta/`'s snapshot chain, which stayed frozen at whatever
+the previous integration step last committed. `drizzle-kit generate` diffs the *current*
+`db/schema.ts` against the *last recorded snapshot*, so every previously-applied-but-unsnapshotted
+table reappeared as a "new" table on the next run.
+
+**Fix:** For each affected merge, ran the probe, verified its generated SQL was structurally
+identical to (same tables/columns/indexes/FKs as) the slice's own already-applied, hand-written
+migration file, then deleted the duplicate probe migration and re-tagged the newly generated
+snapshot's journal entry to that migration's name instead — advancing the snapshot chain without
+double-applying anything. At the final consolidation, folded `rdp_session_grants` into
+`db/schema.ts` itself (a one-line re-export shim left at `rdp/session-grants-table.ts` for its
+importers) and regenerated the snapshot the same way, so every table this phase added now has a
+real entry in the chain.
+
+**Blast radius:** Any future slice that adds a table directly to `db/schema.ts` (or, before folding
+in, to its own file per the "new tables land elsewhere, folded in later" convention) without also
+running `drizzle-kit generate` and committing the resulting snapshot will reproduce this the next
+time anyone runs the probe — the fix here is a one-time catch-up, not a structural prevention. If
+this recurs, check first whether the "new" tables the probe wants to create already exist in a
+committed, hand-written migration before assuming the schema actually changed.
+
+**Verification:** After each fix, `drizzle-kit generate --name probe` printed "No schema changes,
+nothing to migrate" with no new file written; `pnpm --filter @cloudbox/worker-api exec vitest run`
+stayed green throughout (the affected tables' own tests already exercised them against the
+real, hand-written migrations, never against a drizzle-kit-generated one).
+
+## 2026-09-27 — Echoing a Hibernation WebSocket's own close code back to it throws (WT-16)
+**Symptom:** every test (and, would-be, every real client) that called `ws.close()` with no
+arguments crashed the Durable Object: `InvalidAccessError: Invalid WebSocket close code: 1005`,
+thrown from inside `webSocketClose()`.
+
+**Cause:** `webSocketClose(ws, code, reason, wasClean)` is called with the *received* close code.
+A close with no code negotiates as `1005` ("no status received") on the wire — a code the spec
+reserves for exactly this situation and one you are never allowed to *send*. Calling
+`ws.close(code, reason)` inside the handler with that same `code` (a natural-looking "acknowledge
+the close" pattern, and what Cloudflare's own doc example shows) throws.
+
+**Fix:** Don't call `ws.close()` in `webSocketClose()` at all. At this repo's `compatibility_date`
+(`web_socket_auto_reply_to_close`, ≥ 2026-04-07), the runtime already auto-replies to close
+frames — Cloudflare's own doc comment on the handler says as much ("calling close() is safe but
+no longer required"), which undersells it: for a `1005` it is actively unsafe, not merely
+redundant.
+
+**Blast radius:** Any Durable Object using the WebSocket Hibernation API on a client that closes
+without an explicit code (every browser tab close, and most client libraries' default
+`.close()`) — not specific to `FleetPresence`. Worth adding to `sorensd/agent-notes`
+(`platform/cloudflare-workers.md`) — not done from this worktree (out of scope: this worktree
+touches only the `cloudbox` repo); flagged in the handoff's "Requests to another worktree".
+
+**Verification:** `test/realtime.test.ts` calls `ws.close()` with no arguments after every
+WebSocket assertion; all 13 cases pass with the handler reduced to a no-op.
+
+## 2026-09-27 — `crypto.DigestStream` is a `ReferenceError` as a bare global, and untyped via `crypto.` too (WT-18)
+**Symptom:** `storePackage` (streaming a release package into R2 while hashing it) threw `ReferenceError: DigestStream is not defined` at runtime in the `@cloudflare/vitest-pool-workers` test pool, even though `@cloudflare/workers-types` declares it. Separately, `tsc` rejected `crypto.DigestStream` with "Property 'DigestStream' does not exist on type 'Crypto'".
+
+**Cause:** Two independent issues stacked. (1) `@cloudflare/workers-types` declares `DigestStream` both as a bare ambient class and as a `Crypto.DigestStream` property, but this repo's `tsconfig.base.json` includes `"lib": ["DOM", …]` (every `Bindings` type needs DOM's other globals), and lib.dom.d.ts's own `Crypto` interface — which does not carry `DigestStream` — wins the merge for the global `crypto` binding's *type*. (2) At runtime in the pool's (older, pinned) workerd, `DigestStream` is reachable only as `crypto.DigestStream`, not as a bare global — the opposite of what the bare-global `ReferenceError` first suggested.
+
+**Fix:** `new (crypto as unknown as { DigestStream: typeof DigestStream }).DigestStream("SHA-256")` — one cast at the single call site (`apps/worker-api/src/releases/upload.ts`), rather than widening the ambient `Crypto` type repo-wide.
+
+**Blast radius:** Any future use of a Workers-only runtime API that is also a *property* of a lib.dom-shadowed global (not just a bare global) will hit the same two-layer trap: fix the bare-global type error first, then still expect a runtime `ReferenceError` until the access goes through the object, not the identifier.
+
+**Verification:** `apps/worker-api/test/releases.test.ts` "stores the package in R2, computes its sha256 and signs a verifiable manifest" passes against the real pool.
+
+## 2026-09-27 — `SubtleCrypto.importKey`/`sign` reject a `Uint8Array` built via `Uint8Array.from(..., mapFn)` or a bare `Uint8Array` return type (WT-18)
+**Symptom:** `tsc` error on `crypto.subtle.importKey("raw", material, …)`: `Uint8Array<ArrayBufferLike>` is not assignable to `BufferSource` (`ArrayBufferView<ArrayBuffer>` needs `buffer: ArrayBuffer`, not `ArrayBufferLike`, which also covers `SharedArrayBuffer`). `TextEncoder.prototype.encode` is unaffected (it returns `Uint8Array<ArrayBuffer>` already) — only bytes built by hand tripped this.
+
+**Cause:** This TypeScript/lib version's `Uint8Array.from(iterable, mapFn)` overload, and a bare `Uint8Array` return-type annotation (no generic argument), both widen to `Uint8Array<ArrayBufferLike>`, which `BufferSource`-typed Web Crypto parameters (`importKey`, `sign`, `verify`, `encrypt`/`decrypt`) no longer accept.
+
+**Fix:** Build the bytes with `new Uint8Array(length)` + an index loop instead of `Uint8Array.from(…, mapFn)`, and annotate every such helper's return type explicitly as `Uint8Array<ArrayBuffer>`, not bare `Uint8Array` (`apps/worker-api/src/releases/download-token.ts`).
+
+**Blast radius:** Any hand-built (not `TextEncoder`-sourced) byte buffer passed to a Web Crypto call in this codebase going forward.
+
+**Verification:** `pnpm --filter @cloudbox/worker-api typecheck` clean; `releases.test.ts`'s download-token tests exercise both the sign and verify paths.
+
 ## 2026-09-27 — Hand-rolled route resolution skipped the staff first-sign-in setup gate (WT-3)
 **Symptom:** WT-8's review sweep S-6 (every `/api/v1` route 403s `setup_required` for staff mid password-change/authenticator-enrolment) failed on `GET /screens/fleet` and `GET /screens/fleet/:deviceId` — a staff account that hadn't finished ADR 0009's forced setup could still read both.
 
@@ -155,6 +239,17 @@ Newest first. Record only non-obvious failures or fixes with meaningful blast ra
 **Blast radius:** `/start` UI only (the API was correct).
 
 **Verification:** Playwright run against wrangler dev + fresh local D1 (`docs/evidence/wt-p2-onboarding/01…06`).
+
+## 2026-09-27 — A staff licence revoke was undone within a minute (found by WT-10)
+**Symptom:** after Subscriptions → Revoke, the lab server went back to `VALID` on its next heartbeat; the licence could only be stopped by suspending the whole plan.
+
+**Cause:** WT-14's heartbeat auto-issuance (`activateLicense`) issues whenever a device has no live entitlement and the tenant's plan is active. A revoke leaves exactly that state, so the next heartbeat issued a new generation.
+
+**Fix:** licence hold (migration 0019): revoke sets `devices.license_hold_*` (`LICENSE_HOLD_PLACED`); automatic issuance skips held devices and reports `licenseState: "revoked"`; only a staff Issue/Renew clears it (`LICENSE_HOLD_CLEARED`).
+
+**Blast radius:** any device whose licence staff revoked while its tenant's plan was active (Phase 2 cloud, since the WT-14 merge).
+
+**Verification:** `test/license-hold.test.ts`; lab runbook step 4 updated.
 
 ## Template
 

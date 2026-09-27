@@ -23,10 +23,27 @@ public sealed class AgentState
     public TrustedTimeState TrustedTime { get; set; } = new();
     public int EntitlementGeneration { get; set; }
 
-    /// <summary>Compact JWE as received. Verification is Slice 3.3; never logged.</summary>
+    /// <summary>Compact JWE, stored only after it verified for this device (Slice 3.3). Never logged.</summary>
     public string? Entitlement { get; set; }
 
     public DateTimeOffset? EntitlementFetchedAt { get; set; }
+
+    /// <summary>Highest generation ever accepted: a stale lease can never supersede a newer one (spec §33.3).</summary>
+    public int HighestEntitlementGeneration { get; set; }
+
+    /// <summary>The cloud reported no live entitlement while one is held here (revoked). Cleared by a newer generation.</summary>
+    public bool EntitlementRevoked { get; set; }
+
+    /// <summary>The cloud refused this device's credential (401/403): revoked or uninstalled elsewhere.</summary>
+    public bool DeviceRevoked { get; set; }
+
+    /// <summary>Last cloud licence verdict (<c>licensed | no_active_plan | device_limit_reached</c>) and its message.</summary>
+    public string? CloudLicenseState { get; set; }
+
+    public string? CloudMessage { get; set; }
+
+    /// <summary>Server public ES256 JWKs (JSON, with kid) pinned at enrollment; only ever added to (ADR 0004 rotation).</summary>
+    public List<string> PinnedSigningKeys { get; set; } = [];
 }
 
 /// <summary>

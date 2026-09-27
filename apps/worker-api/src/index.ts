@@ -8,28 +8,20 @@ import { customerCodeStepUp } from "./auth/challenge";
 import { guardFor, isSameOriginWrite } from "./auth/middleware";
 import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
-import type { AppEnv, Bindings } from "./env";
+import type { AppEnv } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
 import { apiVersion, correlationId } from "./http";
 import { onboardingAuth } from "./onboarding/auth-routes";
 import { serveAsset } from "./ops-shell";
+// WT-16: the FleetPresence Durable Object lives in src/realtime/fleet-presence.ts; re-exported
+// here because `main`/`exports` (wrangler.jsonc) bind the class from this file.
+import { FleetPresence } from "./realtime/fleet-presence";
 import v1 from "./routes/v1";
 import { logoutFor } from "./routes/v1/auth";
+import { scheduled } from "./scheduled";
 
 export type { Bindings } from "./env";
-
-export class FleetPresence {
-  constructor(
-    private readonly state: DurableObjectState,
-    private readonly env: Bindings,
-  ) {}
-
-  async fetch(): Promise<Response> {
-    void this.state;
-    void this.env;
-    return new Response(null, { status: 204 });
-  }
-}
+export { FleetPresence };
 
 const app = new Hono<AppEnv>();
 
@@ -238,4 +230,10 @@ app.notFound((c) => {
   return serveAsset(c);
 });
 
-export default app;
+// WT-19/WT-17: the Worker's Cron entry point (`src/scheduled.ts`'s own hook list, which runs both
+// the alerts evaluator and the backup retention sweep). A module worker's default export needs a
+// `scheduled` method alongside `fetch` for Cron Triggers to fire (`wrangler.jsonc`'s
+// `triggers.crons`) — attached to the same `app` object, not a replacement default export, so
+// every existing test's `app.request(...)` (Hono's own test helper) keeps working unchanged;
+// Hono's `fetch` is already an instance property, so this only adds one.
+export default Object.assign(app, { scheduled });

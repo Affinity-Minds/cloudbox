@@ -12,12 +12,13 @@
 import {
   type AgentLicenseState,
   DEVICE_LIMIT_MESSAGE,
+  LICENSE_REVOKED_MESSAGE,
   NO_ACTIVE_PLAN_MESSAGE,
 } from "@cloudbox/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { audit } from "../audit";
 import type { Db } from "../db/client";
-import { subscriptions } from "../db/schema";
+import { devices, subscriptions } from "../db/schema";
 import {
   currentEntitlementForDevice,
   EntitlementRefusal,
@@ -29,6 +30,12 @@ import { isRunning, newestPerTenant, type PlanRow, tenantPlanQuery } from "./pla
 /** Plan term when `plans.term_days` (WT-13) is absent or empty. */
 export const DEFAULT_TERM_DAYS = 365;
 const DAY_MS = 86_400_000;
+
+const held = {
+  licenseState: "revoked",
+  message: LICENSE_REVOKED_MESSAGE,
+  generation: null,
+} as const satisfies ActivationOutcome;
 
 export type ActivationOutcome = {
   licenseState?: AgentLicenseState;
@@ -110,11 +117,14 @@ export async function activateLicense(
   now = new Date(),
 ): Promise<ActivationOutcome> {
   const correlationId = options.correlationId ?? null;
-  const [current, planRows] = await Promise.all([
+  const [current, planRows, holdRows] = await Promise.all([
     currentEntitlementForDevice(db, device.id),
     tenantPlanQuery(db, [device.tenantId]),
+    db.select({ reason: devices.licenseHoldReason }).from(devices).where(eq(devices.id, device.id)),
   ]);
   if (current) return { licenseState: "licensed", generation: current.generation };
+  // Licence hold: a staff revoke stands until a staff Issue/Renew. Nothing is redeemed or issued.
+  if (holdRows[0]?.reason) return held;
 
   let plan = newestPerTenant(planRows).get(device.tenantId);
   const none: ActivationOutcome = {
@@ -150,6 +160,7 @@ export async function activateLicense(
       };
     }
     if (error.code === "no_active_subscription") return none;
+    if (error.code === "license_hold") return held;
     if (error.code === "generation_conflict") {
       // A concurrent heartbeat issued it a moment ago.
       const again = await currentEntitlementForDevice(db, device.id);

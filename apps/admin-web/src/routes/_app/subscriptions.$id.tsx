@@ -7,6 +7,7 @@ import type {
   SubscriptionDevice,
   SubscriptionStatus,
 } from "@cloudbox/contracts";
+import { ENTITLEMENT_REVOKE_REASON_CODES } from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, KeyRound, Pencil, RotateCw, ShieldOff } from "lucide-react";
@@ -22,6 +23,12 @@ import {
 } from "@/api/subscriptions";
 import { EmptyState, ErrorState, Section } from "@/components/page";
 import { formatMoney } from "@/components/plan-bits";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { StatusPill } from "@/components/status-pill";
 import {
   ExpiryPill,
@@ -58,8 +65,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { formatAgo, formatTimestamp } from "@/lib/time";
+
+const ENTITLEMENT_REVOKE_REASON_LABELS: Record<
+  (typeof ENTITLEMENT_REVOKE_REASON_CODES)[number],
+  string
+> = {
+  non_payment: "Non-payment",
+  tenant_offboarded: "Tenant offboarded",
+  device_replaced: "Device replaced",
+  issued_in_error: "Issued in error",
+  security_incident: "Security incident",
+  other: "Other",
+};
 
 export const Route = createFileRoute("/_app/subscriptions/$id")({
   loader: ({ context, params }) => {
@@ -463,7 +481,7 @@ function IssueDialog({
             <FieldDescription>
               Capped at the subscription end ({toDateInput(data.subscription.validUntil)}). Offline
               grace {data.subscription.offlineGraceDays} d, {data.subscription.maxManagedUsers}{" "}
-              managed users.
+              managed users. Issuing also lifts a licence hold left by an earlier revoke.
             </FieldDescription>
           </Field>
         </FieldGroup>
@@ -490,10 +508,10 @@ function RevokeDialog({
   onClose: () => void;
 }) {
   const invalidate = useInvalidate();
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
   const live = data.entitlements.filter((e) => e.deviceId === device.id && !e.revokedAt);
   const mutation = useMutation({
-    mutationFn: () => revokeEntitlement(device.id, { reason: reason.trim() }),
+    mutationFn: () => revokeEntitlement(device.id, reasonRequestBody(reason)),
     onSuccess: async (result) => {
       toast.success(
         `Revoked ${result.revokedGenerations.map((g) => `g${g}`).join(", ")} for ${device.name}`,
@@ -503,7 +521,7 @@ function RevokeDialog({
     },
     onError: (error) => toast.error(`Revoke failed: ${describeError(error)}`),
   });
-  const valid = reason.trim().length >= 3;
+  const valid = isReasonValid(reason);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -513,19 +531,18 @@ function RevokeDialog({
           <DialogDescription>
             Revokes {live.map((e) => `g${e.generation}`).join(", ") || "every live generation"}. An
             online agent loses its license on its next check; an offline one within its grace window
-            ({data.subscription.offlineGraceDays} d). The reason is recorded in the audit log.
+            ({data.subscription.offlineGraceDays} d). The reason is recorded in the audit log. The
+            server is put on hold: nothing is issued to it automatically until you Issue again.
           </DialogDescription>
         </DialogHeader>
-        <Field>
-          <FieldLabel htmlFor="revoke-reason">Reason (required)</FieldLabel>
-          <Textarea
-            id="revoke-reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. Hardware returned; replacement device enrolled"
-            maxLength={500}
-          />
-        </Field>
+        <ReasonSelect
+          options={ENTITLEMENT_REVOKE_REASON_CODES.map((code) => ({
+            code,
+            label: ENTITLEMENT_REVOKE_REASON_LABELS[code],
+          }))}
+          value={reason}
+          onChange={setReason}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel

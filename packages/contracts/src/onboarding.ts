@@ -127,6 +127,8 @@ export const OnboardingTenant = z.object({
   tenantStatus: z.string(),
   standing: z.enum(["owner", "admin", "user"]),
   enrolledDevices: z.number().int(),
+  /** Enrolled servers whose licence CloudBox revoked (licence hold). */
+  heldDevices: z.number().int().optional(),
   plan: TenantPlan,
 });
 export type OnboardingTenant = z.infer<typeof OnboardingTenant>;

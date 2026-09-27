@@ -51,6 +51,15 @@ public static class WellKnown
             E(Kinds.EventLogSource, AgentPaths.EventLogSource),
             E(Kinds.Service, AgentPaths.ServiceName),
             E(Kinds.ArpEntry, AgentPaths.ArpKey),
+            // Server Setup (WT-10): CloudBox-named artefacts only. The RDP runtime and Windows settings are not listed:
+            // they are not uniquely CloudBox's, so only a manifest entry may revert them.
+            E(Kinds.Directory, AgentPaths.StatusDir),
+            E(Kinds.ScheduledTask, AgentPaths.StatusTask),
+            E(Kinds.Directory, Rdp.RdpWrapperRuntime.VendorDir),
+            E(Kinds.LocalGroup, ManagedUsers.WellKnownGroups.CloudBoxUsers),
+            E(Kinds.FirewallRule, Gate.LicenseGate.AccessRule),
+            E(Kinds.FirewallRule, Gate.LicenseGate.GateRule),
+            E(Kinds.ScheduledTask, Gate.LicenseGate.WatchdogTask),
         ];
     }
 

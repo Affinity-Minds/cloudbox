@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { versionQuery } from "@/api/system";
+import { AlertsSettingsSection } from "@/components/alerts-settings-section";
 import { EmailProvidersSection } from "@/components/email-providers-section";
 import { ErrorState, PageHeader, Section } from "@/components/page";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,6 +49,7 @@ function SettingsPage() {
         )}
       </Section>
       <EmailProvidersSection />
+      <AlertsSettingsSection />
     </>
   );
 }

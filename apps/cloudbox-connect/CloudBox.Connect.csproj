@@ -1,8 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>CloudBox.Connect</RootNamespace>
+    <AssemblyName>CloudBox.Connect</AssemblyName>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- Per-user install, no admin: no ApplicationManifest, so the app runs asInvoker (the default). -->
+    <!-- Single-file publish (build-connect.yml); no native extraction, matching the Agent's uninstall-friendly footprint. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+  <!-- No PackageReference for System.Security.Cryptography.ProtectedData: for net10.0-windows it now
+       ships as part of the shared framework (NU1510 "will not be pruned" if referenced explicitly). -->
 </Project>

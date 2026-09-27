@@ -26,7 +26,7 @@ export function opsBasePath(env: Pick<Bindings, "OPS_BASE_PATH">): string {
 
 /** Console routes of the staff SPA (apps/admin-web/src/routes), relative to the base. */
 const OPS_ROUTES =
-  /^(?:\/|\/login|\/setup-password|\/setup-authenticator|\/tenants(?:\/[^/]+)?|\/fleet(?:\/[^/]+)?|\/enrollment|\/subscriptions(?:\/[^/]+)?|\/licences|\/audit|\/settings)\/?$/;
+  /^(?:\/|\/login|\/setup-password|\/setup-authenticator|\/tenants(?:\/[^/]+)?|\/fleet(?:\/[^/]+)?|\/enrollment|\/subscriptions(?:\/[^/]+)?|\/licences|\/staff|\/plans|\/alerts|\/backups(?:\/[^/]+)?|\/updates(?:\/[^/]+)?|\/audit|\/settings)\/?$/;
 
 export function isOpsDocument(pathname: string, base: string): boolean {
   if (pathname === base) return true;

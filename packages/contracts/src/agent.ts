@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { KeyProtection, RsaPublicJwk } from "./devices";
+import { AgentNetworkInfo } from "./network";
 
 /** `POST /api/v1/agent/enroll` body. */
 export const EnrollRequest = z.object({
@@ -20,13 +21,21 @@ export type EnrollRequest = z.infer<typeof EnrollRequest>;
  * `no_active_plan` (no subscription, or none active and in date), `device_limit_reached` (the plan's
  * `max_devices` is used by other servers).
  */
-export const AgentLicenseState = z.enum(["licensed", "no_active_plan", "device_limit_reached"]);
+export const AgentLicenseState = z.enum([
+  "licensed",
+  "no_active_plan",
+  "device_limit_reached",
+  // A staff licence revoke put the device on hold: nothing is issued until staff Issue again.
+  "revoked",
+]);
 export type AgentLicenseState = z.infer<typeof AgentLicenseState>;
 
 /** The exact text shown for `no_active_plan` (agent Status window, portal, Fleet). */
 export const NO_ACTIVE_PLAN_MESSAGE = "No active plan found. Please contact the CloudBox admin.";
 export const DEVICE_LIMIT_MESSAGE =
   "This plan's server limit is reached. Please contact the CloudBox admin.";
+/** The exact text shown for `revoked` (a staff licence revoke; licence hold). */
+export const LICENSE_REVOKED_MESSAGE = "Licence revoked by CloudBox. Contact the CloudBox admin.";
 
 /** `POST /api/v1/agent/enroll` → 201. `deviceToken` is the Bearer credential for every later call. */
 export const EnrollResponse = z.object({
@@ -39,6 +48,9 @@ export const EnrollResponse = z.object({
   licenseState: AgentLicenseState.optional(),
   /** Human text for a state that needs action (e.g. `NO_ACTIVE_PLAN_MESSAGE`); absent when licensed. */
   message: z.string().optional(),
+  /** WT-9 (ADR 0007): present only when the NetBird controller is configured; absent means the
+   * cloud has no private-mesh server yet, so the agent skips the Netclient install. */
+  network: AgentNetworkInfo.optional(),
 });
 export type EnrollResponse = z.infer<typeof EnrollResponse>;
 
@@ -56,7 +68,17 @@ export const AgentHealth = z.object({
   license: z
     .object({ state: State, days_remaining: z.number().int().nullable().optional() })
     .optional(),
-  network: z.object({ state: State }).optional(),
+  network: z
+    .object({
+      state: State,
+      /**
+       * WT-11 (additive, alpha LAN mode): the device's LAN address as the Agent sees it (e.g.
+       * `192.168.1.42`), used by CloudBox Connect's `LanDirect` network to reach `mstsc` directly
+       * on the same LAN. Null when unknown; absent on agents built before this field existed.
+       */
+      lan_address: z.string().min(1).max(255).nullable().optional(),
+    })
+    .optional(),
   rdp: z.object({ state: State, listener: z.boolean().nullable() }).optional(),
   users: z
     .object({
@@ -66,7 +88,14 @@ export const AgentHealth = z.object({
     })
     .optional(),
   backup: z.object({ state: State, last_success: z.string().nullable().optional() }).optional(),
-  storage: z.object({ free_bytes: z.number().int().min(0).nullable() }).optional(),
+  storage: z
+    .object({
+      free_bytes: z.number().int().min(0).nullable(),
+      /** WT-17 (additive, optional): needed to derive the §24 free-space percentage for the
+       * `disk_low` alert; absent on older agents, in which case that alert is not evaluated. */
+      total_bytes: z.number().int().min(0).nullable().optional(),
+    })
+    .optional(),
   updates: z.object({ state: State, reboot_required: z.boolean().nullable() }).optional(),
   security: z.object({ device_key: KeyProtection, tamper: State }).optional(),
 });

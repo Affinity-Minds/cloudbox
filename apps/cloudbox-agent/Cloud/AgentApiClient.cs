@@ -49,13 +49,19 @@ public interface IEntitlementClient
     Task<EntitlementResponse?> GetEntitlementAsync(Uri baseUrl, string deviceToken, CancellationToken ct);
 }
 
+public interface ISigningKeysClient
+{
+    /// <summary>The server's public entitlement-signing JWKs as JSON strings (each with its kid).</summary>
+    Task<IReadOnlyList<string>> GetSigningKeysAsync(Uri baseUrl, string deviceToken, CancellationToken ct);
+}
+
 public interface IUninstallNotifier
 {
     Task NotifyUninstalledAsync(Uri baseUrl, string deviceToken, CancellationToken ct);
 }
 
 public sealed class AgentApiClient(HttpClient http, Func<bool>? networkAvailable = null)
-    : IEnrollmentClient, IHeartbeatClient, IEntitlementClient, IUninstallNotifier
+    : IEnrollmentClient, IHeartbeatClient, IEntitlementClient, IUninstallNotifier, ISigningKeysClient
 {
     private readonly Func<bool> _networkAvailable = networkAvailable ?? NetworkInterface.GetIsNetworkAvailable;
 
@@ -104,6 +110,15 @@ public sealed class AgentApiClient(HttpClient http, Func<bool>? networkAvailable
         if (res.StatusCode == HttpStatusCode.NotFound) return null;
         if (!res.IsSuccessStatusCode) throw FromStatus(res);
         return await ReadAsync<EntitlementResponse>(res, Json.Options, ct);
+    }
+
+    public async Task<IReadOnlyList<string>> GetSigningKeysAsync(Uri baseUrl, string deviceToken, CancellationToken ct)
+    {
+        using var req = Authed(HttpMethod.Get, baseUrl, "/api/v1/agent/signing-keys", deviceToken);
+        using var res = await SendAsync(req, ct);
+        if (!res.IsSuccessStatusCode) throw FromStatus(res);
+        var body = await ReadAsync<SigningKeysResponse>(res, Json.Options, ct);
+        return body.Keys.Where(k => k.Alg == "ES256").Select(k => k.Jwk.ToJsonString()).ToList();
     }
 
     public async Task NotifyUninstalledAsync(Uri baseUrl, string deviceToken, CancellationToken ct)

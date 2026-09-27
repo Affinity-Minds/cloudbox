@@ -61,6 +61,14 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT "tenant_memberships"."tenant_id" FROM "tenant_memberships" WHERE "tenant_memberships"."user_id" = ? AND "tenant_memberships"."status" = 'active'`,
     params: ["u_test"],
   },
+  // ─── routes/v1/realtime.ts (resolveRealtimeAccess): a customer's active tenant memberships,
+  // same index as screens.fleet's own lookup above but built through drizzle's `and()` (parens,
+  // both sides parameterised) rather than a literal `sql` template ────────────────────────────
+  {
+    name: "realtime.fleet: resolveRealtimeAccess — the caller's active tenant memberships",
+    sql: `select "tenant_memberships"."tenant_id" from "tenant_memberships" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?)`,
+    params: ["u_test", "active"],
+  },
   // ─── screens/fleet.ts (loadFleetDetail): one device, its entitlement history, its audit trail ──
   {
     name: "screens.fleet: device detail by id, joined to its tenant",
@@ -96,7 +104,7 @@ export const queries: RegisteredQuery[] = [
   },
   {
     name: "onboarding.overview: the caller's active memberships with enrolled-device counts",
-    sql: `select "tenants"."id", "tenants"."public_code", "tenants"."display_name", "tenants"."status", "tenant_memberships"."standing", (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled') from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?) order by "tenants"."created_at"`,
+    sql: `select "tenants"."id", "tenants"."public_code", "tenants"."display_name", "tenants"."status", "tenant_memberships"."standing", (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled'), (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled' AND "devices"."license_hold_reason" IS NOT NULL) from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?) order by "tenants"."created_at"`,
     params: ["u_test", "active"],
   },
   {
@@ -138,5 +146,57 @@ export const queries: RegisteredQuery[] = [
     name: "auth.start: codes sent to an address in 24 h + ceiling already audited (review P2-5)",
     sql: `SELECT (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_OTP_SENT' AND created_at > ? AND json_extract(after_json, '$.outcome') IN ('sent', 'send_failed')) AS sent, (SELECT count(*) FROM audit_log WHERE entity_type = 'auth_email' AND entity_id = ? AND event_type = 'AUTH_START_CEILING' AND created_at > ?) AS ceiling`,
     params: ["e@example.test", "2026-01-01", "e@example.test", "2026-01-01"],
+  },
+  // ─── network/controller.ts (WT-9): one row per peer, looked up by its partial unique index ───
+  {
+    name: "network.controller: this device's peer rows for the Fleet Network tab",
+    sql: `select "id", "kind", "status", "netbird_peer_id", "created_at", "updated_at" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."device_id" = ?) order by "network_peers"."updated_at" desc`,
+    params: ["server", "dev_test"],
+  },
+  {
+    name: "network.controller: upsert lookup — server row by device id",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."device_id" = ?)`,
+    params: ["server", "dev_test"],
+  },
+  {
+    name: "network.controller: upsert lookup — client row by (tenant, user)",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."tenant_id" = ? and "network_peers"."user_id" = ?)`,
+    params: ["client", "ten_test", "u1"],
+  },
+  {
+    name: "network.controller: upsert lookup — support marker row by tenant",
+    sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."tenant_id" = ?)`,
+    params: ["support", "ten_test"],
+  },
+  // ─── routes/v1/portal.ts (WT-15): the customer portal's own screens ──────────────────────
+  {
+    name: "portal.home: tenant row by id",
+    sql: `SELECT "id", "public_code", "display_name", "status" FROM "tenants" WHERE "tenants"."id" = ?`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.home: active member count for a tenant",
+    sql: `SELECT count(*) AS n FROM "tenant_memberships" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."status" = 'active'`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.home: enrolled device count for a tenant",
+    sql: `SELECT count(*) AS n FROM "devices" WHERE "devices"."tenant_id" = ? AND "devices"."status" = 'enrolled'`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal: the caller's own active standing in one tenant",
+    sql: `SELECT "standing" FROM "tenant_memberships" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."user_id" = ? AND "tenant_memberships"."status" = 'active'`,
+    params: ["ten_test", "u_test"],
+  },
+  {
+    name: "portal.members: active memberships of a tenant joined to their customer identity",
+    sql: `SELECT "tenant_memberships"."id", "tenant_memberships"."user_id", "customer_users"."email", "customer_users"."name", "tenant_memberships"."standing", "tenant_memberships"."status", "tenant_memberships"."created_at" FROM "tenant_memberships" INNER JOIN "customer_users" ON "customer_users"."id" = "tenant_memberships"."user_id" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."status" = 'active' ORDER BY "tenant_memberships"."created_at" DESC`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.subscription: newest non-cancelled subscription of a tenant, with its plan",
+    sql: `SELECT "subscriptions"."id", "subscriptions"."tenant_id", "subscriptions"."plan_code", "subscriptions"."status", "plans"."name", "plans"."price_amount" FROM "subscriptions" LEFT JOIN "plans" ON "plans"."code" = "subscriptions"."plan_code" WHERE "subscriptions"."tenant_id" = ? AND "subscriptions"."status" <> 'cancelled' ORDER BY "subscriptions"."created_at" DESC LIMIT 1`,
+    params: ["ten_test"],
   },
 ];

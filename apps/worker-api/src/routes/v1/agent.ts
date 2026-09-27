@@ -1,6 +1,7 @@
 // Owner: WT-3. Module `agent`, mounted at `/api/v1/agent` in routes/v1/index.ts.
-// Routes: POST /enroll (unauthenticated, token-gated), POST /heartbeat, GET /entitlement (Bearer
-// device-token via requireDevice(), which 401s once revoked), POST /uninstalled (Bearer
+// Routes: POST /enroll (unauthenticated, token-gated), POST /heartbeat, GET /entitlement, GET
+// /signing-keys (WT-10, additive) (Bearer device-token via requireDevice(), which 401s once
+// revoked), POST /uninstalled (Bearer
 // device-token via its own idempotent lookup — see below).
 //
 // Agent API contract is fixed (packages/contracts/src/agent.ts) — the Windows agent (WT-4) is
@@ -21,7 +22,13 @@ import { calculateJwkThumbprint } from "jose";
 import { audit } from "../../audit";
 import { isUniqueConstraintError, randomOpaqueToken, sha256Hex } from "../../crypto";
 import { createDb, type Db } from "../../db/client";
-import { deviceCredentials, devices, enrollmentTokens, tenants } from "../../db/schema";
+import {
+  deviceCredentials,
+  devices,
+  enrollmentTokens,
+  signingKeys,
+  tenants,
+} from "../../db/schema";
 import { checkEnrollRateLimit } from "../../devices/enroll-rate-limit";
 import { nextDeviceName } from "../../devices/naming";
 import { bearerToken, requireDevice, resolveDevice } from "../../devices/require-device";
@@ -29,10 +36,18 @@ import { bearerToken, requireDevice, resolveDevice } from "../../devices/require
 // generation, or null if there is none or the highest one is revoked (never falls back to an
 // older generation). Heartbeat and GET /entitlement both read through this, not the table directly.
 import { currentEntitlementForDevice } from "../../entitlement/service";
-import type { AppDevice, AppEnv } from "../../env";
+import { ensureSigningKey, SigningKeyError } from "../../entitlement/signing-key";
+import type { AppDevice, AppEnv, Bindings } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-9 (ADR 0007): mints this server's NetBird setup key at activation; revokes its peer/key on
+// uninstall. A no-op (see mintServerSetupKey/revokeDevicePeer) while NETBIRD_API_URL is unset.
+import { mintServerSetupKey, revokeDevicePeer } from "../../network/controller";
 // WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
 import { activateLicense } from "../../onboarding/activation";
+// WT-11 (ADR 0013): queues any pending RDP session grants as heartbeat commands.
+import { pendingCommandsForDevice } from "../../rdp/session";
+// WT-16: best-effort push to the FleetPresence Durable Object; never fails the heartbeat itself.
+import { notifyHeartbeatPresence } from "../../realtime/notify-presence";
 
 const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
 
@@ -169,15 +184,19 @@ export async function recordHeartbeat(
     .where(eq(devices.id, device.id));
 
   const entitlement = await currentEntitlementForDevice(db, device.id);
+  // WT-11 (ADR 0013, additive): any RDP session grants minted since the last heartbeat, encrypted
+  // to this device's own RSA public key. See rdp/session.ts's header comment for the full flow;
+  // WT-10 documents/implements the Agent side of applying this command.
+  const commands = await pendingCommandsForDevice(db, device.id);
 
   return {
     serverTime: now,
     entitlementGeneration: entitlement?.generation ?? null,
-    commands: [],
+    commands,
   };
 }
 
-export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> {
+export async function uninstallDevice(env: Bindings, db: Db, device: AppDevice): Promise<void> {
   const [current] = await db
     .select({ status: devices.status })
     .from(devices)
@@ -201,6 +220,10 @@ export async function uninstallDevice(db: Db, device: AppDevice): Promise<void> 
       source: "agent",
     }),
   ]);
+  // Best-effort: an unreachable NetBird server must not fail the uninstall itself.
+  await revokeDevicePeer(env, db, device.id).catch((error: unknown) => {
+    console.error("uninstallDevice: peer revocation failed", device.id, error);
+  });
 }
 
 const agent = new Hono<AppEnv>();
@@ -230,11 +253,22 @@ agent.post(
       console.error("enroll: activation failed", deviceId, error);
       return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
     });
+    // WT-9: mint this server's NetBird setup key. Best-effort — a NetBird hiccup must not fail
+    // enrollment; the agent simply gets no `network` field and skips the Netclient install.
+    const network = await mintServerSetupKey(c.env, db, { deviceId, tenantId }).catch(
+      (error: unknown) => {
+        console.error("enroll: network provisioning failed", deviceId, error);
+        return { configured: false } as const;
+      },
+    );
     return c.json(
       {
         ...outcome.response,
         ...(licence.licenseState ? { licenseState: licence.licenseState } : {}),
         ...(licence.message ? { message: licence.message } : {}),
+        ...(network.configured
+          ? { network: { setupKey: network.setupKey, managementUrl: network.managementUrl } }
+          : {}),
       },
       201,
     );
@@ -252,6 +286,13 @@ agent.post(
     const db = createDb(c.env.DB);
     const response = await recordHeartbeat(db, c.var.device, health);
     if (response.entitlementGeneration !== null) {
+      await notifyHeartbeatPresence(c.env, {
+        deviceId: c.var.device.id,
+        tenantId: c.var.device.tenantId,
+        agentVersion: health.agent.version,
+        licenseState: "active",
+        activeSessions: health.users?.active_sessions ?? null,
+      });
       return c.json({ ...response, licenseState: "licensed" as const });
     }
     // No live entitlement: redeem/issue if the tenant's plan allows it (WT-14 auto-issuance).
@@ -261,6 +302,13 @@ agent.post(
     }).catch((error: unknown) => {
       console.error("heartbeat: auto-issuance failed", c.var.device.id, error);
       return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
+    });
+    await notifyHeartbeatPresence(c.env, {
+      deviceId: c.var.device.id,
+      tenantId: c.var.device.tenantId,
+      agentVersion: health.agent.version,
+      licenseState: licence.generation !== null ? "active" : "none",
+      activeSessions: health.users?.active_sessions ?? null,
     });
     return c.json({
       ...response,
@@ -278,6 +326,40 @@ agent.get("/entitlement", requireDevice(), async (c) => {
   return c.json({ entitlement: entitlement.token, generation: entitlement.generation });
 });
 
+// WT-10 (additive): the server's public entitlement-signing keys, which the Windows agent pins at
+// enrollment (and re-fetches only when a token names a kid it has not pinned: additive rotation,
+// ADR 0004). Public JWKs only; retired keys are included so leases signed before a rotation still
+// verify until they lapse. The current key is recorded first (idempotent, as issuance does).
+agent.get("/signing-keys", requireDevice(), async (c) => {
+  const db = createDb(c.env.DB);
+  try {
+    await ensureSigningKey(c.env, db);
+  } catch (error) {
+    if (!(error instanceof SigningKeyError)) throw error; // no secret yet: serve what is recorded
+  }
+  const rows = await db
+    .select({
+      kid: signingKeys.kid,
+      alg: signingKeys.alg,
+      status: signingKeys.status,
+      publicJwk: signingKeys.publicJwk,
+    })
+    .from(signingKeys);
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    keys: rows.map((row) => {
+      // Public members only, whatever the stored JSON holds.
+      const { kty, crv, x, y } = JSON.parse(row.publicJwk) as Record<string, string>;
+      return {
+        kid: row.kid,
+        alg: row.alg,
+        status: row.status,
+        jwk: { kty, crv, x, y, kid: row.kid, alg: row.alg, use: "sig" },
+      };
+    }),
+  });
+});
+
 // Not requireDevice(): a retried uninstall call must still 204 after the device (and its
 // credential) are already revoked, so the lookup here tolerates a revoked-but-real credential —
 // see resolveDevice()'s `allowRevoked` doc comment.
@@ -289,7 +371,7 @@ agent.post("/uninstalled", async (c) => {
   const device = await resolveDevice(db, token, { allowRevoked: true });
   if (!device) return c.json({ error: "unauthenticated" }, 401);
 
-  await uninstallDevice(db, device);
+  await uninstallDevice(c.env, db, device);
   return c.body(null, 204);
 });
 

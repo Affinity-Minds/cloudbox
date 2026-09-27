@@ -1,25 +1,33 @@
 // Owner: WT-0. Sidebar entries; keys are fixed by docs/handoffs/foundation.md.
 import {
+  BellRing,
   Building2,
   CreditCard,
+  DatabaseBackup,
   KeyRound,
   LayoutDashboard,
   type LucideIcon,
+  RefreshCw,
   ScrollText,
   Server,
   Settings,
   Tag,
   Ticket,
+  Users,
 } from "lucide-react";
 
 export type NavKey =
   | "overview"
   | "tenants"
   | "fleet"
+  | "alerts"
   | "enrollment"
   | "subscriptions"
   | "plans"
   | "licences"
+  | "backups"
+  | "updates"
+  | "staff"
   | "audit"
   | "settings";
 
@@ -30,10 +38,14 @@ export type NavItem = {
     | "/"
     | "/tenants"
     | "/fleet"
+    | "/alerts"
     | "/enrollment"
     | "/subscriptions"
     | "/plans"
     | "/licences"
+    | "/backups"
+    | "/updates"
+    | "/staff"
     | "/audit"
     | "/settings";
   icon: LucideIcon;
@@ -46,15 +58,19 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: "overview", title: "Overview", to: "/", icon: LayoutDashboard },
       { key: "tenants", title: "Tenants", to: "/tenants", icon: Building2 },
       { key: "fleet", title: "Fleet", to: "/fleet", icon: Server },
+      { key: "alerts", title: "Alerts", to: "/alerts", icon: BellRing }, // WT-17
       { key: "enrollment", title: "Enrollment", to: "/enrollment", icon: KeyRound },
       { key: "subscriptions", title: "Subscriptions", to: "/subscriptions", icon: CreditCard },
       { key: "licences", title: "Licence keys", to: "/licences", icon: Ticket }, // WT-14
+      { key: "backups", title: "Backups", to: "/backups", icon: DatabaseBackup }, // WT-19
+      { key: "updates", title: "Updates", to: "/updates", icon: RefreshCw }, // WT-18
     ],
   },
   {
     label: "Govern",
     items: [
       { key: "plans", title: "Plans", to: "/plans", icon: Tag },
+      { key: "staff", title: "Staff", to: "/staff", icon: Users }, // WT-15
       { key: "audit", title: "Audit log", to: "/audit", icon: ScrollText },
       { key: "settings", title: "Settings", to: "/settings", icon: Settings },
     ],

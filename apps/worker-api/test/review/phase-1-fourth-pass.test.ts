@@ -123,7 +123,11 @@ describe("U-2 (Medium): tenant standing is not ranked", () => {
     await seedMembership(env.DB, { tenantId: t.tenantId, userId: admin.userId, standing: "admin" });
     const res = await app.request(
       `/api/v1/tenants/${t.tenantId}/memberships/${om.membershipId}`,
-      { method: "DELETE", headers: admin.headers },
+      {
+        method: "DELETE",
+        headers: { ...admin.headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "role_change" }),
+      },
       env,
     );
     expect(res.status).toBe(403);

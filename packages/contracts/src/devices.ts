@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AuditEntry } from "./common";
+import { FleetNetworkPeer } from "./network";
 import { TenantPlan } from "./onboarding";
 
 export const DeviceStatus = z.enum(["enrolled", "revoked", "transferred"]);
@@ -87,10 +88,20 @@ export type FleetScreen = z.infer<typeof FleetScreen>;
 
 /** `GET /api/v1/screens/fleet/:deviceId` — overview + license + health tabs come off this row;
  * the audit tab is a separate array of the same shape the audit screen uses. */
+/** Licence hold placed by a staff licence revoke; cleared only by a staff Issue or Renew. */
+export const LicenseHold = z.object({
+  reason: z.string(),
+  at: z.string().nullable(),
+  by: z.string().nullable(),
+});
+export type LicenseHold = z.infer<typeof LicenseHold>;
+
 export const FleetDeviceDetail = Device.extend({
   tenantCode: z.string(),
   tenantName: z.string(),
   licenseState: LicenseState,
+  /** Null when the device is not on hold. */
+  licenseHold: LicenseHold.nullable().optional(),
 });
 export type FleetDeviceDetail = z.infer<typeof FleetDeviceDetail>;
 
@@ -110,5 +121,9 @@ export const FleetDetailScreen = z.object({
   audit: z.array(AuditEntry),
   /** WT-14: the tenant's plan state (`no_active_plan` carries `NO_ACTIVE_PLAN_MESSAGE`). */
   plan: TenantPlan.optional(),
+  /** WT-9 (ADR 0007): this device's NetBird peer rows (normally one, `kind: "server"`), newest
+   * first. Empty when the controller has never touched this device (e.g. enrolled before
+   * `NETBIRD_API_URL` was set). */
+  network: z.array(FleetNetworkPeer).optional(),
 });
 export type FleetDetailScreen = z.infer<typeof FleetDetailScreen>;

@@ -7,7 +7,7 @@ import type {
   UpdateEmailProviderRequest,
 } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 const BASE = "/api/v1/settings/email-providers";
 
@@ -25,8 +25,11 @@ export const updateEmailProvider = (id: string, body: UpdateEmailProviderRequest
     body: JSON.stringify(body),
   });
 
-export const deleteEmailProvider = (id: string) =>
-  api<void>(`${BASE}/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const deleteEmailProvider = (id: string, body: ReasonRequestBody) =>
+  api<void>(`${BASE}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify(body),
+  });
 
 export const testEmailProvider = (id: string) =>
   api<TestEmailProviderResponse>(`${BASE}/${encodeURIComponent(id)}/test`, { method: "POST" });

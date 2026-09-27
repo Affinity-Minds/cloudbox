@@ -1,11 +1,12 @@
 // Owner: WT-14. Server licence keys (ADR 0011): staff generate batches for resellers; a buyer
 // redeems one at /start. Keys are shown once, at generation (copy / CSV); afterwards only the last
 // four symbols exist for support.
-import type {
-  GenerateLicenseKeysResponse,
-  LicenseKeyListItem,
-  LicenseKeyStatus,
-  Plan,
+import {
+  type GenerateLicenseKeysResponse,
+  LICENSE_KEY_REVOKE_REASON_CODES,
+  type LicenseKeyListItem,
+  type LicenseKeyStatus,
+  type Plan,
 } from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -21,6 +22,12 @@ import {
 } from "@/api/license-keys";
 import { EmptyState, ErrorState, PageHeader, Section } from "@/components/page";
 import { formatMoney } from "@/components/plan-bits";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { StatusPill, type Tone } from "@/components/status-pill";
 import { NativeSelect } from "@/components/subscription-bits";
 import { Button } from "@/components/ui/button";
@@ -434,14 +441,25 @@ function GenerateDialog({
   );
 }
 
+const LICENSE_KEY_REVOKE_REASON_LABELS: Record<
+  (typeof LICENSE_KEY_REVOKE_REASON_CODES)[number],
+  string
+> = {
+  store_return: "Store return",
+  issued_in_error: "Issued in error",
+  lost_or_leaked: "Lost or leaked",
+  batch_withdrawn: "Batch withdrawn",
+  other: "Other",
+};
+
 function RevokeDialog({ item, onClose }: { item: LicenseKeyListItem | null; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
   const mutation = useMutation({
-    mutationFn: () => revokeLicenseKey(item?.id ?? "", reason),
+    mutationFn: () => revokeLicenseKey(item?.id ?? "", reasonRequestBody(reason)),
     onSuccess: async () => {
       toast.success(`Key …${item?.codeLast4} revoked`);
-      setReason("");
+      setReason({ code: "" });
       onClose();
       await queryClient.invalidateQueries({ queryKey: ["license-keys"] });
     },
@@ -457,22 +475,21 @@ function RevokeDialog({ item, onClose }: { item: LicenseKeyListItem | null; onCl
             redeemed keys cannot be revoked here.
           </DialogDescription>
         </DialogHeader>
-        <Field>
-          <FieldLabel htmlFor="lk-reason">Reason</FieldLabel>
-          <Input
-            id="lk-reason"
-            placeholder="e.g. card lost by the store"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </Field>
+        <ReasonSelect
+          options={LICENSE_KEY_REVOKE_REASON_CODES.map((code) => ({
+            code,
+            label: LICENSE_KEY_REVOKE_REASON_LABELS[code],
+          }))}
+          value={reason}
+          onChange={setReason}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button
             variant="destructive"
-            disabled={reason.trim().length < 3 || mutation.isPending}
+            disabled={!isReasonValid(reason) || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? "Revoking…" : "Revoke key"}

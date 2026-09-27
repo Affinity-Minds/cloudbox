@@ -8,13 +8,15 @@ using Serilog;
 namespace CloudBox.Agent.Service;
 
 /// <summary>Health loop: heartbeat every ~60 s, exponential backoff with jitter on failure. Cloud downtime never crashes it.</summary>
-public sealed class AgentWorker(HeartbeatCycle cycle, TimeProvider clock) : BackgroundService
+public sealed class AgentWorker(HeartbeatCycle cycle, TimeProvider clock, ServerRuntime? server = null) : BackgroundService
 {
     private readonly ILogger _log = Log.ForContext<AgentWorker>();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _log.Information("CloudBox Agent {Version} started", AgentPaths.AgentVersion);
+        // Fail closed until the local lease has been validated (spec §10.1, §31).
+        if (server is not null) _log.Information("RDP gate at start: {Gate}", server.BlockGate());
         while (!stoppingToken.IsCancellationRequested)
         {
             TimeSpan delay;
@@ -37,6 +39,13 @@ public sealed class AgentWorker(HeartbeatCycle cycle, TimeProvider clock) : Back
                 break;
             }
         }
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+        // A stopped Agent leaves the gate closed; the watchdog task covers a crash.
+        if (server is not null) _log.Information("RDP gate at stop: {Gate}", server.BlockGate());
     }
 }
 

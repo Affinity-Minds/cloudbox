@@ -11,6 +11,8 @@ export const OverviewScreen = z.object({
   devices: z.object({ total: z.number().int(), enrolled: z.number().int() }),
   subscriptions: z.object({ total: z.number().int(), active: z.number().int() }),
   audit: z.object({ total: z.number().int(), lastEventAt: z.string().nullable() }),
+  /** WT-17: real open-alert count, not estimated. */
+  alerts: z.object({ open: z.number().int(), critical: z.number().int() }),
 });
 export type OverviewScreen = z.infer<typeof OverviewScreen>;
 

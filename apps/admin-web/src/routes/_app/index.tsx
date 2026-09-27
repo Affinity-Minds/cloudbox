@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_app/")({
 
 type Stat = {
   label: string;
-  to: "/tenants" | "/fleet" | "/subscriptions" | "/audit";
+  to: "/tenants" | "/fleet" | "/subscriptions" | "/audit" | "/alerts";
   value: (o: OverviewScreen) => number;
   detail: (o: OverviewScreen) => string;
 };
@@ -50,6 +50,12 @@ const STATS: Stat[] = [
     to: "/audit",
     value: (o) => o.audit.total,
     detail: (o) => `last ${formatAgo(o.audit.lastEventAt)}`,
+  },
+  {
+    label: "Open alerts",
+    to: "/alerts",
+    value: (o) => o.alerts.open,
+    detail: (o) => (o.alerts.critical > 0 ? `${o.alerts.critical} critical` : "none critical"),
   },
 ];
 
@@ -88,7 +94,7 @@ function OverviewPage() {
         {overview.isError ? (
           <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
         ) : (
-          <dl className="grid grid-cols-2 border-t md:grid-cols-4">
+          <dl className="grid grid-cols-2 border-t md:grid-cols-5">
             {STATS.map((stat) => (
               <div
                 key={stat.label}

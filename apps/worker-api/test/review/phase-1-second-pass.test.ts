@@ -322,8 +322,19 @@ describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-s
   // WT-1 (owner decision, two identity systems): customer-only routes never read a staff session,
   // so a staff account mid-setup gets 401 there, not setup_required. Asserted in authz tests.
   // WT-14: self-service onboarding and the Connect device list are customer-only too.
+  // WT-15: the customer portal's own screens (`requireTenantStanding`, customer session only) —
+  // matched narrowly (not the whole `/api/v1/tenants` prefix, which is staff-gated CRUD).
   const CUSTOMER_ONLY = (path: string) =>
-    ["/api/v1/me", "/api/v1/onboarding", "/api/v1/connect"].some((p) => path.startsWith(p));
+    ["/api/v1/me", "/api/v1/onboarding", "/api/v1/connect"].some((p) => path.startsWith(p)) ||
+    /\/tenants\/:tenantId\/portal(\/|$)/.test(path);
+  // WT-18: device-Bearer routes, mixed into the same router as its staff routes, so a staff
+  // session mid-setup gets 401 there (no staff session is ever consulted), not setup_required —
+  // same reasoning as `/api/v1/agent/*` below, just not prefix-shaped.
+  const DEVICE_ONLY = new Set([
+    "/api/v1/releases/assigned",
+    "/api/v1/releases/:id/download",
+    "/api/v1/releases/:id/result",
+  ]);
   const PUBLIC = new Set([
     "GET /api/v1",
     "GET /api/v1/foundation",
@@ -340,7 +351,11 @@ describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-s
             !PUBLIC.has(`${r.method} ${r.path}`) &&
             !OPEN_DURING_SETUP.has(`${r.method} ${r.path}`) &&
             !CUSTOMER_ONLY(r.path) &&
-            !r.path.startsWith("/api/v1/agent"),
+            !r.path.startsWith("/api/v1/agent") &&
+            // WT-19: device-Bearer routes, not staff/session-gated (same story as /agent above).
+            r.path !== "/api/v1/backups/policy" &&
+            !r.path.startsWith("/api/v1/backups/jobs") &&
+            !DEVICE_ONLY.has(r.path),
         )
         .map((r) => [`${r.method} ${r.path}`, r]),
     ).values(),

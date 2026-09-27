@@ -62,11 +62,8 @@ export const IssueEntitlementRequest = z.object({
 });
 export type IssueEntitlementRequest = z.infer<typeof IssueEntitlementRequest>;
 
-/** `POST /api/v1/devices/:deviceId/entitlements/revoke`: the reason is typed by the operator and audited. */
-export const RevokeEntitlementRequest = z.object({
-  reason: z.string().trim().min(3).max(500),
-});
-export type RevokeEntitlementRequest = z.infer<typeof RevokeEntitlementRequest>;
+// `POST /api/v1/devices/:deviceId/entitlements/revoke` request: `RevokeEntitlementRequest` in
+// `./reasons.ts` (reason-code + free-text, audited alongside `EntitlementRevokeReasonCode`).
 
 /** Issue/renew response. Carries the signed claims (not secret) and never the token. */
 export const IssueEntitlementResponse = z.object({

@@ -1,7 +1,7 @@
 // Owner: WT-13. Plan designer + the active-plans picker (plan-select.tsx) share this module.
 import type { CreatePlanRequest, Plan, PlansScreen, UpdatePlanRequest } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 /** Plan designer table: every plan (active + retired), with subscription counts. */
 export const plansScreenQuery = queryOptions({
@@ -27,10 +27,10 @@ export const updatePlan = (code: string, input: UpdatePlanRequest) =>
     body: JSON.stringify(input),
   }).then((body) => body.plan);
 
-export const retirePlan = (code: string) =>
+export const retirePlan = (code: string, body: ReasonRequestBody) =>
   api<{ plan: Plan; subscriptionCount: number }>(
     `/api/v1/plans/${encodeURIComponent(code)}/retire`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify(body) },
   );
 
 export const reactivatePlan = (code: string) =>

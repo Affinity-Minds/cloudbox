@@ -25,6 +25,26 @@ public sealed record AgentStatusSnapshot
     public DateTimeOffset? EntitlementFetchedAt { get; init; }
     public DateTimeOffset? TrustedTime { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    // ---- Phase 5 (Server Setup installs): read by CloudBox.Status. Null on an Agent-only install.
+
+    /// <summary>Normalised licence (VALID | OFFLINE_VALID | GRACE | EXPIRED | TAMPER | REVOKED | NO_PLAN).</summary>
+    public CloudBox.Agent.Licensing.LicenseSnapshot? License { get; init; }
+
+    /// <summary>open | blocked | not_installed | error.</summary>
+    public string? Gate { get; init; }
+
+    public UsersView? Users { get; init; }
+    public CloudBox.Agent.Rdp.RdpProbeResult? Rdp { get; init; }
+
+    /// <summary>Private network placeholder until WT-9 (NetBird) lands.</summary>
+    public string Network { get; init; } = "not_configured";
+
+    /// <summary>Support-access banner placeholder (break-glass is a later slice).</summary>
+    public bool SupportAccessActive { get; init; }
+
+    /// <summary>Public renewal page for the QR code, only while renewal is due. Never a secret.</summary>
+    public string? RenewalUrl { get; init; }
 }
 
 public sealed class AgentStatus

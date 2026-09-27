@@ -1,8 +1,37 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>CloudBox.Server.Setup</AssemblyName>
+    <RootNamespace>CloudBox.Server.Setup</RootNamespace>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- A downloaded one-file installer: WPF and WebView2 natives are extracted to %TEMP%\.net\CloudBox.Server.Setup and
+         that folder is removed after Setup exits (SetupCleanup). The installed product never self-extracts. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- References the Agent (manifest steps, enrollment client, install plan). Self-contained is set on the publish
+         command line and flows to the reference. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\cloudbox-agent\CloudBox.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="third-party.lock.json" />
+  </ItemGroup>
+  <!-- CI (build-windows.yml) stages the payload: agent\, status\, vendor\ (downloaded by pinned URL + SHA-256 from
+       third-party.lock.json) and THIRD_PARTY_NOTICES.md, then publishes with -p:PayloadDir=<folder>. A build without it
+       is a UI-only developer build and refuses to install. No binary is ever committed. -->
+  <ItemGroup Condition="'$(PayloadDir)' != ''">
+    <EmbeddedResource Include="$(PayloadDir)\**\*" LogicalName="payload/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
