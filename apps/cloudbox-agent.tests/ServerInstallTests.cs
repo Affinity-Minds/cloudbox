@@ -59,7 +59,7 @@ public sealed class ServerInstallTests
     {
         var machine = new FakeMachine();
         var store = new InMemoryManifestStore();
-        return (machine, store, new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine))));
+        return (machine, store, new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine, keyByKind: true))));
     }
 
     private static ServerInstallOptions Options => new(new Uri("https://box.example.test"), "CBX-ENROLL-TEST", "S-1-5-21-1-2-3-1001",
@@ -140,7 +140,7 @@ public sealed class ServerInstallTests
         await new ServerInstall(runner, host, Options).RunAsync(null, CancellationToken.None);
         Assert.NotEmpty(machine.Values);
 
-        var reloaded = new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine)));
+        var reloaded = new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine, keyByKind: true)));
         var result = await new Uninstaller(reloaded, [], new StringReader(""), new StringWriter(), "LAB-PC", [])
             .RunAsync(new UninstallOptions(Offline: true), new RevertContext(), CancellationToken.None);
 
@@ -165,7 +165,7 @@ public sealed class ServerInstallTests
         Assert.Null(host.Saved);
         Assert.DoesNotContain("restart-service", host.Calls);
 
-        var reloaded = new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine)));
+        var reloaded = new ManifestRunner(store, Kinds.All.Select(k => new FakeStep(k, machine, keyByKind: true)));
         await new Uninstaller(reloaded, [], new StringReader(""), new StringWriter(), "LAB-PC", [])
             .RunAsync(new UninstallOptions(Offline: true), new RevertContext(), CancellationToken.None);
         Assert.Empty(machine.Values);

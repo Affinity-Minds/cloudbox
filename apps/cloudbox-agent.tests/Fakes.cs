@@ -85,21 +85,25 @@ public sealed class FakeMachine
     public List<string> RevertOrder { get; } = [];
 }
 
-/// <summary>Sets machine[id] = spec.value. Optionally fails after partially applying.</summary>
-public sealed class FakeStep(string kind, FakeMachine machine, string? failOnId = null) : IInstallStep
+/// <summary>Sets machine[id] = spec.value. Optionally fails after partially applying. <paramref name="keyByKind"/> keys
+/// the pretend machine by kind + id (a service and an event source may share a name).</summary>
+public sealed class FakeStep(string kind, FakeMachine machine, string? failOnId = null, bool keyByKind = false) : IInstallStep
 {
     public string Kind => kind;
 
+    private string Key(string id) => keyByKind ? $"{kind} {id}" : id;
+
     public JsonObject CapturePriorState(string id, JsonObject? spec)
     {
-        var prior = new JsonObject { ["existed"] = machine.Values.ContainsKey(id) };
-        if (machine.Values.TryGetValue(id, out var v)) prior["value"] = v;
+        var prior = new JsonObject { ["existed"] = machine.Values.ContainsKey(Key(id)) };
+        if (machine.Values.TryGetValue(Key(id), out var v)) prior["value"] = v;
         return prior;
     }
 
     public void Apply(ManifestEntry entry)
     {
-        machine.Values[entry.Id] = entry.Spec?["value"]?.GetValue<string>() ?? "applied";
+        var value = entry.Spec?["value"];
+        machine.Values[Key(entry.Id)] = value is JsonValue v && v.TryGetValue<string>(out var text) ? text : value?.ToJsonString() ?? "applied";
         if (entry.Id == failOnId) throw new InvalidOperationException($"simulated failure in {entry.Id}");
     }
 
@@ -108,16 +112,16 @@ public sealed class FakeStep(string kind, FakeMachine machine, string? failOnId 
         machine.RevertOrder.Add(entry.Id);
         if (entry.PriorExisted)
         {
-            machine.Values[entry.Id] = entry.PriorState!["value"]!.GetValue<string>();
+            machine.Values[Key(entry.Id)] = entry.PriorState!["value"]!.GetValue<string>();
             return RevertOutcome.Restored;
         }
 
-        return machine.Values.Remove(entry.Id) ? RevertOutcome.Removed : RevertOutcome.Missing;
+        return machine.Values.Remove(Key(entry.Id)) ? RevertOutcome.Removed : RevertOutcome.Missing;
     }
 
     public bool Remains(ManifestEntry entry) => entry.PriorExisted
-        ? machine.Values.GetValueOrDefault(entry.Id) != entry.PriorState!["value"]!.GetValue<string>()
-        : machine.Values.ContainsKey(entry.Id);
+        ? machine.Values.GetValueOrDefault(Key(entry.Id)) != entry.PriorState!["value"]!.GetValue<string>()
+        : machine.Values.ContainsKey(Key(entry.Id));
 }
 
 /// <summary>Captures requests and returns canned responses.</summary>
