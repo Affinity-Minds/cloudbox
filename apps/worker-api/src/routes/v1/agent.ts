@@ -33,6 +33,8 @@ import type { AppDevice, AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 // WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
 import { activateLicense } from "../../onboarding/activation";
+// WT-11 (ADR 0013): queues any pending RDP session grants as heartbeat commands.
+import { pendingCommandsForDevice } from "../../rdp/session";
 
 const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
 
@@ -169,11 +171,15 @@ export async function recordHeartbeat(
     .where(eq(devices.id, device.id));
 
   const entitlement = await currentEntitlementForDevice(db, device.id);
+  // WT-11 (ADR 0013, additive): any RDP session grants minted since the last heartbeat, encrypted
+  // to this device's own RSA public key. See rdp/session.ts's header comment for the full flow;
+  // WT-10 documents/implements the Agent side of applying this command.
+  const commands = await pendingCommandsForDevice(db, device.id);
 
   return {
     serverTime: now,
     entitlementGeneration: entitlement?.generation ?? null,
-    commands: [],
+    commands,
   };
 }
 

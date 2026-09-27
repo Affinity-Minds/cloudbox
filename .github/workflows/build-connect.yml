@@ -1,0 +1,33 @@
+name: Build Connect client
+
+on:
+  pull_request:
+    paths:
+      - "apps/cloudbox-connect/**"
+      - "apps/cloudbox-connect.tests/**"
+      - "global.json"
+      - ".github/workflows/build-connect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build apps/cloudbox-connect/CloudBox.Connect.csproj --configuration Release
+      - run: dotnet build apps/cloudbox-connect.tests/CloudBox.Connect.Tests.csproj --configuration Release
+      - run: dotnet test apps/cloudbox-connect.tests/CloudBox.Connect.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+      - run: dotnet publish apps/cloudbox-connect/CloudBox.Connect.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+      - name: List published files (must be the one exe only)
+        run: Get-ChildItem publish | Format-Table Name, Length -AutoSize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloudBox.Connect-win-x64
+          path: publish/CloudBox.Connect.exe
+          if-no-files-found: error

@@ -3,5 +3,6 @@
   <Project Path="apps/cloudbox-agent.tests/CloudBox.Agent.Tests.csproj" />
   <Project Path="apps/cloudbox-status/CloudBox.Status.csproj" />
   <Project Path="apps/cloudbox-connect/CloudBox.Connect.csproj" />
+  <Project Path="apps/cloudbox-connect.tests/CloudBox.Connect.Tests.csproj" />
   <Project Path="apps/cloudbox-server-setup/CloudBox.Server.Setup.csproj" />
 </Solution>

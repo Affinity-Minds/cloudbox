@@ -42,6 +42,10 @@ const SELF_SERVICE_ROUTES = new Set([
   "POST /api/v1/onboarding/tenants",
   "POST /api/v1/onboarding/redeem",
   "POST /api/v1/onboarding/activation-grants",
+  // WT-11 (ADR 0013): CloudBox Connect's RDP credential broker. Customer session only (a staff
+  // session, read_only included, is 401 by the two-identity-systems rule); further gated by active
+  // membership in the device's own tenant, re-resolved server-side every call (rdp/session.ts).
+  "POST /api/v1/connect/devices/:deviceId/session",
 ]);
 
 type RouteUnderTest = { method: string; path: string };

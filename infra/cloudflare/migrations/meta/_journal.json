@@ -29,6 +29,13 @@
       "when": 1790501877491,
       "tag": "0011_plan_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790620800000,
+      "tag": "0013_rdp_session_grants",
+      "breakpoints": true
     }
   ]
 }
