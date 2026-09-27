@@ -43,6 +43,13 @@
       "when": 1790508537505,
       "tag": "0014_network_peers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790514936803,
+      "tag": "0017_backups",
+      "breakpoints": true
     }
   ]
 }
