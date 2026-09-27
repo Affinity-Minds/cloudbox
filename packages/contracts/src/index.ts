@@ -9,6 +9,7 @@ export * from "./entitlement";
 export * from "./license-keys";
 export * from "./memberships";
 export * from "./onboarding";
+export * from "./realtime";
 export * from "./screens";
 export * from "./subscriptions";
 export * from "./tenants";

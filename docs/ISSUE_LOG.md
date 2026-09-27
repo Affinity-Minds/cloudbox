@@ -2,6 +2,32 @@
 
 Newest first. Record only non-obvious failures or fixes with meaningful blast radius.
 
+## 2026-09-27 — Echoing a Hibernation WebSocket's own close code back to it throws (WT-16)
+**Symptom:** every test (and, would-be, every real client) that called `ws.close()` with no
+arguments crashed the Durable Object: `InvalidAccessError: Invalid WebSocket close code: 1005`,
+thrown from inside `webSocketClose()`.
+
+**Cause:** `webSocketClose(ws, code, reason, wasClean)` is called with the *received* close code.
+A close with no code negotiates as `1005` ("no status received") on the wire — a code the spec
+reserves for exactly this situation and one you are never allowed to *send*. Calling
+`ws.close(code, reason)` inside the handler with that same `code` (a natural-looking "acknowledge
+the close" pattern, and what Cloudflare's own doc example shows) throws.
+
+**Fix:** Don't call `ws.close()` in `webSocketClose()` at all. At this repo's `compatibility_date`
+(`web_socket_auto_reply_to_close`, ≥ 2026-04-07), the runtime already auto-replies to close
+frames — Cloudflare's own doc comment on the handler says as much ("calling close() is safe but
+no longer required"), which undersells it: for a `1005` it is actively unsafe, not merely
+redundant.
+
+**Blast radius:** Any Durable Object using the WebSocket Hibernation API on a client that closes
+without an explicit code (every browser tab close, and most client libraries' default
+`.close()`) — not specific to `FleetPresence`. Worth adding to `sorensd/agent-notes`
+(`platform/cloudflare-workers.md`) — not done from this worktree (out of scope: this worktree
+touches only the `cloudbox` repo); flagged in the handoff's "Requests to another worktree".
+
+**Verification:** `test/realtime.test.ts` calls `ws.close()` with no arguments after every
+WebSocket assertion; all 13 cases pass with the handler reduced to a no-op.
+
 ## 2026-09-27 — Hand-rolled route resolution skipped the staff first-sign-in setup gate (WT-3)
 **Symptom:** WT-8's review sweep S-6 (every `/api/v1` route 403s `setup_required` for staff mid password-change/authenticator-enrolment) failed on `GET /screens/fleet` and `GET /screens/fleet/:deviceId` — a staff account that hadn't finished ADR 0009's forced setup could still read both.
 
