@@ -22,6 +22,7 @@ import { Route as AppPlansRouteImport } from './routes/_app/plans'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSubscriptionsRouteImport } from './routes/_app/subscriptions'
 import { Route as AppTenantsRouteImport } from './routes/_app/tenants'
+import { Route as AppUpdatesRouteImport } from './routes/_app/updates'
 import { Route as AppFleetDeviceIdRouteImport } from './routes/_app/fleet.$deviceId'
 import { Route as AppSubscriptionsIdRouteImport } from './routes/_app/subscriptions.$id'
 import { Route as AppTenantsTenantIdRouteImport } from './routes/_app/tenants.$tenantId'
@@ -90,6 +91,11 @@ const AppTenantsRoute = AppTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => AppRoute,
 } as any)
+const AppUpdatesRoute = AppUpdatesRouteImport.update({
+  id: '/updates',
+  path: '/updates',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppFleetDeviceIdRoute = AppFleetDeviceIdRouteImport.update({
   id: '/$deviceId',
   path: '/$deviceId',
@@ -119,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
+  '/updates': typeof AppUpdatesRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
+  '/updates': typeof AppUpdatesRoute
   '/': typeof AppIndexRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/_app/tenants': typeof AppTenantsRouteWithChildren
+  '/_app/updates': typeof AppUpdatesRoute
   '/_app/': typeof AppIndexRoute
   '/_app/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/_app/subscriptions/$id': typeof AppSubscriptionsIdRoute
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/subscriptions'
     | '/tenants'
+    | '/updates'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
     | '/tenants/$tenantId'
@@ -190,6 +200,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/subscriptions'
     | '/tenants'
+    | '/updates'
     | '/'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
@@ -208,6 +219,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/subscriptions'
     | '/_app/tenants'
+    | '/_app/updates'
     | '/_app/'
     | '/_app/fleet/$deviceId'
     | '/_app/subscriptions/$id'
@@ -314,6 +326,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTenantsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/updates': {
+      id: '/_app/updates'
+      path: '/updates'
+      fullPath: '/updates'
+      preLoaderRoute: typeof AppUpdatesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/fleet/$deviceId': {
       id: '/_app/fleet/$deviceId'
       path: '/$deviceId'
@@ -382,6 +401,7 @@ interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRoute
   AppSubscriptionsRoute: typeof AppSubscriptionsRouteWithChildren
   AppTenantsRoute: typeof AppTenantsRouteWithChildren
+  AppUpdatesRoute: typeof AppUpdatesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -394,6 +414,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRoute,
   AppSubscriptionsRoute: AppSubscriptionsRouteWithChildren,
   AppTenantsRoute: AppTenantsRouteWithChildren,
+  AppUpdatesRoute: AppUpdatesRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

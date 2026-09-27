@@ -5,6 +5,7 @@ import {
   KeyRound,
   LayoutDashboard,
   type LucideIcon,
+  RefreshCw,
   ScrollText,
   Server,
   Settings,
@@ -20,6 +21,7 @@ export type NavKey =
   | "subscriptions"
   | "plans"
   | "licences"
+  | "updates"
   | "audit"
   | "settings";
 
@@ -34,6 +36,7 @@ export type NavItem = {
     | "/subscriptions"
     | "/plans"
     | "/licences"
+    | "/updates"
     | "/audit"
     | "/settings";
   icon: LucideIcon;
@@ -49,6 +52,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: "enrollment", title: "Enrollment", to: "/enrollment", icon: KeyRound },
       { key: "subscriptions", title: "Subscriptions", to: "/subscriptions", icon: CreditCard },
       { key: "licences", title: "Licence keys", to: "/licences", icon: Ticket }, // WT-14
+      { key: "updates", title: "Updates", to: "/updates", icon: RefreshCw }, // WT-18
     ],
   },
   {
