@@ -10,6 +10,7 @@ import {
   Settings,
   Tag,
   Ticket,
+  Users,
 } from "lucide-react";
 
 export type NavKey =
@@ -20,6 +21,7 @@ export type NavKey =
   | "subscriptions"
   | "plans"
   | "licences"
+  | "staff"
   | "audit"
   | "settings";
 
@@ -34,6 +36,7 @@ export type NavItem = {
     | "/subscriptions"
     | "/plans"
     | "/licences"
+    | "/staff"
     | "/audit"
     | "/settings";
   icon: LucideIcon;
@@ -55,6 +58,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Govern",
     items: [
       { key: "plans", title: "Plans", to: "/plans", icon: Tag },
+      { key: "staff", title: "Staff", to: "/staff", icon: Users }, // WT-15
       { key: "audit", title: "Audit log", to: "/audit", icon: ScrollText },
       { key: "settings", title: "Settings", to: "/settings", icon: Settings },
     ],

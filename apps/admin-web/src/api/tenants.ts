@@ -68,9 +68,10 @@ export const updateMemberStanding = (
     body: JSON.stringify(input),
   });
 
-export const removeMember = (tenantId: string, membershipId: string) =>
+export const removeMember = (tenantId: string, membershipId: string, reason?: string) =>
   api<Membership>(`/api/v1/tenants/${tenantId}/memberships/${membershipId}`, {
     method: "DELETE",
+    body: reason ? JSON.stringify({ reason }) : undefined,
   });
 
 export const myTenantsQuery = queryOptions({
