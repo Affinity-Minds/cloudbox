@@ -1,4 +1,37 @@
-{"service":"running","agentVersion":"0.1.0","enrolled":true,"deviceId":"dev_sample","deviceName":"CLOUDBOX-00017","tenantCode":"CBX-00001","keyProtection":"tpm","cloud":"connected","tamper":"none","entitlementGeneration":3,
- "license":{"state":"VALID","reason":null,"message":null,"daysRemaining":21,"graceDaysRemaining":null,"validUntil":"2026-10-18T00:00:00Z","maxManagedUsers":6,"renewalWarningDays":30,"generation":3,"renewalDue":true,"allowsRemoteAccess":true},
- "gate":"open","users":{"configured":6,"limit":6,"activeSessions":3,"state":"reconciled","conflicts":[]},
- "rdp":{"state":"healthy","listener":true,"detail":"Remote sessions available"},"network":"not_configured","supportAccessActive":false,"renewalUrl":"https://box.affinityminds.in/portal?renew=CBX-00001"}
+{
+  "service": "running",
+  "agentVersion": "0.1.0",
+  "enrolled": true,
+  "deviceId": "dev_sample",
+  "deviceName": "CLOUDBOX-00017",
+  "tenantCode": "CBX-00001",
+  "keyProtection": "tpm",
+  "cloud": "connected",
+  "tamper": "none",
+  "entitlementGeneration": 3,
+  "license": {
+    "state": "VALID",
+    "reason": null,
+    "message": null,
+    "daysRemaining": 21,
+    "graceDaysRemaining": null,
+    "validUntil": "2026-10-18T00:00:00Z",
+    "maxManagedUsers": 6,
+    "renewalWarningDays": 30,
+    "generation": 3,
+    "renewalDue": true,
+    "allowsRemoteAccess": true
+  },
+  "gate": "open",
+  "users": {
+    "configured": 6,
+    "limit": 6,
+    "activeSessions": 3,
+    "state": "reconciled",
+    "conflicts": []
+  },
+  "rdp": { "state": "healthy", "listener": true, "detail": "Remote sessions available" },
+  "network": "not_configured",
+  "supportAccessActive": false,
+  "renewalUrl": "https://box.affinityminds.in/portal?renew=CBX-00001"
+}

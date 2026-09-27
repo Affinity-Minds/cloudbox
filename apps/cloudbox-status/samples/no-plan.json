@@ -1,4 +1,37 @@
-{"service":"running","agentVersion":"0.1.0","enrolled":true,"deviceId":"dev_sample","deviceName":"CLOUDBOX-00018","tenantCode":"CBX-00002","keyProtection":"tpm","cloud":"connected","tamper":"none","entitlementGeneration":0,
- "license":{"state":"NO_PLAN","reason":"no_active_plan","message":"No active plan found. Please contact the CloudBox admin.","daysRemaining":null,"graceDaysRemaining":null,"validUntil":null,"maxManagedUsers":null,"renewalWarningDays":null,"generation":0,"renewalDue":false,"allowsRemoteAccess":false},
- "gate":"blocked","users":{"configured":null,"limit":null,"activeSessions":0,"state":"waiting_for_licence","conflicts":[]},
- "rdp":{"state":"healthy","listener":true,"detail":"Remote sessions available"},"network":"not_configured","supportAccessActive":false,"renewalUrl":null}
+{
+  "service": "running",
+  "agentVersion": "0.1.0",
+  "enrolled": true,
+  "deviceId": "dev_sample",
+  "deviceName": "CLOUDBOX-00018",
+  "tenantCode": "CBX-00002",
+  "keyProtection": "tpm",
+  "cloud": "connected",
+  "tamper": "none",
+  "entitlementGeneration": 0,
+  "license": {
+    "state": "NO_PLAN",
+    "reason": "no_active_plan",
+    "message": "No active plan found. Please contact the CloudBox admin.",
+    "daysRemaining": null,
+    "graceDaysRemaining": null,
+    "validUntil": null,
+    "maxManagedUsers": null,
+    "renewalWarningDays": null,
+    "generation": 0,
+    "renewalDue": false,
+    "allowsRemoteAccess": false
+  },
+  "gate": "blocked",
+  "users": {
+    "configured": null,
+    "limit": null,
+    "activeSessions": 0,
+    "state": "waiting_for_licence",
+    "conflicts": []
+  },
+  "rdp": { "state": "healthy", "listener": true, "detail": "Remote sessions available" },
+  "network": "not_configured",
+  "supportAccessActive": false,
+  "renewalUrl": null
+}
