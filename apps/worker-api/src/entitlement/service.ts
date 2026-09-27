@@ -362,7 +362,13 @@ export async function revokeForDevice(
     // Issue/Renew lifts it.
     db
       .update(devices)
-      .set({ licenseHoldReason: reason, licenseHoldAt: revokedAt, licenseHoldBy: actor.id })
+      .set({
+        // Display text for Fleet/portal (the "Licence on hold" reason), never the "code: text"
+        // audit format: the operator's free text when given, else the bare reason code.
+        licenseHoldReason: reasonText ?? reasonCode,
+        licenseHoldAt: revokedAt,
+        licenseHoldBy: actor.id,
+      })
       .where(eq(devices.id, deviceId)),
     audit(db, {
       eventType: "LICENSE_HOLD_PLACED",
@@ -370,7 +376,11 @@ export async function revokeForDevice(
       entityId: deviceId,
       actor: { type: "user", id: actor.id },
       before: { licenseHoldReason: null },
-      after: { licenseHoldReason: reason, licenseHoldAt: revokedAt, generations },
+      after: {
+        licenseHoldReason: reasonText ?? reasonCode,
+        licenseHoldAt: revokedAt,
+        generations,
+      },
       correlationId: actor.correlationId,
       source: "api",
     }),
