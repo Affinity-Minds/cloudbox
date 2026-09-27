@@ -641,6 +641,59 @@ export const licenseKeys = sqliteTable(
   ],
 );
 
+// ─── Network peers (migration 0014, WT-9) ────────────────────────────────────────────────────
+// One row per NetBird-mesh entity CloudBox has provisioned: a server (device_id set), a Connect
+// client (user_id set, one per tenant membership), or the per-tenant "support access wired"
+// marker (kind 'support', neither set — the single `cbx-support` gateway peer itself is not
+// tenant-scoped and lives outside this table; a marker row records that a tenant's server group
+// has been added to the standing support policy). D1 is authoritative for desired membership
+// (master spec §4.8 "Network control ownership"); `netbird_peer_id` is filled once the real peer
+// is observed joined (a future reconciliation job — out of scope while the server is mocked) and
+// is null until then. `group_ids_json` records which NetBird group ids this row's setup key or
+// policy contribution touched, for audit/debugging without calling back to NetBird.
+export const NETWORK_PEER_KINDS = ["server", "client", "support"] as const;
+export const NETWORK_PEER_STATUSES = ["not_configured", "pending", "active", "revoked"] as const;
+
+export const networkPeers = sqliteTable(
+  "network_peers",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: NETWORK_PEER_KINDS }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id").references(() => devices.id),
+    userId: text("user_id").references(() => customerUsers.id),
+    netbirdPeerId: text("netbird_peer_id"),
+    netbirdSetupKeyId: text("netbird_setup_key_id"),
+    /** JSON array of NetBird group ids this row's setup key/policy contribution touched. */
+    groupIdsJson: text("group_ids_json").notNull().default("[]"),
+    status: text("status", { enum: NETWORK_PEER_STATUSES }).notNull().default("not_configured"),
+    createdAt: createdAt(),
+    updatedAt: text("updated_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("network_peers_tenant_kind_idx").on(table.tenantId, table.kind),
+    // One server row per device.
+    uniqueIndex("network_peers_device_uq")
+      .on(table.deviceId)
+      .where(sql`${table.deviceId} IS NOT NULL`),
+    // One client row per (tenant, user) — a Connect member has one client identity per tenant.
+    uniqueIndex("network_peers_client_uq")
+      .on(table.tenantId, table.userId)
+      .where(sql`${table.kind} = 'client'`),
+    // One support marker row per tenant.
+    uniqueIndex("network_peers_support_uq")
+      .on(table.tenantId)
+      .where(sql`${table.kind} = 'support'`),
+    check("network_peers_kind_check", sql`${table.kind} IN ('server', 'client', 'support')`),
+    check(
+      "network_peers_status_check",
+      sql`${table.status} IN ('not_configured', 'pending', 'active', 'revoked')`,
+    ),
+  ],
+);
+
 // ─── Email providers (migration 0008, WT-12) ─────────────────────────────────────────────────
 
 export const EMAIL_PROVIDER_KINDS = ["cloudflare_binding", "smtp", "log"] as const;

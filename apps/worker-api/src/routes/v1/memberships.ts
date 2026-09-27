@@ -26,6 +26,9 @@ import { createDb } from "../../db/client";
 import { customerUsers, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-9 (ADR 0007): removes the member's NetBird client peer/setup key on revoke. No-op while
+// NetBird is unconfigured.
+import { revokeClientPeer } from "../../network/controller";
 
 // biome-ignore lint/complexity/noBannedTypes: Hono's Schema generic default, not our shape.
 const router = new Hono<AppEnv, {}, "/tenants/:tenantId/memberships">();
@@ -279,6 +282,10 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
     after,
     correlationId: c.var.correlationId,
     source: "api",
+  });
+  // Best-effort: an unreachable NetBird server must not fail the membership revoke itself.
+  await revokeClientPeer(c.env, db, { userId: before.userId, tenantId }).catch((error: unknown) => {
+    console.error("membership revoke: peer revocation failed", membershipId, error);
   });
 
   return c.json(after);

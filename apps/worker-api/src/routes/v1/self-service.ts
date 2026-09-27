@@ -8,12 +8,14 @@
 //   POST /onboarding/redeem               customer        licence key → tenant + pending plan
 //   POST /onboarding/activation-grants    customer, Owner/Admin of body.tenantId
 //   GET  /connect/devices                 customer, active member   CloudBox Connect device list
+//   GET  /connect/devices/:deviceId/network  customer, active member   mints a NetBird client key (WT-9)
 //   POST /license-keys/batches            staff license.issue       plaintext keys once (JSON/CSV)
 //   GET  /license-keys                    staff license.issue or subscription.view
 //   POST /license-keys/:id/revoke         staff license.revoke
 import {
   ActivationGrantRequest,
   type ActivationGrantResponse,
+  type ClientNetworkResponse,
   type ConnectDevicesResponse,
   CreateOwnTenantRequest,
   type CreateOwnTenantResponse,
@@ -31,6 +33,9 @@ import { createDb } from "../../db/client";
 import { devices, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-9 (ADR 0007): mints this Connect member's NetBird client setup key. A no-op response
+// (404 `network_not_configured`) while NETBIRD_API_URL is unset.
+import { mintClientSetupKey } from "../../network/controller";
 import {
   allocateTenantCode,
   clientOf,
@@ -276,6 +281,48 @@ router.get("/connect/devices", requireUser(), async (c) => {
         licenseState: d.licenseState,
       })),
   };
+  return c.json(body);
+});
+
+// WT-9 (ADR 0007): mints a NetBird client setup key so the Connect app can join this tenant's
+// mesh and reach `deviceId`. `deviceId` only resolves which tenant's client group to join (the
+// key itself is not bound to that one device) — the gate is active membership in its tenant, the
+// same check `GET /connect/devices` uses, re-resolved from `tenant_memberships` every call.
+router.get("/connect/devices/:deviceId/network", requireUser(), async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.var.user;
+  const deviceId = c.req.param("deviceId");
+
+  const [device] = await db
+    .select({ tenantId: devices.tenantId })
+    .from(devices)
+    .where(eq(devices.id, deviceId));
+  if (!device) return c.json({ error: "not_found" }, 404);
+
+  const [membership] = await db
+    .select({ id: tenantMemberships.id })
+    .from(tenantMemberships)
+    .where(
+      and(
+        eq(tenantMemberships.tenantId, device.tenantId),
+        eq(tenantMemberships.userId, user.id),
+        eq(tenantMemberships.status, "active"),
+      ),
+    );
+  if (!membership) return c.json({ error: "forbidden" }, 403);
+
+  const result = await mintClientSetupKey(c.env, db, {
+    userId: user.id,
+    tenantId: device.tenantId,
+  });
+  if (!result.configured) return c.json({ error: "network_not_configured" }, 404);
+
+  const body: ClientNetworkResponse = {
+    setupKey: result.setupKey,
+    managementUrl: result.managementUrl,
+    expiresAt: result.expiresAt,
+  };
+  c.header("Cache-Control", "no-store"); // the setup key is a confidential artefact
   return c.json(body);
 });
 
