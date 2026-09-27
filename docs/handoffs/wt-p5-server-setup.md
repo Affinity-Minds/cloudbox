@@ -129,7 +129,10 @@ windows, no missing/clipped text.
 - `status-no-plan.png` — Status app, licence "No active plan" (red), Remote Users "Waiting for the licence"; correct
   error-state copy, nothing blank.
 - `status-renewal-due.png` — Status app, licence "Expires in 21 days" with QR code and "Scan to renew" rendered;
-  Remote Users 6/6.
+  Remote Users 6/6. With the QR shown the window is taller than the 1024×768 runner screen, so the Agent card and
+  footer are cut off at the bottom edge of the capture (the window itself renders; it fits on a 1080p screen).
+
+Status is rendered against fictional sample pipe documents (`apps/cloudbox-status/samples/`), not a live Agent.
 - `status-revoked.png` — Status app, licence "Revoked" (red) with contact-admin copy; Remote Users 6/6, Remote Access
   Healthy.
 
