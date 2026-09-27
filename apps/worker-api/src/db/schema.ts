@@ -593,6 +593,8 @@ export const entitlements = sqliteTable(
   ],
 );
 
+export const SIGNING_KEY_PURPOSES = ["entitlement", "release"] as const;
+
 export const signingKeys = sqliteTable(
   "signing_keys",
   {
@@ -602,9 +604,130 @@ export const signingKeys = sqliteTable(
     status: text("status", { enum: ["active", "retired"] })
       .notNull()
       .default("active"),
+    /**
+     * Migration 0016 (WT-18): which signer this key belongs to — `entitlement` (WT-5,
+     * `ENTITLEMENT_SIGNING_JWK`) or `release` (WT-18, `RELEASE_SIGNING_JWK`). Added by `ALTER
+     * TABLE ADD COLUMN`, which D1/SQLite cannot pair with an inline CHECK (that needs a full table
+     * rebuild) — enforced by BEFORE INSERT/UPDATE triggers instead, the same pattern migration
+     * 0009 uses for `plans.status`/`plans.currency`; no declarative CHECK is declared here either.
+     */
+    purpose: text("purpose").notNull().default("entitlement"),
     createdAt: createdAt(),
   },
   (table) => [check("signing_keys_status_check", sql`${table.status} IN ('active', 'retired')`)],
+);
+
+// ─── OTA releases (migration 0016, WT-18) ────────────────────────────────────────────────────
+// Master spec §18, §45; Slices 10.1–10.4. `manifest_json` is the plain (never-secret) payload for
+// server-side reads; `manifest_jws` is the signed envelope (`@cloudbox/update-contracts`) served to
+// devices and verified by them. Neither is confidential, unlike `entitlements.token`.
+
+export const RELEASE_COMPONENTS = ["agent", "status", "setup", "connect"] as const;
+export const RELEASE_CHANNELS = ["development", "pilot", "stable", "pinned"] as const;
+export const RELEASE_STATUSES = ["draft", "pilot", "stable", "withdrawn"] as const;
+
+export const releases = sqliteTable(
+  "releases",
+  {
+    id: text("id").primaryKey(),
+    component: text("component", { enum: RELEASE_COMPONENTS }).notNull(),
+    version: text("version").notNull(),
+    channel: text("channel", { enum: RELEASE_CHANNELS }).notNull(),
+    manifestJson: text("manifest_json").notNull(),
+    manifestJws: text("manifest_jws").notNull(),
+    packageR2Key: text("package_r2_key").notNull(),
+    packageSha256: text("package_sha256").notNull(),
+    packageSize: integer("package_size").notNull(),
+    minAgentVersion: text("min_agent_version"),
+    rollbackOf: text("rollback_of"),
+    notes: text("notes"),
+    status: text("status", { enum: RELEASE_STATUSES }).notNull().default("draft"),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+    promotedAt: text("promoted_at"),
+    withdrawnAt: text("withdrawn_at"),
+    withdrawReason: text("withdraw_reason"),
+  },
+  (table) => [
+    index("releases_component_channel_idx").on(table.component, table.channel, table.status),
+    index("releases_created_at_idx").on(table.createdAt),
+    check(
+      "releases_component_check",
+      sql`${table.component} IN ('agent', 'status', 'setup', 'connect')`,
+    ),
+    check(
+      "releases_channel_check",
+      sql`${table.channel} IN ('development', 'pilot', 'stable', 'pinned')`,
+    ),
+    check(
+      "releases_status_check",
+      sql`${table.status} IN ('draft', 'pilot', 'stable', 'withdrawn')`,
+    ),
+  ],
+);
+
+export const RELEASE_ASSIGNMENT_SCOPES = ["device", "tenant", "fleet_percent"] as const;
+
+export const releaseAssignments = sqliteTable(
+  "release_assignments",
+  {
+    id: text("id").primaryKey(),
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    scope: text("scope", { enum: RELEASE_ASSIGNMENT_SCOPES }).notNull(),
+    deviceId: text("device_id").references(() => devices.id),
+    tenantId: text("tenant_id").references(() => tenants.id),
+    percent: integer("percent"),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index("release_assignments_release_idx").on(table.releaseId),
+    index("release_assignments_device_idx").on(table.deviceId),
+    index("release_assignments_tenant_idx").on(table.tenantId),
+    check(
+      "release_assignments_scope_check",
+      sql`${table.scope} IN ('device', 'tenant', 'fleet_percent')`,
+    ),
+  ],
+);
+
+export const RELEASE_RESULT_STATES = [
+  "assigned",
+  "downloaded",
+  "verified",
+  "installed_healthy",
+  "installed_unhealthy",
+  "rolled_back",
+  "failed_download",
+  "failed_validation",
+  "deferred_active_users",
+  "deferred_maintenance",
+] as const;
+
+export const releaseResults = sqliteTable(
+  "release_results",
+  {
+    id: text("id").primaryKey(),
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    state: text("state", { enum: RELEASE_RESULT_STATES }).notNull(),
+    detailJson: text("detail_json"),
+    reportedAt: text("reported_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("release_results_release_idx").on(table.releaseId, table.reportedAt),
+    index("release_results_device_idx").on(table.deviceId, table.reportedAt),
+    check(
+      "release_results_state_check",
+      sql`${table.state} IN ('assigned', 'downloaded', 'verified', 'installed_healthy', 'installed_unhealthy', 'rolled_back', 'failed_download', 'failed_validation', 'deferred_active_users', 'deferred_maintenance')`,
+    ),
+  ],
 );
 
 // ─── License keys (migration 0010, WT-14) ────────────────────────────────────────────────────

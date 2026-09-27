@@ -28,6 +28,28 @@ touches only the `cloudbox` repo); flagged in the handoff's "Requests to another
 **Verification:** `test/realtime.test.ts` calls `ws.close()` with no arguments after every
 WebSocket assertion; all 13 cases pass with the handler reduced to a no-op.
 
+## 2026-09-27 — `crypto.DigestStream` is a `ReferenceError` as a bare global, and untyped via `crypto.` too (WT-18)
+**Symptom:** `storePackage` (streaming a release package into R2 while hashing it) threw `ReferenceError: DigestStream is not defined` at runtime in the `@cloudflare/vitest-pool-workers` test pool, even though `@cloudflare/workers-types` declares it. Separately, `tsc` rejected `crypto.DigestStream` with "Property 'DigestStream' does not exist on type 'Crypto'".
+
+**Cause:** Two independent issues stacked. (1) `@cloudflare/workers-types` declares `DigestStream` both as a bare ambient class and as a `Crypto.DigestStream` property, but this repo's `tsconfig.base.json` includes `"lib": ["DOM", …]` (every `Bindings` type needs DOM's other globals), and lib.dom.d.ts's own `Crypto` interface — which does not carry `DigestStream` — wins the merge for the global `crypto` binding's *type*. (2) At runtime in the pool's (older, pinned) workerd, `DigestStream` is reachable only as `crypto.DigestStream`, not as a bare global — the opposite of what the bare-global `ReferenceError` first suggested.
+
+**Fix:** `new (crypto as unknown as { DigestStream: typeof DigestStream }).DigestStream("SHA-256")` — one cast at the single call site (`apps/worker-api/src/releases/upload.ts`), rather than widening the ambient `Crypto` type repo-wide.
+
+**Blast radius:** Any future use of a Workers-only runtime API that is also a *property* of a lib.dom-shadowed global (not just a bare global) will hit the same two-layer trap: fix the bare-global type error first, then still expect a runtime `ReferenceError` until the access goes through the object, not the identifier.
+
+**Verification:** `apps/worker-api/test/releases.test.ts` "stores the package in R2, computes its sha256 and signs a verifiable manifest" passes against the real pool.
+
+## 2026-09-27 — `SubtleCrypto.importKey`/`sign` reject a `Uint8Array` built via `Uint8Array.from(..., mapFn)` or a bare `Uint8Array` return type (WT-18)
+**Symptom:** `tsc` error on `crypto.subtle.importKey("raw", material, …)`: `Uint8Array<ArrayBufferLike>` is not assignable to `BufferSource` (`ArrayBufferView<ArrayBuffer>` needs `buffer: ArrayBuffer`, not `ArrayBufferLike`, which also covers `SharedArrayBuffer`). `TextEncoder.prototype.encode` is unaffected (it returns `Uint8Array<ArrayBuffer>` already) — only bytes built by hand tripped this.
+
+**Cause:** This TypeScript/lib version's `Uint8Array.from(iterable, mapFn)` overload, and a bare `Uint8Array` return-type annotation (no generic argument), both widen to `Uint8Array<ArrayBufferLike>`, which `BufferSource`-typed Web Crypto parameters (`importKey`, `sign`, `verify`, `encrypt`/`decrypt`) no longer accept.
+
+**Fix:** Build the bytes with `new Uint8Array(length)` + an index loop instead of `Uint8Array.from(…, mapFn)`, and annotate every such helper's return type explicitly as `Uint8Array<ArrayBuffer>`, not bare `Uint8Array` (`apps/worker-api/src/releases/download-token.ts`).
+
+**Blast radius:** Any hand-built (not `TextEncoder`-sourced) byte buffer passed to a Web Crypto call in this codebase going forward.
+
+**Verification:** `pnpm --filter @cloudbox/worker-api typecheck` clean; `releases.test.ts`'s download-token tests exercise both the sign and verify paths.
+
 ## 2026-09-27 — Hand-rolled route resolution skipped the staff first-sign-in setup gate (WT-3)
 **Symptom:** WT-8's review sweep S-6 (every `/api/v1` route 403s `setup_required` for staff mid password-change/authenticator-enrolment) failed on `GET /screens/fleet` and `GET /screens/fleet/:deviceId` — a staff account that hadn't finished ADR 0009's forced setup could still read both.
 

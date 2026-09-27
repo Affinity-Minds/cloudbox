@@ -25,6 +25,10 @@ export const ID_PREFIX = {
   restoreTest: "rst_",
   /** WT-17. */
   alert: "alrt_",
+  // WT-18 (migration 0016): OTA releases.
+  release: "rel_",
+  releaseAssignment: "rla_",
+  releaseResult: "rlr_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

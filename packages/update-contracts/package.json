@@ -1,0 +1,24 @@
+{
+  "name": "@cloudbox/update-contracts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate-signing-key": "node scripts/generate-signing-key.ts",
+    "make-test-vector": "node scripts/make-test-vector.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

@@ -69,7 +69,7 @@ test("/login renders the customer email step (no password field, no link to the 
   await page.screenshot({ path: path.join(EVIDENCE_DIR, "login.png"), fullPage: true });
 });
 
-test("${OPS_BASE_PATH}/login renders the staff form (email + password), noindex", async ({
+test(`${OPS_BASE_PATH}/login renders the staff form (email + password), noindex`, async ({
   page,
 }) => {
   const response = await page.goto(`${OPS_BASE_PATH}/login`);

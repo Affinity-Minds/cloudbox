@@ -14,6 +14,7 @@ export * from "./network";
 export * from "./onboarding";
 export * from "./realtime";
 export * from "./reasons";
+export * from "./releases";
 export * from "./screens";
 export * from "./subscriptions";
 export * from "./tenants";

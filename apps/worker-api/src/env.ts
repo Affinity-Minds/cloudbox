@@ -32,6 +32,8 @@ export type Bindings = {
   /** Initial password of the bootstrap super admin (ADR 0009); seeded once, must be changed. */
   BOOTSTRAP_SUPER_ADMIN_PASSWORD?: string;
   ENTITLEMENT_SIGNING_JWK?: string;
+  /** OTA release-manifest signing key (WT-18): its own signer, never `ENTITLEMENT_SIGNING_JWK`. */
+  RELEASE_SIGNING_JWK?: string;
   PHASE0_ADMIN_KEY?: string;
   /** 32 raw bytes, base64. AES-256-GCM key for `email_providers.secret_ciphertext` (WT-12). */
   PROVIDER_SECRETS_KEY?: string;

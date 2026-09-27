@@ -17,6 +17,7 @@ import me from "./me";
 import meAlerts from "./me-alerts";
 import memberships from "./memberships";
 import realtime from "./realtime";
+import releases from "./releases";
 import screens from "./screens";
 import selfService from "./self-service";
 import setup from "./setup";
@@ -57,6 +58,7 @@ v1.route("/tenants/:tenantId/backup-policy", tenantBackupPolicy); // WT-19
 v1.route("/me/backups", meBackups); // WT-19
 v1.route("/settings/alerts", alertsSettings); // WT-17
 v1.route("/alerts", alerts); // WT-17
+v1.route("/releases", releases); // WT-18
 v1.route("/screens", screens); // WT-0 (+ one line per screen owner in screens/index.ts)
 v1.route("/audit", audit); // WT-0
 v1.route("/", selfService); // WT-14: /onboarding/*, /connect/*, /license-keys/*
