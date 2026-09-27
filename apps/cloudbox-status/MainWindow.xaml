@@ -1,0 +1,98 @@
+<Window x:Class="CloudBox.Status.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CloudBox Status" Width="460" SizeToContent="Height" ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen" Background="#F1F5F9" FontFamily="Segoe UI" FontSize="13">
+  <Window.Resources>
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#E2E8F0" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="14,10" />
+      <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+    <Style x:Key="Caption" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#64748B" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+    <Style x:Key="Value" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#0F172A" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="Detail" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#334155" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
+  </Window.Resources>
+  <StackPanel>
+    <Border Background="#0F172A" Padding="18,12">
+      <Grid>
+        <TextBlock Text="CloudBox" Foreground="White" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+        <Border x:Name="CloudPill" HorizontalAlignment="Right" CornerRadius="10" Padding="10,3" Background="#475569">
+          <TextBlock x:Name="CloudText" Foreground="White" FontSize="11" FontWeight="Bold" Text="CHECKING" />
+        </Border>
+      </Grid>
+    </Border>
+    <Border x:Name="SupportBanner" Visibility="Collapsed" Background="#FEF3C7" Padding="18,8">
+      <TextBlock Foreground="#92400E" TextWrapping="Wrap"
+                 Text="CloudBox support access is active on this server. It ends automatically." />
+    </Border>
+    <StackPanel Margin="16,14,16,6">
+      <TextBlock x:Name="DeviceName" FontSize="20" FontWeight="SemiBold" Foreground="#0F172A" Text="CloudBox" />
+      <TextBlock x:Name="TenantLine" Foreground="#475569" Margin="0,0,0,12" Text="Connecting to the CloudBox Agent..." />
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Text="LICENCE" />
+          <StackPanel Orientation="Horizontal">
+            <Ellipse x:Name="LicenseDot" Width="10" Height="10" Fill="#94A3B8" Margin="0,0,8,0" VerticalAlignment="Center" />
+            <TextBlock x:Name="LicenseState" Style="{StaticResource Value}" Text="Checking" />
+          </StackPanel>
+          <TextBlock x:Name="LicenseDetail" Style="{StaticResource Detail}" />
+          <StackPanel x:Name="RenewPanel" Visibility="Collapsed" Margin="0,10,0,0" HorizontalAlignment="Left">
+            <Image x:Name="RenewQr" Width="140" Height="140" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+            <TextBlock Text="Scan to renew" HorizontalAlignment="Center" Foreground="#334155" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Text="REMOTE USERS" />
+          <TextBlock x:Name="UsersConfigured" Style="{StaticResource Value}" Text="-" />
+          <TextBlock x:Name="UsersActive" Style="{StaticResource Detail}" />
+        </StackPanel>
+      </Border>
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Text="REMOTE ACCESS" />
+          <TextBlock x:Name="RdpState" Style="{StaticResource Value}" Text="-" />
+          <TextBlock x:Name="RdpDetail" Style="{StaticResource Detail}" />
+        </StackPanel>
+      </Border>
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Text="PRIVATE NETWORK" />
+          <TextBlock x:Name="NetworkState" Style="{StaticResource Value}" Text="Not configured yet" />
+          <TextBlock Style="{StaticResource Detail}" Text="Added in a later CloudBox release." />
+        </StackPanel>
+      </Border>
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Text="AGENT" />
+          <TextBlock x:Name="AgentLine" Style="{StaticResource Detail}" Text="-" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+    <TextBlock x:Name="Footer" Foreground="#94A3B8" FontSize="11" Margin="16,0,16,12" />
+  </StackPanel>
+</Window>

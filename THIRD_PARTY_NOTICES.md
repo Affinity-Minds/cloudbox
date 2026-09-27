@@ -32,7 +32,7 @@ This document lists all third-party software components included in or used by C
 
 ### RDP Wrapper (sergiye/rdpWrapper, pinned v2.15)
 
-**Repository:** https://github.com/stascorp/rdpwrap (archived); maintained fork: https://github.com/sergiye/rdpwrap  
+**Repository:** https://github.com/sergiye/rdpWrapper (release 2.15, 2026-06-12; asset `rdpWrapper_x64.exe`, SHA-256 pinned in `apps/cloudbox-server-setup/third-party.lock.json`, ADR 0012)  
 **License:** Commercial — **direct permission from author Sergiy Egoshyn**  
 **Evidence:** Held privately; confirmed by project owner (2026-09-26)  
 **Usage:** Embedded in CloudBox.Server.Setup.exe; silent runtime for concurrent RDP sessions  
@@ -44,9 +44,9 @@ Verified (2026-09-26) in rdpWrapper repository and embedded binaries:
 
 | Binary | Author | License | Purpose |
 |---|---|---|---|
-| `TermWrap.exe` | llccd | MIT | Terminal wrapper for RDP concurrent session support |
-| `UmWrap.exe` | llccd | MIT | User mode wrapper utility |
-| `EndpWrap.exe` | llccd | MIT | Endpoint wrapper |
+| `TermWrap.dll` | llccd | MIT | Terminal wrapper for RDP concurrent session support |
+| `UmWrap.dll` | llccd | MIT | User mode wrapper utility |
+| `EndpWrap.dll` | llccd | MIT | Endpoint wrapper |
 | `RDPWrapOffsetFinder.exe` | llccd | MIT | Binary offset discovery tool (build-time only) |
 | `rdpwrap.dll` | stascorp | Apache-2.0 | Core RDP Wrapper runtime library |
 | `rdpwrap.ini` | stascorp | Apache-2.0 | Configuration file and offset database |
@@ -94,6 +94,13 @@ Verified (2026-09-26) in rdpWrapper repository and embedded binaries:
 **Source:** `.csproj` files in `apps/cloudbox-agent`, `apps/cloudbox-server-setup`  
 **Status:** To be inventoried after WT-4 foundation (Windows components)  
 **When:** WT-4 publishes baseline Windows build; WT-7 inventories from publish artifacts.
+
+**Added by WT-10 (Server Setup, Status, local verifier):**
+- `jose-jwt` 5.3.0 (MIT) — entitlement JWE decrypt (RSA-OAEP-256/A256GCM; Microsoft.IdentityModel lacks RSA-OAEP-256)
+- `Microsoft.IdentityModel.JsonWebTokens` 8.23.0 (MIT) — entitlement ES256 JWS verification
+- `System.DirectoryServices.AccountManagement` 10.0.12 (MIT, .NET) — managed local users
+- `QRCoder` 1.8.0 (MIT) — CloudBox Status renewal QR
+- `Microsoft.Web.WebView2` 1.0.4191.47 (Microsoft WebView2 SDK licence, redistributable) — Setup sign-up page
 
 **Expected major packages (not exhaustive):**
 - `Microsoft.Extensions.Hosting.WindowsServices` (Microsoft, proprietary)

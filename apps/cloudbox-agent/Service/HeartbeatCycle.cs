@@ -14,13 +14,15 @@ public sealed class HeartbeatCycle(
     AgentStatus status,
     TimeProvider clock,
     Random rng,
-    Func<long?>? freeBytes = null)
+    Func<long?>? freeBytes = null,
+    ServerRuntime? server = null)
 {
     // Generous so an unsynchronised lab clock is not reported as tampering; Slice 4.1 tunes this.
     private static readonly TimeSpan ClockTolerance = TimeSpan.FromHours(1);
     private readonly ILogger _log = Log.ForContext<HeartbeatCycle>();
     private readonly Func<long?> _freeBytes = freeBytes ?? HealthBuilder.SystemDriveFreeBytes;
     private bool _bindingReported;
+    private bool _lastConnected;
 
     public int ConsecutiveFailures { get; private set; }
 
@@ -50,24 +52,59 @@ public sealed class HeartbeatCycle(
         var tamper = clockState == TrustedTimeState.Healthy ? "none" : clockState;
         if (tamper != "none") Security.Log.Warning("Local clock is behind the trusted-time high-water mark ({Tamper})", tamper);
 
+        // Boot-time gate (spec §10.1): the local lease is validated and enforced before and independently of the cloud.
+        LocalReport? local = null;
+        if (server is not null)
+        {
+            var lic = await server.EvaluateAsync(state, now, clockState, _lastConnected);
+            local = server.Enforce(lic);
+        }
+
         string cloud;
         string? error = null;
         try
         {
-            var health = HealthBuilder.Build(state.DeviceId, state.KeyProtection, tamper, _freeBytes());
+            var health = local is null
+                ? HealthBuilder.Build(state.DeviceId, state.KeyProtection, tamper, _freeBytes())
+                : HealthBuilder.Build(state.DeviceId, state.KeyProtection, tamper, _freeBytes(),
+                    new LicensePart(local.License.State, local.License.DaysRemaining),
+                    new RdpPart(local.Rdp.State, local.Rdp.Listener),
+                    new UsersPart(local.Users.Configured, local.Users.Limit, local.Users.ActiveSessions),
+                    new StatePart("not_configured"));
             var baseUrl = new Uri(state.BaseUrl);
             var res = await heartbeat.HeartbeatAsync(baseUrl, state.DeviceToken, health, ct);
             state.TrustedTime.ObserveServerTime(res.ServerTime);
             state.LastHeartbeatAt = now;
+            state.DeviceRevoked = false;
+            if (res.LicenseState is not null)
+            {
+                state.CloudLicenseState = res.LicenseState;
+                state.CloudMessage = res.Message;
+            }
+
+            if (res.EntitlementGeneration is null && state.EntitlementGeneration > 0 && !state.EntitlementRevoked)
+            {
+                // The cloud holds no live lease for a device that has one: it was revoked (spec §32).
+                state.EntitlementRevoked = true;
+                Security.Log.Warning("Cloud reports no live entitlement; generation {Generation} treated as revoked", state.EntitlementGeneration);
+            }
+
             if (res.EntitlementGeneration is { } gen && gen > state.EntitlementGeneration)
             {
                 var ent = await entitlements.GetEntitlementAsync(baseUrl, state.DeviceToken, ct);
                 if (ent is not null)
                 {
-                    state.Entitlement = ent.Entitlement;
-                    state.EntitlementGeneration = ent.Generation;
-                    state.EntitlementFetchedAt = now;
-                    _log.Information("Entitlement generation {Generation} downloaded", ent.Generation);
+                    if (server is null)
+                    {
+                        state.Entitlement = ent.Entitlement;
+                        state.EntitlementGeneration = ent.Generation;
+                        state.EntitlementFetchedAt = now;
+                        _log.Information("Entitlement generation {Generation} downloaded", ent.Generation);
+                    }
+                    else
+                    {
+                        await server.License.AcceptAsync(state, ent, now, ct);
+                    }
                 }
             }
 
@@ -79,10 +116,24 @@ public sealed class HeartbeatCycle(
             ConsecutiveFailures++;
             cloud = ex.State;
             error = ex.Message;
+            if (ex.Failure == CloudFailure.Unauthorized && !state.DeviceRevoked)
+            {
+                state.DeviceRevoked = true;
+                Security.Log.Warning("Cloud refused this device's credential; remote access treated as revoked");
+            }
+
             _log.Warning("Heartbeat failed ({Cloud}, attempt {Failures}): {Error}", cloud, ConsecutiveFailures, ex.Message);
         }
 
+        _lastConnected = cloud == "connected";
         stateStore.Save(state); // Persists trusted-time marks even when the cloud is unreachable.
+        if (server is not null)
+        {
+            // Re-evaluate with what the cloud just said (new generation, revocation, connectivity).
+            var lic = await server.EvaluateAsync(state, now, clockState, _lastConnected);
+            local = server.Enforce(lic);
+        }
+
         var delay = Backoff.Next(ConsecutiveFailures, rng);
         status.Set(new AgentStatusSnapshot
         {
@@ -101,6 +152,13 @@ public sealed class HeartbeatCycle(
             EntitlementFetchedAt = state.EntitlementFetchedAt,
             TrustedTime = state.TrustedTime.HighestTrustedTime,
             UpdatedAt = now,
+            License = local?.License,
+            Gate = local?.Gate,
+            Users = local?.Users,
+            Rdp = local?.Rdp,
+            RenewalUrl = local?.License.RenewalDue == true
+                ? $"{state.BaseUrl.TrimEnd('/')}/portal?renew={Uri.EscapeDataString(state.TenantCode)}"
+                : null,
         });
         return delay;
     }

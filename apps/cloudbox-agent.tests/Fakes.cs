@@ -12,9 +12,17 @@ using CloudBox.Agent.State;
 namespace CloudBox.Agent.Tests;
 
 /// <summary>Device key held in memory; stands in for the CNG/TPM store.</summary>
-public sealed class InMemoryDeviceKeyStore(string protection = "tpm") : IDeviceKeyStore
+public sealed class InMemoryDeviceKeyStore(string protection = "tpm", RSA? key = null) : IDeviceKeyStore
 {
-    private RSA? _key;
+    private RSA? _key = key;
+
+    public RSA? OpenPrivateKey()
+    {
+        if (_key is null) return null;
+        var copy = RSA.Create();
+        copy.ImportParameters(_key.ExportParameters(true));
+        return copy;
+    }
 
     public DeviceKeyInfo OpenOrCreate()
     {

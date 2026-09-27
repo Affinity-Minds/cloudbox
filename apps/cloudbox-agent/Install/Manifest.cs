@@ -31,10 +31,13 @@ public static class Kinds
     public const string ThirdPartyComponent = "third_party_component";
     public const string ArpEntry = "arp_entry";
 
+    /// <summary>Added by WT-10 for the CloudBoxUsers group (Slice 5.4).</summary>
+    public const string LocalGroup = "local_group";
+
     public static readonly IReadOnlyList<string> All =
     [
         Service, Directory, File, RegistryKey, RegistryValue, FirewallRule, LocalUser, LocalGroupMembership,
-        ScheduledTask, CngKey, EventLogSource, WindowsSetting, ThirdPartyComponent, ArpEntry,
+        ScheduledTask, CngKey, EventLogSource, WindowsSetting, ThirdPartyComponent, ArpEntry, LocalGroup,
     ];
 }
 
@@ -166,6 +169,7 @@ public sealed class ManifestRunner
     /// <summary>Record-then-act: the entry is persisted as pending before the step touches the machine.</summary>
     public ManifestEntry Apply(string kind, string id, JsonObject? spec = null)
     {
+        Refresh();
         var step = Step(kind);
         var entry = new ManifestEntry
         {
@@ -182,6 +186,24 @@ public sealed class ManifestRunner
         _store.Save(Manifest);
         return entry;
     }
+
+    /// <summary>
+    /// Setup and the Agent service both append to the manifest (the service creates managed users after enrollment).
+    /// Before each write, entries another process persisted since this runner loaded are merged in, so neither clobbers
+    /// the other.
+    /// </summary>
+    private void Refresh()
+    {
+        var persisted = _store.Load();
+        if (persisted is null) return;
+        var known = Manifest.Entries.Select(EntryKey).ToHashSet(StringComparer.Ordinal);
+        foreach (var e in persisted.Entries)
+        {
+            if (!known.Contains(EntryKey(e))) Manifest.Entries.Add(e);
+        }
+    }
+
+    private static string EntryKey(ManifestEntry e) => $"{e.Kind}\u0000{e.Id}\u0000{e.CreatedAt:O}";
 
     /// <summary>Replays entries in reverse. Never stops at a failure; every entry gets an outcome.</summary>
     public IReadOnlyList<RevertResult> RevertAll(IReadOnlyList<ManifestEntry> entries, RevertContext context)
