@@ -159,6 +159,9 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
       lastHealthJson: devices.lastHealthJson,
       enrolledAt: devices.enrolledAt,
       revokedAt: devices.revokedAt,
+      licenseHoldReason: devices.licenseHoldReason,
+      licenseHoldAt: devices.licenseHoldAt,
+      licenseHoldBy: devices.licenseHoldBy,
       tenantCode: tenants.publicCode,
       tenantName: tenants.displayName,
     })
@@ -211,13 +214,17 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
 
   const now = new Date().toISOString();
   const latestValid = entitlementRows.find((e) => e.revokedAt === null)?.validUntil ?? null;
-  const { lastHealthJson, ...deviceFields } = device;
+  const { lastHealthJson, licenseHoldReason, licenseHoldAt, licenseHoldBy, ...deviceFields } =
+    device;
 
   return {
     device: {
       ...deviceFields,
       lastHealth: lastHealthJson ? JSON.parse(lastHealthJson) : null,
       licenseState: licenseState(latestValid, now),
+      licenseHold: licenseHoldReason
+        ? { reason: licenseHoldReason, at: licenseHoldAt, by: licenseHoldBy }
+        : null,
     },
     entitlements: entitlementRows,
     plan: toTenantPlan(newestPerTenant(planRows).get(device.tenantId)),

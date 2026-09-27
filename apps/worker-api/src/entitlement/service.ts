@@ -89,6 +89,8 @@ export async function issueForDevice(
         deviceStatus: sql<DeviceStatus>`${devices.status}`.as("device_status"),
         devicePublicKeyJwk: devices.devicePublicKeyJwk,
         deviceKeyThumbprint: devices.deviceKeyThumbprint,
+        licenseHoldReason: devices.licenseHoldReason,
+        licenseHoldAt: devices.licenseHoldAt,
         subscriptionId: sql<string | null>`${subscriptions.id}`.as("subscription_id"),
         subscriptionStatus: sql<SubscriptionStatus | null>`${subscriptions.status}`.as(
           "subscription_status",
@@ -142,6 +144,10 @@ export async function issueForDevice(
   if (!ctx) throw new EntitlementRefusal(404, "not_found", "device");
   // §32: a revoked (or transferred) device must not receive a fresh lease.
   if (ctx.deviceStatus !== "enrolled") throw new EntitlementRefusal(409, "device_not_enrolled");
+  // Licence hold (migration 0019): after a staff revoke, only a staff Issue/Renew may issue again.
+  // Automatic issuance (actor `system`: activation, heartbeat catch-up) never lifts it.
+  const automatic = actor.type === "system";
+  if (automatic && ctx.licenseHoldReason) throw new EntitlementRefusal(409, "license_hold");
   if (
     !ctx.subscriptionId ||
     !ctx.subscriptionStatus ||
@@ -252,7 +258,14 @@ export async function issueForDevice(
         JOIN subscriptions s ON s.id = e.subscription_id
         WHERE e.revoked_at IS NULL AND d.status = 'enrolled' AND s.status <> 'cancelled'
           AND e.device_id <> ${record.deviceId} AND d.tenant_id = ${ctx.tenantId}
-      ) < ${ctx.maxDevices ?? 0}`);
+      ) < ${ctx.maxDevices ?? 0}
+      ${
+        // A hold placed after the read above still stops an automatic issuance.
+        automatic
+          ? sql`AND NOT EXISTS (SELECT 1 FROM devices h
+                                WHERE h.id = ${record.deviceId} AND h.license_hold_reason IS NOT NULL)`
+          : sql``
+      }`);
     inserted = (result.meta?.changes ?? 0) === 1;
   } catch (error) {
     // UNIQUE(device_id, generation): a concurrent issue took this generation. Nothing was written.
@@ -260,6 +273,13 @@ export async function issueForDevice(
     throw error;
   }
   if (!inserted) {
+    if (automatic) {
+      const [held] = await db
+        .select({ reason: devices.licenseHoldReason })
+        .from(devices)
+        .where(eq(devices.id, deviceId));
+      if (held?.reason) throw new EntitlementRefusal(409, "license_hold");
+    }
     throw new EntitlementRefusal(409, "device_limit_reached", `plan allows ${ctx.maxDevices}`);
   }
 
@@ -275,6 +295,34 @@ export async function issueForDevice(
     correlationId: actor.correlationId,
     source: actor.source ?? "api",
   });
+
+  // A staff Issue/Renew is the only thing that lifts a licence hold (the hold that was read above;
+  // a newer one placed meanwhile stays).
+  if (!automatic && ctx.licenseHoldReason) {
+    await db.batch([
+      db
+        .update(devices)
+        .set({ licenseHoldReason: null, licenseHoldAt: null, licenseHoldBy: null })
+        .where(
+          and(
+            eq(devices.id, deviceId),
+            ctx.licenseHoldAt === null
+              ? isNull(devices.licenseHoldAt)
+              : eq(devices.licenseHoldAt, ctx.licenseHoldAt),
+          ),
+        ),
+      audit(db, {
+        eventType: "LICENSE_HOLD_CLEARED",
+        entityType: "device",
+        entityId: deviceId,
+        actor: { type: actor.type ?? "user", id: actor.id },
+        before: { licenseHoldReason: ctx.licenseHoldReason, licenseHoldAt: ctx.licenseHoldAt },
+        after: { licenseHoldReason: null, clearedBy: kind, licenseId, generation },
+        correlationId: actor.correlationId,
+        source: actor.source ?? "api",
+      }),
+    ]);
+  }
 
   return { entitlement: record, claims };
 }
@@ -309,6 +357,22 @@ export async function revokeForDevice(
       .update(entitlements)
       .set({ revokedAt })
       .where(and(eq(entitlements.deviceId, deviceId), isNull(entitlements.revokedAt))),
+    // Licence hold (migration 0019): automatic issuance must not undo this revoke; only a staff
+    // Issue/Renew lifts it.
+    db
+      .update(devices)
+      .set({ licenseHoldReason: reason, licenseHoldAt: revokedAt, licenseHoldBy: actor.id })
+      .where(eq(devices.id, deviceId)),
+    audit(db, {
+      eventType: "LICENSE_HOLD_PLACED",
+      entityType: "device",
+      entityId: deviceId,
+      actor: { type: "user", id: actor.id },
+      before: { licenseHoldReason: null },
+      after: { licenseHoldReason: reason, licenseHoldAt: revokedAt, generations },
+      correlationId: actor.correlationId,
+      source: "api",
+    }),
     audit(db, {
       eventType: "LICENSE_REVOKED",
       entityType: "entitlement",

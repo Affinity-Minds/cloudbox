@@ -476,6 +476,11 @@ export const devices = sqliteTable(
     lastHealthJson: text("last_health_json"),
     enrolledAt: text("enrolled_at").notNull().default(isoNow),
     revokedAt: text("revoked_at"),
+    // Licence hold (migration 0019): set by a staff licence revoke, cleared only by a staff Issue or
+    // Renew. While set, auto-issuance (activation, heartbeat catch-up) never issues to the device.
+    licenseHoldReason: text("license_hold_reason"),
+    licenseHoldAt: text("license_hold_at"),
+    licenseHoldBy: text("license_hold_by"),
   },
   (table) => [
     index("devices_tenant_status_idx").on(table.tenantId, table.status),

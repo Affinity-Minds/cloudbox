@@ -156,6 +156,17 @@ Newest first. Record only non-obvious failures or fixes with meaningful blast ra
 
 **Verification:** Playwright run against wrangler dev + fresh local D1 (`docs/evidence/wt-p2-onboarding/01…06`).
 
+## 2026-09-27 — A staff licence revoke was undone within a minute (found by WT-10)
+**Symptom:** after Subscriptions → Revoke, the lab server went back to `VALID` on its next heartbeat; the licence could only be stopped by suspending the whole plan.
+
+**Cause:** WT-14's heartbeat auto-issuance (`activateLicense`) issues whenever a device has no live entitlement and the tenant's plan is active. A revoke leaves exactly that state, so the next heartbeat issued a new generation.
+
+**Fix:** licence hold (migration 0019): revoke sets `devices.license_hold_*` (`LICENSE_HOLD_PLACED`); automatic issuance skips held devices and reports `licenseState: "revoked"`; only a staff Issue/Renew clears it (`LICENSE_HOLD_CLEARED`).
+
+**Blast radius:** any device whose licence staff revoked while its tenant's plan was active (Phase 2 cloud, since the WT-14 merge).
+
+**Verification:** `test/license-hold.test.ts`; lab runbook step 4 updated.
+
 ## Template
 
 ### YYYY-MM-DD — Short symptom

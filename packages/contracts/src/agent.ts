@@ -20,13 +20,21 @@ export type EnrollRequest = z.infer<typeof EnrollRequest>;
  * `no_active_plan` (no subscription, or none active and in date), `device_limit_reached` (the plan's
  * `max_devices` is used by other servers).
  */
-export const AgentLicenseState = z.enum(["licensed", "no_active_plan", "device_limit_reached"]);
+export const AgentLicenseState = z.enum([
+  "licensed",
+  "no_active_plan",
+  "device_limit_reached",
+  // A staff licence revoke put the device on hold: nothing is issued until staff Issue again.
+  "revoked",
+]);
 export type AgentLicenseState = z.infer<typeof AgentLicenseState>;
 
 /** The exact text shown for `no_active_plan` (agent Status window, portal, Fleet). */
 export const NO_ACTIVE_PLAN_MESSAGE = "No active plan found. Please contact the CloudBox admin.";
 export const DEVICE_LIMIT_MESSAGE =
   "This plan's server limit is reached. Please contact the CloudBox admin.";
+/** The exact text shown for `revoked` (a staff licence revoke; licence hold). */
+export const LICENSE_REVOKED_MESSAGE = "Licence revoked by CloudBox. Contact the CloudBox admin.";
 
 /** `POST /api/v1/agent/enroll` → 201. `deviceToken` is the Bearer credential for every later call. */
 export const EnrollResponse = z.object({

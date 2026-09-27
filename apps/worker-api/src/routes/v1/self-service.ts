@@ -88,6 +88,11 @@ router.get("/onboarding/overview", requireUser(), async (c) => {
           SELECT count(*) FROM ${devices}
           WHERE ${devices.tenantId} = ${tenants.id} AND ${devices.status} = 'enrolled'
         )`.mapWith(Number),
+        heldDevices: sql<number>`(
+          SELECT count(*) FROM ${devices}
+          WHERE ${devices.tenantId} = ${tenants.id} AND ${devices.status} = 'enrolled'
+            AND ${devices.licenseHoldReason} IS NOT NULL
+        )`.mapWith(Number),
       })
       .from(tenantMemberships)
       .innerJoin(tenants, eq(tenants.id, tenantMemberships.tenantId))

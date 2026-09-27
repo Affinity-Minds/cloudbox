@@ -96,7 +96,7 @@ export const queries: RegisteredQuery[] = [
   },
   {
     name: "onboarding.overview: the caller's active memberships with enrolled-device counts",
-    sql: `select "tenants"."id", "tenants"."public_code", "tenants"."display_name", "tenants"."status", "tenant_memberships"."standing", (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled') from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?) order by "tenants"."created_at"`,
+    sql: `select "tenants"."id", "tenants"."public_code", "tenants"."display_name", "tenants"."status", "tenant_memberships"."standing", (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled'), (SELECT count(*) FROM "devices" WHERE "devices"."tenant_id" = "tenants"."id" AND "devices"."status" = 'enrolled' AND "devices"."license_hold_reason" IS NOT NULL) from "tenant_memberships" inner join "tenants" on "tenants"."id" = "tenant_memberships"."tenant_id" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?) order by "tenants"."created_at"`,
     params: ["u_test", "active"],
   },
   {

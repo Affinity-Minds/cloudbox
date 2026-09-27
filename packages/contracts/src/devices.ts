@@ -87,10 +87,20 @@ export type FleetScreen = z.infer<typeof FleetScreen>;
 
 /** `GET /api/v1/screens/fleet/:deviceId` — overview + license + health tabs come off this row;
  * the audit tab is a separate array of the same shape the audit screen uses. */
+/** Licence hold placed by a staff licence revoke; cleared only by a staff Issue or Renew. */
+export const LicenseHold = z.object({
+  reason: z.string(),
+  at: z.string().nullable(),
+  by: z.string().nullable(),
+});
+export type LicenseHold = z.infer<typeof LicenseHold>;
+
 export const FleetDeviceDetail = Device.extend({
   tenantCode: z.string(),
   tenantName: z.string(),
   licenseState: LicenseState,
+  /** Null when the device is not on hold. */
+  licenseHold: LicenseHold.nullable().optional(),
 });
 export type FleetDeviceDetail = z.infer<typeof FleetDeviceDetail>;
 
