@@ -347,12 +347,16 @@ export const rolePermissions = sqliteTable(
 // ─── Plans ────────────────────────────────────────────────────────────────────────────────────
 
 export const PLAN_STATUSES = ["active", "retired"] as const;
+export const PLAN_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"] as const;
 
 // `status`/`term_days` were added to an existing table by migration 0009 via `ALTER TABLE ADD
 // COLUMN`, which D1/SQLite cannot pair with an inline CHECK constraint (that requires a full
 // table rebuild). Migration 0009 enforces both instead with BEFORE INSERT/UPDATE triggers
 // (`plans_status_check_insert/_update`, `plans_term_days_check_insert/_update`) — there is no
-// declarative CHECK on this table in D1, so none is declared here either.
+// declarative CHECK on this table in D1, so none is declared here either. Migration 0011's
+// `currency` column follows the same pattern (`plans_currency_check_insert/_update`); the price
+// amounts and `max_addon_users` are plain non-negative integers, bounds enforced by Zod only
+// (same as `offline_grace_days`/`renewal_warning_days` above — no DB trigger for those either).
 export const plans = sqliteTable("plans", {
   code: text("code").primaryKey(),
   name: text("name").notNull(),
@@ -365,6 +369,14 @@ export const plans = sqliteTable("plans", {
   status: text("status").notNull().default("active"),
   /** Days a redeemed subscription runs (owner addition; redemption semantics are WT-14's). */
   termDays: integer("term_days").notNull().default(365),
+  /** Minor units (e.g. paise/cents) for `currency`. */
+  priceAmount: integer("price_amount").notNull().default(0),
+  /** ISO 4217. */
+  currency: text("currency").notNull().default("INR"),
+  /** Minor units, per additional managed user per term. */
+  addonUserPriceAmount: integer("addon_user_price_amount").notNull().default(0),
+  /** 0 = no add-on users allowed on this plan. */
+  maxAddonUsers: integer("max_addon_users").notNull().default(0),
   createdAt: createdAt(),
   updatedAt: text("updated_at").notNull().default(isoNow),
 });
@@ -524,6 +536,14 @@ export const subscriptions = sqliteTable(
     validFrom: text("valid_from"),
     validUntil: text("valid_until"),
     maxManagedUsers: integer("max_managed_users").notNull(),
+    /**
+     * Add-on managed users beyond the plan's base `max_managed_users`, bought at
+     * `plans.addon_user_price_amount` each per term (migration 0011). Capped at
+     * `plans.max_addon_users`; effective limit = `max_managed_users + addon_users`. Added by
+     * `ALTER TABLE ADD COLUMN`, so a constant default only — the `<= max_addon_users` bound is
+     * data-dependent (another table) and is enforced by the API, not a DB CHECK.
+     */
+    addonUsers: integer("addon_users").notNull().default(0),
     featuresJson: text("features_json").notNull(),
     offlineGraceDays: integer("offline_grace_days").notNull(),
     renewalWarningDays: integer("renewal_warning_days").notNull(),

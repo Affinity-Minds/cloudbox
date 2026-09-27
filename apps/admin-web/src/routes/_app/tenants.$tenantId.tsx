@@ -1,6 +1,12 @@
 // Owner: WT-2. Tenant detail: tabs Overview / Members / Devices / Subscription / Audit.
 // Tab lives in the query string (agent-notes ux-patterns "Routes, not tab state").
-import type { AuditEntry, Device, Membership, Subscription, Tenant } from "@cloudbox/contracts";
+import type {
+  AuditEntry,
+  Device,
+  Membership,
+  SubscriptionWithPricing,
+  Tenant,
+} from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, UserPlus } from "lucide-react";
@@ -10,6 +16,7 @@ import { toast } from "sonner";
 import { describeError } from "@/api/client";
 import { inviteMember, removeMember, tenantDetailQuery, updateMemberStanding } from "@/api/tenants";
 import { EmptyState, ErrorState, PageHeader, Section } from "@/components/page";
+import { formatMoney } from "@/components/plan-bits";
 import { StatusPill, type Tone } from "@/components/status-pill";
 import { ArchiveTenantDialog } from "@/components/tenants/archive-tenant-dialog";
 import { InviteMemberDialog } from "@/components/tenants/invite-member-dialog";
@@ -406,7 +413,7 @@ function DevicesTab({ devices }: { devices: Device[] }) {
   );
 }
 
-function SubscriptionTab({ subscriptions }: { subscriptions: Subscription[] }) {
+function SubscriptionTab({ subscriptions }: { subscriptions: SubscriptionWithPricing[] }) {
   return (
     <Section title="Subscription">
       {subscriptions.length === 0 ? (
@@ -423,6 +430,7 @@ function SubscriptionTab({ subscriptions }: { subscriptions: Subscription[] }) {
               <TableHead>Valid from</TableHead>
               <TableHead>Valid until</TableHead>
               <TableHead>Managed users</TableHead>
+              <TableHead>Price / term</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -436,7 +444,18 @@ function SubscriptionTab({ subscriptions }: { subscriptions: Subscription[] }) {
                 </TableCell>
                 <TableCell>{formatTimestamp(sub.validFrom)}</TableCell>
                 <TableCell>{formatTimestamp(sub.validUntil)}</TableCell>
-                <TableCell className="tabular-nums">{sub.maxManagedUsers}</TableCell>
+                <TableCell className="tabular-nums">
+                  {sub.effectiveMaxManagedUsers}
+                  {sub.addonUsers > 0 ? (
+                    <span className="text-muted-foreground">
+                      {" "}
+                      ({sub.maxManagedUsers} + {sub.addonUsers})
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  {formatMoney(sub.totalPriceAmount, sub.currency)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

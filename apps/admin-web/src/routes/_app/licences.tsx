@@ -20,6 +20,7 @@ import {
   revokeLicenseKey,
 } from "@/api/license-keys";
 import { EmptyState, ErrorState, PageHeader, Section } from "@/components/page";
+import { formatMoney } from "@/components/plan-bits";
 import { StatusPill, type Tone } from "@/components/status-pill";
 import { NativeSelect } from "@/components/subscription-bits";
 import { Button } from "@/components/ui/button";
@@ -105,6 +106,7 @@ function LicencesPage() {
             <TableRow>
               <TableHead className="h-8 px-3 text-xs">Batch</TableHead>
               <TableHead className="h-8 px-3 text-xs">Plan</TableHead>
+              <TableHead className="h-8 px-3 text-xs">Price</TableHead>
               <TableHead className="h-8 px-3 text-xs">Created</TableHead>
               <TableHead className="h-8 px-3 text-xs">Expires</TableHead>
               <TableHead className="h-8 px-3 text-right text-xs">Keys</TableHead>
@@ -115,7 +117,7 @@ function LicencesPage() {
           </TableHeader>
           <TableBody>
             {keys.isPending ? (
-              <SkeletonRows columns={8} />
+              <SkeletonRows columns={9} />
             ) : (
               (keys.data?.batches ?? []).map((b) => (
                 <TableRow
@@ -126,6 +128,12 @@ function LicencesPage() {
                 >
                   <TableCell className="h-8 px-3 py-1 font-medium">{b.batchLabel}</TableCell>
                   <TableCell className="h-8 px-3 py-1 font-mono text-xs">{b.planCode}</TableCell>
+                  <TableCell
+                    className="h-8 px-3 py-1 tabular-nums text-xs"
+                    title="The plan's current price, for display only — not what this batch was sold for."
+                  >
+                    {formatMoney(b.planPriceAmount, b.planCurrency)}
+                  </TableCell>
                   <TableCell
                     className="h-8 px-3 py-1 font-mono text-xs"
                     title={formatTimestamp(b.createdAt)}

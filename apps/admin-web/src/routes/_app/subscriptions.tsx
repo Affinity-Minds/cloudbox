@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { describeError } from "@/api/client";
 import { createSubscription, subscriptionsQuery } from "@/api/subscriptions";
 import { EmptyState, ErrorState, PageHeader } from "@/components/page";
+import { formatMoney } from "@/components/plan-bits";
 import { PlanSelect } from "@/components/plan-select";
 import {
   ExpiryPill,
@@ -277,10 +278,19 @@ function NewSubscriptionDialog({
   const [maxUsers, setMaxUsers] = useState("");
   const [graceDays, setGraceDays] = useState("");
   const [warningDays, setWarningDays] = useState("");
+  const [addonUsers, setAddonUsers] = useState("0");
   const plan = screen.plans.find((p) => p.code === planCode);
   const selectedTenant = tenantId || available[0]?.id || "";
 
   const optional = (value: string) => (value.trim() === "" ? undefined : Number(value));
+
+  const addonUsersCount = Math.max(0, Number(addonUsers) || 0);
+  const effectiveMaxUsers = plan
+    ? (Number(maxUsers) || plan.maxManagedUsers) + addonUsersCount
+    : undefined;
+  const totalPrice = plan
+    ? plan.priceAmount + addonUsersCount * plan.addonUserPriceAmount
+    : undefined;
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -289,6 +299,7 @@ function NewSubscriptionDialog({
         validFrom: fromDateInput(validFrom),
         validUntil: fromDateInput(validUntil),
         maxManagedUsers: optional(maxUsers),
+        addonUsers: addonUsersCount,
         offlineGraceDays: optional(graceDays),
         renewalWarningDays: optional(warningDays),
       }),
@@ -399,6 +410,37 @@ function NewSubscriptionDialog({
                 />
               </Field>
             </div>
+            <Field>
+              <FieldLabel htmlFor="sub-addon-users">Add-on users</FieldLabel>
+              <Input
+                id="sub-addon-users"
+                type="number"
+                min={0}
+                max={plan?.maxAddonUsers ?? 0}
+                disabled={!plan || plan.maxAddonUsers === 0}
+                value={addonUsers}
+                onChange={(e) => setAddonUsers(e.target.value)}
+              />
+              <FieldDescription>
+                {plan && plan.maxAddonUsers > 0
+                  ? `Up to ${plan.maxAddonUsers}, at ${formatMoney(plan.addonUserPriceAmount, plan.currency)} each per term.`
+                  : "This plan does not offer add-on users."}
+              </FieldDescription>
+            </Field>
+            {plan ? (
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Effective managed users</span>
+                  <span className="tabular-nums font-medium">{effectiveMaxUsers}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total price (per term)</span>
+                  <span className="tabular-nums font-medium">
+                    {totalPrice !== undefined ? formatMoney(totalPrice, plan.currency) : "—"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
           </FieldGroup>
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

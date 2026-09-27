@@ -79,6 +79,13 @@ export const LicenseKeyBatch = z.object({
   unredeemed: z.number().int(),
   redeemed: z.number().int(),
   revoked: z.number().int(),
+  /**
+   * The plan's price at read time, for display only (migration 0011, owner addition) — a batch
+   * does not store its own price, and this is not what a redeemed subscription is billed; it is
+   * just the plan's current price, shown so staff can see what a batch is "worth" at a glance.
+   */
+  planPriceAmount: z.number().int(),
+  planCurrency: z.string(),
 });
 export type LicenseKeyBatch = z.infer<typeof LicenseKeyBatch>;
 
