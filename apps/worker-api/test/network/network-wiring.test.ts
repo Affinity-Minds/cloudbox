@@ -175,7 +175,11 @@ describe("device revoke and membership revoke call the peer revocations", () => 
 
     const revokeResponse = await app.request(
       `/api/v1/devices/${deviceId}/revoke`,
-      { method: "POST", headers: staff.headers },
+      {
+        method: "POST",
+        headers: { ...staff.headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "decommissioned" }),
+      },
       { ...env, ...NETBIRD_ENV },
     );
     expect(revokeResponse.status).toBe(204);
@@ -207,7 +211,11 @@ describe("device revoke and membership revoke call the peer revocations", () => 
 
     const deleteResponse = await app.request(
       `/api/v1/tenants/${tenantId}/memberships/${membership.membershipId}`,
-      { method: "DELETE", headers: owner.headers },
+      {
+        method: "DELETE",
+        headers: { ...owner.headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "left_organisation" }),
+      },
       { ...env, ...NETBIRD_ENV },
     );
     expect(deleteResponse.status).toBe(200);

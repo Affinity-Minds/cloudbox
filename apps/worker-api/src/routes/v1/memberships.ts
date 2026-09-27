@@ -301,9 +301,11 @@ router.delete(
       source: "api",
     });
     // Best-effort: an unreachable NetBird server must not fail the membership revoke itself.
-    await revokeClientPeer(c.env, db, { userId: before.userId, tenantId }).catch((error: unknown) => {
-      console.error("membership revoke: peer revocation failed", membershipId, error);
-    });
+    await revokeClientPeer(c.env, db, { userId: before.userId, tenantId }).catch(
+      (error: unknown) => {
+        console.error("membership revoke: peer revocation failed", membershipId, error);
+      },
+    );
 
     return c.json(after);
   },
