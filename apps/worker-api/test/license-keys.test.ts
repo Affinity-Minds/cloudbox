@@ -179,6 +179,53 @@ describe("licence key batches (staff)", () => {
     );
     expect(again.status).toBe(409);
   });
+
+  it("revoke's reason-code shape: missing/invalid code and other-without-text are 400, a valid code+text audits both", async () => {
+    const batch = await generate(1);
+    const id = batch.keys[0]?.id;
+    const superAdmin = await staff("super_admin");
+
+    expect((await post(`/api/v1/license-keys/${id}/revoke`, {}, superAdmin.headers)).status).toBe(
+      400,
+    );
+    expect(
+      (
+        await post(
+          `/api/v1/license-keys/${id}/revoke`,
+          { reasonCode: "not_a_real_code" },
+          superAdmin.headers,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await post(`/api/v1/license-keys/${id}/revoke`, { reasonCode: "other" }, superAdmin.headers))
+        .status,
+    ).toBe(400);
+
+    const revoked = await post(
+      `/api/v1/license-keys/${id}/revoke`,
+      { reasonCode: "lost_or_leaked", reasonText: "Buyer reported the card lost in transit" },
+      superAdmin.headers,
+    );
+    expect(revoked.status).toBe(204);
+
+    const row = await env.DB.prepare("SELECT revoke_reason FROM license_keys WHERE id = ?")
+      .bind(id)
+      .first<{ revoke_reason: string }>();
+    expect(row?.revoke_reason).toBe("lost_or_leaked: Buyer reported the card lost in transit");
+
+    const auditRow = await env.DB.prepare(
+      "SELECT after_json FROM audit_log WHERE event_type = 'LICENSE_KEY_REVOKED' AND entity_id = ?",
+    )
+      .bind(id)
+      .first<{ after_json: string }>();
+    const after = JSON.parse(auditRow?.after_json ?? "{}");
+    expect(after).toMatchObject({
+      reasonCode: "lost_or_leaked",
+      reasonText: "Buyer reported the card lost in transit",
+      reason: "lost_or_leaked: Buyer reported the card lost in transit",
+    });
+  });
 });
 
 describe("licence key redemption at onboarding", () => {

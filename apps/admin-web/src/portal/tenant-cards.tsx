@@ -104,6 +104,20 @@ export function TenantCards() {
             <CopyCode code={tenant.tenantCode} />
           </div>
           <PlanLine tenant={tenant} />
+          {tenant.heldDevices ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-red-600/30 bg-red-500/10 px-3 py-2 text-sm"
+            >
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
+              <span>
+                {tenant.heldDevices === 1
+                  ? "1 server's licence was revoked by CloudBox."
+                  : `${tenant.heldDevices} servers' licences were revoked by CloudBox.`}{" "}
+                Contact the CloudBox admin.
+              </span>
+            </div>
+          ) : null}
         </section>
       ))}
       <div className="flex items-center justify-between gap-2 p-4 text-sm">

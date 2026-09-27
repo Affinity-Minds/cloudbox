@@ -18,11 +18,25 @@ public sealed record EnrollResponse(
     string TenantId,
     string TenantCode,
     string DeviceName,
-    string DeviceToken);
+    string DeviceToken,
+    string? LicenseState = null,
+    string? Message = null);
 
 public sealed record HeartbeatRequest(AgentHealth Health);
 
-public sealed record HeartbeatResponse(DateTimeOffset ServerTime, int? EntitlementGeneration, IReadOnlyList<object>? Commands);
+/// <summary>WT-14 (additive): <c>licenseState</c> is licensed | no_active_plan | device_limit_reached; <c>message</c> is
+/// human text when the state needs action.</summary>
+public sealed record HeartbeatResponse(
+    DateTimeOffset ServerTime,
+    int? EntitlementGeneration,
+    IReadOnlyList<object>? Commands,
+    string? LicenseState = null,
+    string? Message = null);
+
+/// <summary><c>GET /api/v1/agent/signing-keys</c> (WT-10, additive): public ES256 JWKs.</summary>
+public sealed record SigningKeysResponse(IReadOnlyList<SigningKeyItem> Keys);
+
+public sealed record SigningKeyItem(string Kid, string Alg, string Status, System.Text.Json.Nodes.JsonObject Jwk);
 
 public sealed record EntitlementResponse(string Entitlement, int Generation);
 
@@ -53,14 +67,16 @@ public static class HealthBuilder
 {
     public const string Unknown = "unknown";
 
-    /// <summary>Tonight: real values for device/agent/storage/security; everything else "unknown".</summary>
-    public static AgentHealth Build(string deviceId, string keyProtection, string tamper, long? freeBytes) => new(
+    /// <summary>Real values for device/agent/storage/security; licence, RDP and users when the server runtime reports
+    /// them (Phase 5), otherwise "unknown"/null.</summary>
+    public static AgentHealth Build(string deviceId, string keyProtection, string tamper, long? freeBytes,
+        LicensePart? license = null, RdpPart? rdp = null, UsersPart? users = null, StatePart? network = null) => new(
         deviceId,
         new AgentPart(AgentPaths.AgentVersion, tamper == "none"),
-        new LicensePart(Unknown, null),
-        new StatePart(Unknown),
-        new RdpPart(Unknown, null),
-        new UsersPart(null, null, null),
+        license ?? new LicensePart(Unknown, null),
+        network ?? new StatePart(Unknown),
+        rdp ?? new RdpPart(Unknown, null),
+        users ?? new UsersPart(null, null, null),
         new BackupPart(Unknown, null),
         new StoragePart(freeBytes),
         new UpdatesPart(Unknown, null),

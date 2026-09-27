@@ -42,6 +42,13 @@
       "name": "EMAIL"
     }
   ],
+  // src/scheduled.ts's one hook list: WT-17's alerts evaluator (needs this 5-minute cadence) plus
+  // WT-19's backup retention sweep (self-throttled to hourly inside the hook, since it is not
+  // cheap enough to run every tick). One `triggers` block, one crons entry — add a new job as a
+  // hook in scheduled.ts, never a second entry or block here.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "exports": {
     "FleetPresence": {
       "type": "durable-object",

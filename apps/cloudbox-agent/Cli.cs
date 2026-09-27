@@ -156,6 +156,7 @@ public static class Cli
             };
             stateStore.Save(state);
             Console.WriteLine($"  enrolled: {enrolled.DeviceName} ({enrolled.DeviceId}) tenant {enrolled.TenantCode}");
+            await PinSigningKeysAsync(api, stateStore, state);
 
             runner.Apply(Kinds.EventLogSource, AgentPaths.EventLogSource, new JsonObject { ["log"] = "Application" });
             runner.Apply(Kinds.Service, AgentPaths.ServiceName, new JsonObject
@@ -195,7 +196,26 @@ public static class Cli
         return 0;
     }
 
-    private static string WindowsBuild()
+    /// <summary>Pins the server's public entitlement-signing keys (best effort: the verifier re-fetches on first use).</summary>
+    public static async Task PinSigningKeysAsync(ISigningKeysClient api, ILocalStateStore store, AgentState state)
+    {
+        try
+        {
+            var keys = await api.GetSigningKeysAsync(new Uri(state.BaseUrl), state.DeviceToken, CancellationToken.None);
+            foreach (var k in keys)
+            {
+                if (!state.PinnedSigningKeys.Contains(k)) state.PinnedSigningKeys.Add(k);
+            }
+
+            store.Save(state);
+        }
+        catch (CloudApiException ex)
+        {
+            Console.Error.WriteLine($"  signing keys not pinned yet ({ex.Message}); the agent fetches them on first use");
+        }
+    }
+
+    public static string WindowsBuild()
     {
         var v = Environment.OSVersion.Version;
         using var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
@@ -230,6 +250,8 @@ public static class Cli
         ManifestRunner runner, UninstallOptions options, AgentState? state, IUninstallNotifier api)
     {
         var context = new RevertContext();
+        StopAgentService(); // Nothing may re-create managed users or reopen the gate while the manifest is replayed.
+        StopStatusApps(); // A running Status window would keep its exe locked.
         Func<CancellationToken, Task>? notify = state is null
             ? null
             : ct => api.NotifyUninstalledAsync(new Uri(state.BaseUrl), state.DeviceToken, ct);
@@ -260,6 +282,41 @@ public static class Cli
 
         ProcessRunner.ScheduleSelfDelete(context.SelfDeletePaths);
         return result;
+    }
+
+    private static void StopAgentService()
+    {
+        try
+        {
+            if (!ServiceStep.Exists(AgentPaths.ServiceName)) return;
+            using var sc = new ServiceController(AgentPaths.ServiceName);
+            if (sc.Status is ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending) return;
+            sc.Stop();
+            sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ServiceProcess.TimeoutException)
+        {
+            Console.Error.WriteLine($"Could not stop {AgentPaths.ServiceName} first ({ex.Message}); continuing");
+        }
+    }
+
+    private static void StopStatusApps()
+    {
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(AgentPaths.StatusExe)))
+        {
+            using (p)
+            {
+                try
+                {
+                    p.Kill();
+                    p.WaitForExit(5000);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    // Already gone.
+                }
+            }
+        }
     }
 
     private static void PreserveLogs()
@@ -349,6 +406,21 @@ public static class Cli
             }
 
             var toApply = entry;
+            if (entry.Kind == Kinds.File && !string.Equals(entry.Id, AgentPaths.InstalledExe, StringComparison.OrdinalIgnoreCase))
+            {
+                // Status app / runtime package files come from Setup's payload: only Setup can restore them.
+                Console.WriteLine($"  MISSING   {entry.Kind,-22} {entry.Id}  run CloudBox Server Setup again to restore it");
+                failures++;
+                continue;
+            }
+
+            if (entry.Kind is Kinds.ThirdPartyComponent or Kinds.LocalUser or Kinds.LocalGroupMembership)
+            {
+                // Runtime and managed users have their own repair paths below / in the Agent service.
+                Console.WriteLine($"  skipped   {entry.Kind,-22} {entry.Id}");
+                continue;
+            }
+
             if (entry.Kind == Kinds.File)
             {
                 toApply = new ManifestEntry
@@ -370,6 +442,15 @@ public static class Cli
                 Console.WriteLine($"  FAILED    {entry.Kind,-22} {entry.Id}  {ex.Message}");
                 failures++;
             }
+        }
+
+        if (runner.Manifest.Entries.Any(e => e.Kind == Kinds.ThirdPartyComponent && e.Id == Rdp.RdpRuntimeComponent.Id))
+        {
+            var rdp = Rdp.RdpWrapperRuntime.CreateDefault();
+            var before = rdp.Probe();
+            var after = before.State == Rdp.RdpStates.Healthy ? before : rdp.Repair();
+            Console.WriteLine($"  rdp       {before.State} -> {after.State}  {after.Detail}");
+            if (after.State != Rdp.RdpStates.Healthy) failures++;
         }
 
         if (ServiceStep.Exists(AgentPaths.ServiceName))

@@ -73,15 +73,17 @@ entitlements.post(
   requirePermission("license.revoke"),
   validate("json", RevokeEntitlementRequest),
   (c) =>
-    refusalAware(c, async () =>
-      c.json(
+    refusalAware(c, async () => {
+      const { reasonCode, reasonText } = c.req.valid("json");
+      return c.json(
         await revokeForDevice(createDb(c.env.DB), {
           deviceId: deviceIdOf(c),
-          reason: c.req.valid("json").reason,
+          reasonCode,
+          reasonText,
           actor: actorOf(c),
         }),
-      ),
-    ),
+      );
+    }),
 );
 
 export default entitlements;

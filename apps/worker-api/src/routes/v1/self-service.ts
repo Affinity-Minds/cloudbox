@@ -8,18 +8,22 @@
 //   POST /onboarding/redeem               customer        licence key → tenant + pending plan
 //   POST /onboarding/activation-grants    customer, Owner/Admin of body.tenantId
 //   GET  /connect/devices                 customer, active member   CloudBox Connect device list
+//   GET  /connect/devices/:deviceId/network  customer, active member   mints a NetBird client key (WT-9)
+//   POST /connect/devices/:deviceId/session customer, active member  WT-11 RDP credential broker (ADR 0013)
 //   POST /license-keys/batches            staff license.issue       plaintext keys once (JSON/CSV)
 //   GET  /license-keys                    staff license.issue or subscription.view
 //   POST /license-keys/:id/revoke         staff license.revoke
 import {
   ActivationGrantRequest,
   type ActivationGrantResponse,
+  type ClientNetworkResponse,
   type ConnectDevicesResponse,
   CreateOwnTenantRequest,
   type CreateOwnTenantResponse,
   GenerateLicenseKeysRequest,
   LicenseKeysQuery,
   type OnboardingOverview,
+  type RdpSessionResponse,
   RedeemLicenseKeyRequest,
   RevokeLicenseKeyRequest,
 } from "@cloudbox/contracts";
@@ -31,6 +35,9 @@ import { createDb } from "../../db/client";
 import { devices, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
+// WT-9 (ADR 0007): mints this Connect member's NetBird client setup key. A no-op response
+// (404 `network_not_configured`) while NETBIRD_API_URL is unset.
+import { mintClientSetupKey } from "../../network/controller";
 import {
   allocateTenantCode,
   clientOf,
@@ -48,6 +55,7 @@ import {
   revokeLicenseKey,
 } from "../../onboarding/license-keys";
 import { newestPerTenant, tenantPlanQuery, toTenantPlan } from "../../onboarding/plan";
+import { activeMembership, grantSession, SessionRefusal } from "../../rdp/session";
 import { createEnrollmentToken } from "./enrollment";
 import { getActiveTenantId } from "./me";
 import { loadFleet } from "./screens/fleet";
@@ -87,6 +95,11 @@ router.get("/onboarding/overview", requireUser(), async (c) => {
         enrolledDevices: sql<number>`(
           SELECT count(*) FROM ${devices}
           WHERE ${devices.tenantId} = ${tenants.id} AND ${devices.status} = 'enrolled'
+        )`.mapWith(Number),
+        heldDevices: sql<number>`(
+          SELECT count(*) FROM ${devices}
+          WHERE ${devices.tenantId} = ${tenants.id} AND ${devices.status} = 'enrolled'
+            AND ${devices.licenseHoldReason} IS NOT NULL
         )`.mapWith(Number),
       })
       .from(tenantMemberships)
@@ -274,9 +287,81 @@ router.get("/connect/devices", requireUser(), async (c) => {
         online: d.online,
         lastSeenAt: d.lastSeenAt,
         licenseState: d.licenseState,
+        lanAddress: d.lanAddress,
       })),
   };
   return c.json(body);
+});
+
+// WT-9 (ADR 0007): mints a NetBird client setup key so the Connect app can join this tenant's
+// mesh and reach `deviceId`. `deviceId` only resolves which tenant's client group to join (the
+// key itself is not bound to that one device) — the gate is active membership in its tenant, the
+// same check `GET /connect/devices` uses, re-resolved from `tenant_memberships` every call.
+router.get("/connect/devices/:deviceId/network", requireUser(), async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.var.user;
+  const deviceId = c.req.param("deviceId");
+
+  const [device] = await db
+    .select({ tenantId: devices.tenantId })
+    .from(devices)
+    .where(eq(devices.id, deviceId));
+  if (!device) return c.json({ error: "not_found" }, 404);
+
+  const [membership] = await db
+    .select({ id: tenantMemberships.id })
+    .from(tenantMemberships)
+    .where(
+      and(
+        eq(tenantMemberships.tenantId, device.tenantId),
+        eq(tenantMemberships.userId, user.id),
+        eq(tenantMemberships.status, "active"),
+      ),
+    );
+  if (!membership) return c.json({ error: "forbidden" }, 403);
+
+  const result = await mintClientSetupKey(c.env, db, {
+    userId: user.id,
+    tenantId: device.tenantId,
+  });
+  if (!result.configured) return c.json({ error: "network_not_configured" }, 404);
+
+  const body: ClientNetworkResponse = {
+    setupKey: result.setupKey,
+    managementUrl: result.managementUrl,
+    expiresAt: result.expiresAt,
+  };
+  c.header("Cache-Control", "no-store"); // the setup key is a confidential artefact
+  return c.json(body);
+});
+
+// WT-11 (ADR 0013): mints a managed-user RDP credential for this device. The caller must be an
+// active member of the device's tenant (any standing — unlike activation grants, an ordinary
+// member uses Connect); membership and device/tenant match are both re-checked here, not inferred
+// from the device list the caller may be looking at.
+router.post("/connect/devices/:deviceId/session", requireUser(), async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.var.user;
+  const deviceId = c.req.param("deviceId");
+  const tenantId = c.req.query("tenantId") || (await getActiveTenantId(db, user.id));
+  if (!tenantId) return c.json({ error: "no_active_tenant" }, 409);
+  if (!(await activeMembership(db, tenantId, user.id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  try {
+    const grant = await grantSession(db, {
+      deviceId,
+      tenantId,
+      userId: user.id,
+      correlationId: c.var.correlationId,
+    });
+    const body: RdpSessionResponse = grant;
+    c.header("Cache-Control", "no-store"); // the compact response carries a one-time plaintext password
+    return c.json(body, 201);
+  } catch (error) {
+    if (error instanceof SessionRefusal) return c.json({ error: error.code }, error.status);
+    throw error;
+  }
 });
 
 // ─── license keys (staff) ────────────────────────────────────────────────────────────────────
@@ -326,9 +411,11 @@ router.post(
   validate("json", RevokeLicenseKeyRequest),
   async (c) => {
     try {
+      const { reasonCode, reasonText } = c.req.valid("json");
       await revokeLicenseKey(createDb(c.env.DB), {
         id: c.req.param("id"),
-        reason: c.req.valid("json").reason,
+        reasonCode,
+        reasonText,
         actorId: c.var.user.id,
         correlationId: c.var.correlationId,
       });

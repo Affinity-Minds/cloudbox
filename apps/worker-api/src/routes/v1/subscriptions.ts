@@ -7,7 +7,9 @@ import {
   CreatePlanRequest,
   CreateSubscriptionRequest,
   type Feature,
+  formatReason,
   type Plan,
+  RetirePlanRequest,
   type Subscription,
   UpdatePlanRequest,
   UpdateSubscriptionRequest,
@@ -239,6 +241,7 @@ async function setPlanStatus(
   code: string,
   target: "active" | "retired",
   eventType: "PLAN_RETIRED" | "PLAN_REACTIVATED",
+  reason?: { reasonCode: string; reasonText?: string },
 ) {
   const db = createDb(c.env.DB);
   const [current] = await db.select().from(plansTable).where(eq(plansTable.code, code));
@@ -266,7 +269,14 @@ async function setPlanStatus(
       entityId: code,
       actor: { type: "user", id: c.var.user.id },
       before,
-      after,
+      after: reason
+        ? {
+            ...after,
+            reasonCode: reason.reasonCode,
+            reasonText: reason.reasonText,
+            reason: formatReason(reason),
+          }
+        : after,
       correlationId: c.var.correlationId,
       source: "api",
     }),
@@ -274,8 +284,17 @@ async function setPlanStatus(
   return c.json({ plan: after, subscriptionCount });
 }
 
-plans.post("/:code/retire", requirePermission("subscription.manage"), (c) =>
-  setPlanStatus(c, c.req.param("code"), "retired", "PLAN_RETIRED"),
+plans.post(
+  "/:code/retire",
+  requirePermission("subscription.manage"),
+  validate("json", RetirePlanRequest),
+  (c) => {
+    const { reasonCode, reasonText } = c.req.valid("json");
+    return setPlanStatus(c, c.req.param("code"), "retired", "PLAN_RETIRED", {
+      reasonCode,
+      reasonText,
+    });
+  },
 );
 
 plans.post("/:code/reactivate", requirePermission("subscription.manage"), (c) =>

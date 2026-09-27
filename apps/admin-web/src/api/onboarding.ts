@@ -1,6 +1,8 @@
 // Owner: WT-14. Self-service onboarding on the customer surface (ADR 0011): the /start path,
 // tenant self-creation, licence-key redemption and the portal overview.
 import type {
+  ActivationGrantRequest,
+  ActivationGrantResponse,
   CreateOwnTenantRequest,
   CreateOwnTenantResponse,
   OnboardingConfig,
@@ -70,6 +72,13 @@ export const createOwnTenant = (body: CreateOwnTenantRequest) =>
 
 export const redeemLicenseKey = (body: RedeemLicenseKeyRequest) =>
   api<CreateOwnTenantResponse>("/api/v1/onboarding/redeem", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+/** WT-15: "Activate a server" on the portal. Owner/Admin only (the API re-checks standing). */
+export const createActivationGrant = (body: ActivationGrantRequest) =>
+  api<ActivationGrantResponse>("/api/v1/onboarding/activation-grants", {
     method: "POST",
     body: JSON.stringify(body),
   });

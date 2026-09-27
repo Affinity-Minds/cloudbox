@@ -222,6 +222,7 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
       staffAdmin,
       {
         method: "DELETE",
+        body: JSON.stringify({ reasonCode: "other", reasonText: "No longer with the company" }),
       },
     );
     expect(response.status).toBe(200);
@@ -234,6 +235,11 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
 
     const events = await auditFor("membership", invited.id);
     expect(events.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);
+    expect(events.find((e) => e.eventType === "USER_REMOVED")?.after).toMatchObject({
+      reasonCode: "other",
+      reasonText: "No longer with the company",
+      reason: "other: No longer with the company",
+    });
 
     // Revoking again is a no-op, not a second audit event.
     const again = await call(
@@ -241,11 +247,52 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
       staffAdmin,
       {
         method: "DELETE",
+        body: JSON.stringify({ reasonCode: "role_change" }),
       },
     );
     expect(again.status).toBe(200);
     const eventsAfter = await auditFor("membership", invited.id);
     expect(eventsAfter.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);
+  });
+
+  it("reason-code shape: an omitted body revokes with no reason recorded; invalid code and other-without-text are 400", async () => {
+    const tenant = await seedTenant(env.DB, { displayName: "Reason Shape Org" });
+    const invited = (await (
+      await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
+        method: "POST",
+        body: JSON.stringify({ email: "reason-shape@example.test", standing: "user" }),
+      })
+    ).json()) as Membership;
+    const path = `/api/v1/tenants/${tenant.tenantId}/memberships/${invited.id}`;
+
+    // WT-15 (portal.test.ts): the customer portal's own members page has no reason catalogue and
+    // sends no body at all when the operator gives no reason (RemoveMembershipRequest's own doc
+    // comment) — unlike every other reasoned delete in this API, a fully-omitted reason is not a
+    // 400 here, and the audit row simply carries no reasonCode/reasonText/reason.
+    const omitted = await call(path, staffAdmin, { method: "DELETE", body: "{}" });
+    expect(omitted.status).toBe(200);
+    const events = await auditFor("membership", invited.id);
+    const removed = events.find((e) => e.eventType === "USER_REMOVED");
+    expect(removed?.after).not.toHaveProperty("reasonCode");
+    expect(removed?.after).not.toHaveProperty("reason");
+
+    // A shape that DOES attempt a reason must still be a valid one.
+    expect(
+      (
+        await call(path, staffAdmin, {
+          method: "DELETE",
+          body: JSON.stringify({ reasonCode: "not_a_real_code" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(path, staffAdmin, {
+          method: "DELETE",
+          body: JSON.stringify({ reasonCode: "other" }),
+        })
+      ).status,
+    ).toBe(400);
   });
 });
 
@@ -317,7 +364,7 @@ describe("Standing ranking and the last-active-owner guard (review U-2)", () => 
     const response = await call(
       `/api/v1/tenants/${tenant.tenantId}/memberships/${membership.membershipId}`,
       staffAdmin,
-      { method: "DELETE" },
+      { method: "DELETE", body: JSON.stringify({ reasonCode: "role_change" }) },
     );
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: "last_owner" });
@@ -369,7 +416,7 @@ describe("Standing ranking and the last-active-owner guard (review U-2)", () => 
     const response = await call(
       `/api/v1/tenants/${tenant.tenantId}/memberships/${membershipA.membershipId}`,
       staffAdmin,
-      { method: "DELETE" },
+      { method: "DELETE", body: JSON.stringify({ reasonCode: "role_change" }) },
     );
     expect(response.status).toBe(200);
   });

@@ -32,6 +32,9 @@ public interface IDeviceKeyStore
 
     DeviceKeyInfo? TryOpen();
 
+    /// <summary>The private key for decrypting entitlements (the operation stays inside CNG/TPM). Caller disposes.</summary>
+    RSA? OpenPrivateKey();
+
     bool Exists();
 
     /// <summary>Deletes the key. Returns false when there was no key.</summary>
@@ -93,6 +96,18 @@ public sealed class CngDeviceKeyStore(string keyName, bool allowTpm = true) : ID
             if (!SafeExists(provider)) continue;
             using var key = CngKey.Open(keyName, provider, CngKeyOpenOptions.MachineKey);
             return Describe(key, protection);
+        }
+
+        return null;
+    }
+
+    public RSA? OpenPrivateKey()
+    {
+        foreach (var (provider, _) in Providers())
+        {
+            if (!SafeExists(provider)) continue;
+            using var key = CngKey.Open(keyName, provider, CngKeyOpenOptions.MachineKey);
+            return new RSACng(key); // Duplicates the handle.
         }
 
         return null;

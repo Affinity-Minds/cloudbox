@@ -476,6 +476,11 @@ export const devices = sqliteTable(
     lastHealthJson: text("last_health_json"),
     enrolledAt: text("enrolled_at").notNull().default(isoNow),
     revokedAt: text("revoked_at"),
+    // Licence hold (migration 0019): set by a staff licence revoke, cleared only by a staff Issue or
+    // Renew. While set, auto-issuance (activation, heartbeat catch-up) never issues to the device.
+    licenseHoldReason: text("license_hold_reason"),
+    licenseHoldAt: text("license_hold_at"),
+    licenseHoldBy: text("license_hold_by"),
   },
   (table) => [
     index("devices_tenant_status_idx").on(table.tenantId, table.status),
@@ -588,6 +593,8 @@ export const entitlements = sqliteTable(
   ],
 );
 
+export const SIGNING_KEY_PURPOSES = ["entitlement", "release"] as const;
+
 export const signingKeys = sqliteTable(
   "signing_keys",
   {
@@ -597,9 +604,130 @@ export const signingKeys = sqliteTable(
     status: text("status", { enum: ["active", "retired"] })
       .notNull()
       .default("active"),
+    /**
+     * Migration 0016 (WT-18): which signer this key belongs to — `entitlement` (WT-5,
+     * `ENTITLEMENT_SIGNING_JWK`) or `release` (WT-18, `RELEASE_SIGNING_JWK`). Added by `ALTER
+     * TABLE ADD COLUMN`, which D1/SQLite cannot pair with an inline CHECK (that needs a full table
+     * rebuild) — enforced by BEFORE INSERT/UPDATE triggers instead, the same pattern migration
+     * 0009 uses for `plans.status`/`plans.currency`; no declarative CHECK is declared here either.
+     */
+    purpose: text("purpose").notNull().default("entitlement"),
     createdAt: createdAt(),
   },
   (table) => [check("signing_keys_status_check", sql`${table.status} IN ('active', 'retired')`)],
+);
+
+// ─── OTA releases (migration 0016, WT-18) ────────────────────────────────────────────────────
+// Master spec §18, §45; Slices 10.1–10.4. `manifest_json` is the plain (never-secret) payload for
+// server-side reads; `manifest_jws` is the signed envelope (`@cloudbox/update-contracts`) served to
+// devices and verified by them. Neither is confidential, unlike `entitlements.token`.
+
+export const RELEASE_COMPONENTS = ["agent", "status", "setup", "connect"] as const;
+export const RELEASE_CHANNELS = ["development", "pilot", "stable", "pinned"] as const;
+export const RELEASE_STATUSES = ["draft", "pilot", "stable", "withdrawn"] as const;
+
+export const releases = sqliteTable(
+  "releases",
+  {
+    id: text("id").primaryKey(),
+    component: text("component", { enum: RELEASE_COMPONENTS }).notNull(),
+    version: text("version").notNull(),
+    channel: text("channel", { enum: RELEASE_CHANNELS }).notNull(),
+    manifestJson: text("manifest_json").notNull(),
+    manifestJws: text("manifest_jws").notNull(),
+    packageR2Key: text("package_r2_key").notNull(),
+    packageSha256: text("package_sha256").notNull(),
+    packageSize: integer("package_size").notNull(),
+    minAgentVersion: text("min_agent_version"),
+    rollbackOf: text("rollback_of"),
+    notes: text("notes"),
+    status: text("status", { enum: RELEASE_STATUSES }).notNull().default("draft"),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+    promotedAt: text("promoted_at"),
+    withdrawnAt: text("withdrawn_at"),
+    withdrawReason: text("withdraw_reason"),
+  },
+  (table) => [
+    index("releases_component_channel_idx").on(table.component, table.channel, table.status),
+    index("releases_created_at_idx").on(table.createdAt),
+    check(
+      "releases_component_check",
+      sql`${table.component} IN ('agent', 'status', 'setup', 'connect')`,
+    ),
+    check(
+      "releases_channel_check",
+      sql`${table.channel} IN ('development', 'pilot', 'stable', 'pinned')`,
+    ),
+    check(
+      "releases_status_check",
+      sql`${table.status} IN ('draft', 'pilot', 'stable', 'withdrawn')`,
+    ),
+  ],
+);
+
+export const RELEASE_ASSIGNMENT_SCOPES = ["device", "tenant", "fleet_percent"] as const;
+
+export const releaseAssignments = sqliteTable(
+  "release_assignments",
+  {
+    id: text("id").primaryKey(),
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    scope: text("scope", { enum: RELEASE_ASSIGNMENT_SCOPES }).notNull(),
+    deviceId: text("device_id").references(() => devices.id),
+    tenantId: text("tenant_id").references(() => tenants.id),
+    percent: integer("percent"),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index("release_assignments_release_idx").on(table.releaseId),
+    index("release_assignments_device_idx").on(table.deviceId),
+    index("release_assignments_tenant_idx").on(table.tenantId),
+    check(
+      "release_assignments_scope_check",
+      sql`${table.scope} IN ('device', 'tenant', 'fleet_percent')`,
+    ),
+  ],
+);
+
+export const RELEASE_RESULT_STATES = [
+  "assigned",
+  "downloaded",
+  "verified",
+  "installed_healthy",
+  "installed_unhealthy",
+  "rolled_back",
+  "failed_download",
+  "failed_validation",
+  "deferred_active_users",
+  "deferred_maintenance",
+] as const;
+
+export const releaseResults = sqliteTable(
+  "release_results",
+  {
+    id: text("id").primaryKey(),
+    releaseId: text("release_id")
+      .notNull()
+      .references(() => releases.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    state: text("state", { enum: RELEASE_RESULT_STATES }).notNull(),
+    detailJson: text("detail_json"),
+    reportedAt: text("reported_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("release_results_release_idx").on(table.releaseId, table.reportedAt),
+    index("release_results_device_idx").on(table.deviceId, table.reportedAt),
+    check(
+      "release_results_state_check",
+      sql`${table.state} IN ('assigned', 'downloaded', 'verified', 'installed_healthy', 'installed_unhealthy', 'rolled_back', 'failed_download', 'failed_validation', 'deferred_active_users', 'deferred_maintenance')`,
+    ),
+  ],
 );
 
 // ─── License keys (migration 0010, WT-14) ────────────────────────────────────────────────────
@@ -641,6 +769,59 @@ export const licenseKeys = sqliteTable(
   ],
 );
 
+// ─── Network peers (migration 0014, WT-9) ────────────────────────────────────────────────────
+// One row per NetBird-mesh entity CloudBox has provisioned: a server (device_id set), a Connect
+// client (user_id set, one per tenant membership), or the per-tenant "support access wired"
+// marker (kind 'support', neither set — the single `cbx-support` gateway peer itself is not
+// tenant-scoped and lives outside this table; a marker row records that a tenant's server group
+// has been added to the standing support policy). D1 is authoritative for desired membership
+// (master spec §4.8 "Network control ownership"); `netbird_peer_id` is filled once the real peer
+// is observed joined (a future reconciliation job — out of scope while the server is mocked) and
+// is null until then. `group_ids_json` records which NetBird group ids this row's setup key or
+// policy contribution touched, for audit/debugging without calling back to NetBird.
+export const NETWORK_PEER_KINDS = ["server", "client", "support"] as const;
+export const NETWORK_PEER_STATUSES = ["not_configured", "pending", "active", "revoked"] as const;
+
+export const networkPeers = sqliteTable(
+  "network_peers",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: NETWORK_PEER_KINDS }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id").references(() => devices.id),
+    userId: text("user_id").references(() => customerUsers.id),
+    netbirdPeerId: text("netbird_peer_id"),
+    netbirdSetupKeyId: text("netbird_setup_key_id"),
+    /** JSON array of NetBird group ids this row's setup key/policy contribution touched. */
+    groupIdsJson: text("group_ids_json").notNull().default("[]"),
+    status: text("status", { enum: NETWORK_PEER_STATUSES }).notNull().default("not_configured"),
+    createdAt: createdAt(),
+    updatedAt: text("updated_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("network_peers_tenant_kind_idx").on(table.tenantId, table.kind),
+    // One server row per device.
+    uniqueIndex("network_peers_device_uq")
+      .on(table.deviceId)
+      .where(sql`${table.deviceId} IS NOT NULL`),
+    // One client row per (tenant, user) — a Connect member has one client identity per tenant.
+    uniqueIndex("network_peers_client_uq")
+      .on(table.tenantId, table.userId)
+      .where(sql`${table.kind} = 'client'`),
+    // One support marker row per tenant.
+    uniqueIndex("network_peers_support_uq")
+      .on(table.tenantId)
+      .where(sql`${table.kind} = 'support'`),
+    check("network_peers_kind_check", sql`${table.kind} IN ('server', 'client', 'support')`),
+    check(
+      "network_peers_status_check",
+      sql`${table.status} IN ('not_configured', 'pending', 'active', 'revoked')`,
+    ),
+  ],
+);
+
 // ─── Email providers (migration 0008, WT-12) ─────────────────────────────────────────────────
 
 export const EMAIL_PROVIDER_KINDS = ["cloudflare_binding", "smtp", "log"] as const;
@@ -669,5 +850,237 @@ export const emailProviders = sqliteTable(
       "email_providers_kind_check",
       sql`${table.kind} IN ('cloudflare_binding', 'smtp', 'log')`,
     ),
+  ],
+);
+
+// ─── Backups (migration 0017, WT-19) ─────────────────────────────────────────────────────────
+// master spec §23 (all subsections), §46; Slices 9.3-9.5 cloud halves. `backup_jobs` is the local
+// backup's own metadata (§23.8 "backup success is not upload success" — job state tracks local
+// verification separately from cloud upload/verify); `backup_artifacts` is the R2 object's state,
+// one row per job once an upload attempt begins. Never delete the newest `cloud_verified`
+// artifact per device regardless of policy (retention.ts).
+
+export const BACKUP_JOB_KINDS = ["frequent", "nightly", "manual", "pre_upgrade"] as const;
+export const BACKUP_JOB_STATES = [
+  "created",
+  "verified_local",
+  "upload_started",
+  "upload_completed",
+  "cloud_verified",
+  "retention_applied",
+  "failed",
+] as const;
+export const RETENTION_CLASSES = ["recent", "daily", "weekly", "monthly", "yearly"] as const;
+export const RESTORE_OUTCOMES = ["success", "failure", "partial"] as const;
+
+/** Per-tenant retention policy (§23.7). No row = the tenant follows the global default stored at
+ * `settings['backups.default_policy']` (resolved server-side by `backups/policy.ts`, never by the
+ * client guessing). */
+export const backupPolicies = sqliteTable("backup_policies", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id),
+  frequentHours: integer("frequent_hours").notNull().default(4),
+  dailyKeep: integer("daily_keep").notNull().default(30),
+  weeklyKeep: integer("weekly_keep").notNull().default(12),
+  monthlyKeep: integer("monthly_keep").notNull().default(12),
+  yearlyKeep: integer("yearly_keep").notNull().default(0),
+  offsiteEnabled: integer("offsite_enabled", { mode: "boolean" }).notNull().default(true),
+  updatedBy: text("updated_by"),
+  updatedAt: text("updated_at").notNull().default(isoNow),
+});
+
+export const backupJobs = sqliteTable(
+  "backup_jobs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    kind: text("kind", { enum: BACKUP_JOB_KINDS }).notNull(),
+    state: text("state", { enum: BACKUP_JOB_STATES }).notNull().default("created"),
+    startedAt: text("started_at").notNull().default(isoNow),
+    finishedAt: text("finished_at"),
+    sourceDataset: text("source_dataset").notNull(),
+    appVersion: text("app_version"),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    localPathHint: text("local_path_hint"),
+    errorJson: text("error_json"),
+  },
+  (table) => [
+    index("backup_jobs_tenant_device_idx").on(table.tenantId, table.deviceId, table.startedAt),
+    index("backup_jobs_device_state_idx").on(table.deviceId, table.state),
+    check(
+      "backup_jobs_kind_check",
+      sql`${table.kind} IN ('frequent', 'nightly', 'manual', 'pre_upgrade')`,
+    ),
+    check(
+      "backup_jobs_state_check",
+      sql`${table.state} IN ('created', 'verified_local', 'upload_started', 'upload_completed', 'cloud_verified', 'retention_applied', 'failed')`,
+    ),
+  ],
+);
+
+export const backupArtifacts = sqliteTable(
+  "backup_artifacts",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id")
+      .notNull()
+      .unique()
+      .references(() => backupJobs.id),
+    r2Key: text("r2_key").notNull().unique(),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    encryptionJson: text("encryption_json"),
+    uploadedAt: text("uploaded_at"),
+    verifiedAt: text("verified_at"),
+    retentionClass: text("retention_class", { enum: RETENTION_CLASSES }),
+    expiresAt: text("expires_at"),
+    deletedAt: text("deleted_at"),
+    /** In-flight R2 multipart upload id (owner addition, not in the spec's column list — needed
+     * to resume `PUT .../parts/:n` and `POST .../complete` against the same R2 upload). Cleared
+     * (left as-is; harmless) once `complete` succeeds. */
+    multipartUploadId: text("multipart_upload_id"),
+  },
+  (table) => [
+    index("backup_artifacts_job_idx").on(table.jobId),
+    check(
+      "backup_artifacts_retention_class_check",
+      sql`${table.retentionClass} IS NULL OR ${table.retentionClass} IN ('recent', 'daily', 'weekly', 'monthly', 'yearly')`,
+    ),
+  ],
+);
+
+export const restoreTests = sqliteTable(
+  "restore_tests",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => backupArtifacts.id),
+    performedBy: text("performed_by").notNull(),
+    performedAt: text("performed_at").notNull().default(isoNow),
+    outcome: text("outcome", { enum: RESTORE_OUTCOMES }).notNull(),
+    notes: text("notes"),
+  },
+  (table) => [
+    index("restore_tests_device_idx").on(table.deviceId, table.performedAt),
+    index("restore_tests_tenant_idx").on(table.tenantId, table.performedAt),
+    check(
+      "restore_tests_outcome_check",
+      sql`${table.outcome} IN ('success', 'failure', 'partial')`,
+    ),
+  ],
+);
+
+// ─── Alerts (migration 0015, WT-17) ──────────────────────────────────────────────────────────
+// Stateful alert records (spec §25/§44), evaluated on a cron (src/alerts/evaluate.ts): one row
+// per `dedupe_key` for the lifetime of the deployment — a resolved alert's row is reopened
+// (never re-inserted) when its condition recurs, so the UNIQUE constraint below is never a
+// collision waiting to happen.
+
+export const ALERT_CATEGORIES = [
+  "device_offline",
+  "license_expiring",
+  "license_expired",
+  "no_active_plan",
+  "clock_tamper",
+  "device_binding_failure",
+  "backup_failed",
+  "backup_overdue",
+  "disk_low",
+  "agent_outdated",
+  "update_failed",
+  "reboot_required",
+  "private_network_failed",
+  "rdp_unhealthy",
+  "break_glass_active",
+] as const;
+
+export const ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
+export const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
+
+export const alerts = sqliteTable(
+  "alerts",
+  {
+    id: text("id").primaryKey(),
+    /** Null for a category with no tenant scope (there is none today, but kept nullable per the
+     * brief's exact column list). */
+    tenantId: text("tenant_id").references(() => tenants.id),
+    /** Null for a tenant-level category (`license_expiring`/`license_expired`). */
+    deviceId: text("device_id").references(() => devices.id),
+    category: text("category", { enum: ALERT_CATEGORIES }).notNull(),
+    severity: text("severity", { enum: ALERT_SEVERITIES }).notNull(),
+    status: text("status", { enum: ALERT_STATUSES }).notNull().default("open"),
+    /** `${category}:${deviceId ?? tenantId}` — the identity of one alert "slot"; see the evaluator. */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    openedAt: text("opened_at").notNull().default(isoNow),
+    lastEvidenceJson: text("last_evidence_json"),
+    lastSeenAt: text("last_seen_at"),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgedAt: text("acknowledged_at"),
+    resolvedAt: text("resolved_at"),
+    /** Last time an email went out for this dedupe key (6h cooldown; src/alerts/notify.ts). */
+    notifiedAt: text("notified_at"),
+  },
+  (table) => [
+    index("alerts_status_severity_idx").on(table.status, table.severity),
+    index("alerts_tenant_status_idx").on(table.tenantId, table.status),
+    index("alerts_device_status_idx").on(table.deviceId, table.status),
+    check(
+      "alerts_category_check",
+      sql`${table.category} IN ('device_offline', 'license_expiring', 'license_expired', 'no_active_plan', 'clock_tamper', 'device_binding_failure', 'backup_failed', 'backup_overdue', 'disk_low', 'agent_outdated', 'update_failed', 'reboot_required', 'private_network_failed', 'rdp_unhealthy', 'break_glass_active')`,
+    ),
+    check("alerts_severity_check", sql`${table.severity} IN ('info', 'warning', 'critical')`),
+    check("alerts_status_check", sql`${table.status} IN ('open', 'acknowledged', 'resolved')`),
+  ],
+);
+
+// ─── RDP session grants (migration 0013, WT-11) ────────────────────────────────────────────────
+// Folded in from src/rdp/session-grants-table.ts at the phase-2/devices consolidation (docs/
+// ISSUE_LOG.md's P2-7): every table now lives here, per this file's own header comment; that file
+// keeps a one-line re-export so its (many) importers are unchanged. One minted managed-user
+// (`cloudNN`) credential grant for CloudBox Connect's RDP broker. The plaintext password is
+// returned to the caller exactly once (`POST /connect/devices/:deviceId/session`) and never
+// stored: `password_hash` (SHA-256) is kept only so a grant can be identified/audited without the
+// plaintext, and `password_ciphertext` is the compact JWE of `{"password":"…"}` encrypted to the
+// device's own enrolled RSA public key at grant time (the same key management scheme as the
+// entitlement envelope) — safe to store because only that device's private key (CNG-protected,
+// never leaves the machine) can open it. `delivered_at` marks the grant as already queued into a
+// heartbeat response so a slow-polling Agent isn't handed the same command twice.
+export const rdpSessionGrants = sqliteTable(
+  "rdp_session_grants",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    managedUser: text("managed_user").notNull(),
+    slot: integer("slot").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    passwordCiphertext: text("password_ciphertext").notNull(),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: createdAt(),
+    expiresAt: text("expires_at").notNull(),
+    deliveredAt: text("delivered_at"),
+    revokedAt: text("revoked_at"),
+  },
+  (table) => [
+    index("rdp_session_grants_device_idx").on(table.deviceId, table.expiresAt),
+    index("rdp_session_grants_pending_idx").on(table.deviceId, table.deliveredAt),
   ],
 );

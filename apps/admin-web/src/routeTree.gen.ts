@@ -14,14 +14,19 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetupAuthenticatorRouteImport } from './routes/setup-authenticator'
 import { Route as SetupPasswordRouteImport } from './routes/setup-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAlertsRouteImport } from './routes/_app/alerts'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
+import { Route as AppBackupsRouteImport } from './routes/_app/backups'
 import { Route as AppEnrollmentRouteImport } from './routes/_app/enrollment'
 import { Route as AppFleetRouteImport } from './routes/_app/fleet'
 import { Route as AppLicencesRouteImport } from './routes/_app/licences'
 import { Route as AppPlansRouteImport } from './routes/_app/plans'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppStaffRouteImport } from './routes/_app/staff'
 import { Route as AppSubscriptionsRouteImport } from './routes/_app/subscriptions'
 import { Route as AppTenantsRouteImport } from './routes/_app/tenants'
+import { Route as AppUpdatesRouteImport } from './routes/_app/updates'
+import { Route as AppBackupsDeviceIdRouteImport } from './routes/_app/backups.$deviceId'
 import { Route as AppFleetDeviceIdRouteImport } from './routes/_app/fleet.$deviceId'
 import { Route as AppSubscriptionsIdRouteImport } from './routes/_app/subscriptions.$id'
 import { Route as AppTenantsTenantIdRouteImport } from './routes/_app/tenants.$tenantId'
@@ -50,9 +55,19 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAlertsRoute = AppAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBackupsRoute = AppBackupsRouteImport.update({
+  id: '/backups',
+  path: '/backups',
   getParentRoute: () => AppRoute,
 } as any)
 const AppEnrollmentRoute = AppEnrollmentRouteImport.update({
@@ -80,6 +95,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppStaffRoute = AppStaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSubscriptionsRoute = AppSubscriptionsRouteImport.update({
   id: '/subscriptions',
   path: '/subscriptions',
@@ -89,6 +109,16 @@ const AppTenantsRoute = AppTenantsRouteImport.update({
   id: '/tenants',
   path: '/tenants',
   getParentRoute: () => AppRoute,
+} as any)
+const AppUpdatesRoute = AppUpdatesRouteImport.update({
+  id: '/updates',
+  path: '/updates',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBackupsDeviceIdRoute = AppBackupsDeviceIdRouteImport.update({
+  id: '/$deviceId',
+  path: '/$deviceId',
+  getParentRoute: () => AppBackupsRoute,
 } as any)
 const AppFleetDeviceIdRoute = AppFleetDeviceIdRouteImport.update({
   id: '/$deviceId',
@@ -111,14 +141,19 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/alerts': typeof AppAlertsRoute
   '/audit': typeof AppAuditRoute
+  '/backups': typeof AppBackupsRouteWithChildren
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
   '/licences': typeof AppLicencesRoute
   '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
+  '/updates': typeof AppUpdatesRoute
+  '/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -127,15 +162,20 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/alerts': typeof AppAlertsRoute
   '/audit': typeof AppAuditRoute
+  '/backups': typeof AppBackupsRouteWithChildren
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
   '/licences': typeof AppLicencesRoute
   '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
+  '/updates': typeof AppUpdatesRoute
   '/': typeof AppIndexRoute
+  '/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -146,15 +186,20 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/_app/alerts': typeof AppAlertsRoute
   '/_app/audit': typeof AppAuditRoute
+  '/_app/backups': typeof AppBackupsRouteWithChildren
   '/_app/enrollment': typeof AppEnrollmentRoute
   '/_app/fleet': typeof AppFleetRouteWithChildren
   '/_app/licences': typeof AppLicencesRoute
   '/_app/plans': typeof AppPlansRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/staff': typeof AppStaffRoute
   '/_app/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/_app/tenants': typeof AppTenantsRouteWithChildren
+  '/_app/updates': typeof AppUpdatesRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/_app/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/_app/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/_app/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -166,14 +211,19 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/alerts'
     | '/audit'
+    | '/backups'
     | '/enrollment'
     | '/fleet'
     | '/licences'
     | '/plans'
     | '/settings'
+    | '/staff'
     | '/subscriptions'
     | '/tenants'
+    | '/updates'
+    | '/backups/$deviceId'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
     | '/tenants/$tenantId'
@@ -182,15 +232,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/alerts'
     | '/audit'
+    | '/backups'
     | '/enrollment'
     | '/fleet'
     | '/licences'
     | '/plans'
     | '/settings'
+    | '/staff'
     | '/subscriptions'
     | '/tenants'
+    | '/updates'
     | '/'
+    | '/backups/$deviceId'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
     | '/tenants/$tenantId'
@@ -200,15 +255,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/_app/alerts'
     | '/_app/audit'
+    | '/_app/backups'
     | '/_app/enrollment'
     | '/_app/fleet'
     | '/_app/licences'
     | '/_app/plans'
     | '/_app/settings'
+    | '/_app/staff'
     | '/_app/subscriptions'
     | '/_app/tenants'
+    | '/_app/updates'
     | '/_app/'
+    | '/_app/backups/$deviceId'
     | '/_app/fleet/$deviceId'
     | '/_app/subscriptions/$id'
     | '/_app/tenants/$tenantId'
@@ -258,11 +318,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/alerts': {
+      id: '/_app/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AppAlertsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/audit': {
       id: '/_app/audit'
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AppAuditRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/backups': {
+      id: '/_app/backups'
+      path: '/backups'
+      fullPath: '/backups'
+      preLoaderRoute: typeof AppBackupsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/enrollment': {
@@ -300,6 +374,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/staff': {
+      id: '/_app/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof AppStaffRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/subscriptions': {
       id: '/_app/subscriptions'
       path: '/subscriptions'
@@ -313,6 +394,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/tenants'
       preLoaderRoute: typeof AppTenantsRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_app/updates': {
+      id: '/_app/updates'
+      path: '/updates'
+      fullPath: '/updates'
+      preLoaderRoute: typeof AppUpdatesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/backups/$deviceId': {
+      id: '/_app/backups/$deviceId'
+      path: '/$deviceId'
+      fullPath: '/backups/$deviceId'
+      preLoaderRoute: typeof AppBackupsDeviceIdRouteImport
+      parentRoute: typeof AppBackupsRoute
     }
     '/_app/fleet/$deviceId': {
       id: '/_app/fleet/$deviceId'
@@ -337,6 +432,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppBackupsRouteChildren {
+  AppBackupsDeviceIdRoute: typeof AppBackupsDeviceIdRoute
+}
+
+const AppBackupsRouteChildren: AppBackupsRouteChildren = {
+  AppBackupsDeviceIdRoute: AppBackupsDeviceIdRoute,
+}
+
+const AppBackupsRouteWithChildren = AppBackupsRoute._addFileChildren(
+  AppBackupsRouteChildren,
+)
 
 interface AppFleetRouteChildren {
   AppFleetDeviceIdRoute: typeof AppFleetDeviceIdRoute
@@ -374,26 +481,34 @@ const AppTenantsRouteWithChildren = AppTenantsRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
+  AppBackupsRoute: typeof AppBackupsRouteWithChildren
   AppEnrollmentRoute: typeof AppEnrollmentRoute
   AppFleetRoute: typeof AppFleetRouteWithChildren
   AppLicencesRoute: typeof AppLicencesRoute
   AppPlansRoute: typeof AppPlansRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppStaffRoute: typeof AppStaffRoute
   AppSubscriptionsRoute: typeof AppSubscriptionsRouteWithChildren
   AppTenantsRoute: typeof AppTenantsRouteWithChildren
+  AppUpdatesRoute: typeof AppUpdatesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
+  AppBackupsRoute: AppBackupsRouteWithChildren,
   AppEnrollmentRoute: AppEnrollmentRoute,
   AppFleetRoute: AppFleetRouteWithChildren,
   AppLicencesRoute: AppLicencesRoute,
   AppPlansRoute: AppPlansRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppStaffRoute: AppStaffRoute,
   AppSubscriptionsRoute: AppSubscriptionsRouteWithChildren,
   AppTenantsRoute: AppTenantsRouteWithChildren,
+  AppUpdatesRoute: AppUpdatesRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

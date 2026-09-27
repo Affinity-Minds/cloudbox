@@ -1,0 +1,42 @@
+{
+  "note": "TEST VECTOR ONLY. Throwaway keys; never trust this server key outside tests.",
+  "format": "JWS ES256 {typ:cbx-release+jwt}",
+  "jws": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjI2Uk1OV05acWs5Yi14eU1VSjVRbmc3OGNKZHY0VDdtUy14NHAtTXlmT2siLCJ0eXAiOiJjYngtcmVsZWFzZStqd3QifQ.eyJjb21wb25lbnQiOiJhZ2VudCIsInZlcnNpb24iOiIxLjQuMiIsImNoYW5uZWwiOiJzdGFibGUiLCJtaW5BZ2VudFZlcnNpb24iOiIxLjIuMCIsInBhY2thZ2UiOnsicjJLZXkiOiJyZWxlYXNlcy9hZ2VudC8xLjQuMi9jbG91ZGJveC1hZ2VudC0xLjQuMi5tc2kiLCJzaGEyNTYiOiI5NjRiNDYzMTRkNDY4OGNkODEwMzMyMDkzMjEwNDUzNGJkODJlMDdhOWE5YjZjYTc3ZDIwODkyZjNmZDVjODRiIiwic2l6ZUJ5dGVzIjo0MTk0MzA0MH0sInJvbGxiYWNrT2YiOm51bGwsIm5vdGVzIjoiVGVzdCB2ZWN0b3IgcmVsZWFzZS4iLCJjcmVhdGVkQnkiOiJzdGZfMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiY3JlYXRlZEF0IjoiMjAyNi0wOS0yN1QwMDowMDowMC4wMDBaIn0.Qb9NM2XTSPCHCD24Ag7shomo871vC7esqXXJ0QFCU_5HBx9uoqlQp9xfpgjs99eNd_yMjWYTAbz6vEAHJv6Fog",
+  "serverPublicJwks": [
+    {
+      "kty": "EC",
+      "x": "jDASAhwSI0jXElNrYHRfe9Lv38679jvlyCq8Vk-LOOg",
+      "y": "pzn0u3wbxOhtxTVWRCizBhpPmoFvaD9XGmTFikZZ1k0",
+      "crv": "P-256",
+      "kid": "26RMNWNZqk9b-xyMUJ5Qng78cJdv4T7mS-x4p-MyfOk",
+      "alg": "ES256",
+      "use": "sig"
+    }
+  ],
+  "otherServerPublicJwks": [
+    {
+      "kty": "EC",
+      "x": "63m9Fn7mFTBh_WQrC_ZHzJVvJzrEfWMUytKpBIkSuz8",
+      "y": "jU1-THO_HKdBeUruVIcSlMwLQiYSpSmjEPmn5nhefEM",
+      "crv": "P-256",
+      "kid": "P-Njx1BzWcpqOrci4l7arrDzRPYrjyEZJnG-g8JrE80",
+      "alg": "ES256",
+      "use": "sig"
+    }
+  ],
+  "expectedManifest": {
+    "component": "agent",
+    "version": "1.4.2",
+    "channel": "stable",
+    "minAgentVersion": "1.2.0",
+    "package": {
+      "r2Key": "releases/agent/1.4.2/cloudbox-agent-1.4.2.msi",
+      "sha256": "964b46314d4688cd8103320932104534bd82e07a9a9b6ca77d20892f3fd5c84b",
+      "sizeBytes": 41943040
+    },
+    "rollbackOf": null,
+    "notes": "Test vector release.",
+    "createdBy": "stf_00000000-0000-4000-8000-000000000001",
+    "createdAt": "2026-09-27T00:00:00.000Z"
+  }
+}

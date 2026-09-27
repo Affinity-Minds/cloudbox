@@ -95,6 +95,5 @@ export const LicenseKeysResponse = z.object({
 });
 export type LicenseKeysResponse = z.infer<typeof LicenseKeysResponse>;
 
-/** `POST /api/v1/license-keys/:id/revoke` (`license.revoke`). */
-export const RevokeLicenseKeyRequest = z.object({ reason: z.string().trim().min(3).max(500) });
-export type RevokeLicenseKeyRequest = z.infer<typeof RevokeLicenseKeyRequest>;
+// `POST /api/v1/license-keys/:id/revoke` (`license.revoke`) request: `RevokeLicenseKeyRequest` in
+// `./reasons.ts` (reason-code + free-text, audited alongside `LicenseKeyRevokeReasonCode`).

@@ -318,7 +318,10 @@ describe("V2-5: WT-13 plan routes", () => {
     // An existing tenant on the plan, then retire it.
     const existing = await seedTenant(env.DB);
     await pendingPlan(existing.tenantId, "v25-plan");
-    expect((await staffCall(sa, "POST", "/plans/v25-plan/retire")).status).toBe(200);
+    expect(
+      (await staffCall(sa, "POST", "/plans/v25-plan/retire", { reasonCode: "discontinued" }))
+        .status,
+    ).toBe(200);
     const fresh = await seedTenant(env.DB);
     const refused = await staffCall(sa, "POST", `/tenants/${fresh.tenantId}/subscriptions`, {
       planCode: "v25-plan",

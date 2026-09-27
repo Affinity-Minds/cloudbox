@@ -15,6 +15,7 @@ const GUARDED_TABLES = [
   "entitlements",
   "enrollment_tokens",
   "audit_log",
+  "network_peers",
 ];
 
 type PlanRow = { id: number; parent: number; notused: number; detail: string };
