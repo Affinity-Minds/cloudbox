@@ -38,7 +38,7 @@ This document describes the security boundaries, enforcement mechanisms, limits,
 ### 5. Rate limiting
 - Per-email / per-IP limits on OTP sends and verifications (H-1 fix, c573cc2):
   - OTP send: 5 per (email, client IP /64) per 15 min, 30 per email per hour, 10 per 24 h to new addresses.
-  - OTP verify: 3 failed attempts per IP per 60 s, code is burned after 3 failures.
+  - OTP verify: 3 failed attempts per IP per 60 s, code is burned after 5 failures (`allowedAttempts`, T-2 fix, `229781c`).
 - Per-IP limits on staff password sign-in (3 failures per 10 s) and `/two-factor/*` endpoints (3 per 10 s).
 - Per-client (IP + path) limit on Connect sign-in: 3 per 60 s per path per IP.
 - Enforced: Rate-limit state is stored in per-key rows in `staff_rate_limit` / `customer_rate_limit` tables; state is cleared and buckets are rotated.
@@ -102,7 +102,7 @@ This document describes the security boundaries, enforcement mechanisms, limits,
 
 **Enrollment:**
 1. Tenant admin calls `POST /api/v1/tenants/{tenantId}/activation-grants` to mint an activation code.
-2. Code is valid for 7 days.
+2. Code is valid for 15 minutes (`ACTIVATION_GRANT_TTL_MINUTES`).
 3. Server installer displays an enrollment code (token derived from a randomly generated key).
 4. Admin enters activation code into a web form; server displays enrollment code.
 5. On server boot, installer retrieves enrollment code from registry and calls `POST /api/v1/agent/enroll`.
@@ -111,7 +111,7 @@ This document describes the security boundaries, enforcement mechanisms, limits,
 8. Cloud issues `devices` row and first `device_credentials` row.
 9. Cloud issues first `entitlements` row (auto-activates pending subscription).
 10. Enforced: Enrollment code is single-use and expires after 7 days.
-11. Enforced: Activation code is single-use and expires after 7 days.
+11. Enforced: Activation code is single-use and expires after 15 minutes.
 
 **Device credentials and rotation:**
 - Credentials are bearer tokens issued at enrollment and rotated on every successful heartbeat.
