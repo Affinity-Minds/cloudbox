@@ -168,4 +168,35 @@ export const queries: RegisteredQuery[] = [
     sql: `select "id" from "network_peers" where ("network_peers"."kind" = ? and "network_peers"."tenant_id" = ?)`,
     params: ["support", "ten_test"],
   },
+  // ─── routes/v1/portal.ts (WT-15): the customer portal's own screens ──────────────────────
+  {
+    name: "portal.home: tenant row by id",
+    sql: `SELECT "id", "public_code", "display_name", "status" FROM "tenants" WHERE "tenants"."id" = ?`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.home: active member count for a tenant",
+    sql: `SELECT count(*) AS n FROM "tenant_memberships" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."status" = 'active'`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.home: enrolled device count for a tenant",
+    sql: `SELECT count(*) AS n FROM "devices" WHERE "devices"."tenant_id" = ? AND "devices"."status" = 'enrolled'`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal: the caller's own active standing in one tenant",
+    sql: `SELECT "standing" FROM "tenant_memberships" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."user_id" = ? AND "tenant_memberships"."status" = 'active'`,
+    params: ["ten_test", "u_test"],
+  },
+  {
+    name: "portal.members: active memberships of a tenant joined to their customer identity",
+    sql: `SELECT "tenant_memberships"."id", "tenant_memberships"."user_id", "customer_users"."email", "customer_users"."name", "tenant_memberships"."standing", "tenant_memberships"."status", "tenant_memberships"."created_at" FROM "tenant_memberships" INNER JOIN "customer_users" ON "customer_users"."id" = "tenant_memberships"."user_id" WHERE "tenant_memberships"."tenant_id" = ? AND "tenant_memberships"."status" = 'active' ORDER BY "tenant_memberships"."created_at" DESC`,
+    params: ["ten_test"],
+  },
+  {
+    name: "portal.subscription: newest non-cancelled subscription of a tenant, with its plan",
+    sql: `SELECT "subscriptions"."id", "subscriptions"."tenant_id", "subscriptions"."plan_code", "subscriptions"."status", "plans"."name", "plans"."price_amount" FROM "subscriptions" LEFT JOIN "plans" ON "plans"."code" = "subscriptions"."plan_code" WHERE "subscriptions"."tenant_id" = ? AND "subscriptions"."status" <> 'cancelled' ORDER BY "subscriptions"."created_at" DESC LIMIT 1`,
+    params: ["ten_test"],
+  },
 ];

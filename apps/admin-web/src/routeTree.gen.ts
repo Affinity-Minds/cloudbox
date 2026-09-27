@@ -22,6 +22,7 @@ import { Route as AppFleetRouteImport } from './routes/_app/fleet'
 import { Route as AppLicencesRouteImport } from './routes/_app/licences'
 import { Route as AppPlansRouteImport } from './routes/_app/plans'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppStaffRouteImport } from './routes/_app/staff'
 import { Route as AppSubscriptionsRouteImport } from './routes/_app/subscriptions'
 import { Route as AppTenantsRouteImport } from './routes/_app/tenants'
 import { Route as AppUpdatesRouteImport } from './routes/_app/updates'
@@ -94,6 +95,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppStaffRoute = AppStaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSubscriptionsRoute = AppSubscriptionsRouteImport.update({
   id: '/subscriptions',
   path: '/subscriptions',
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/licences': typeof AppLicencesRoute
   '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
   '/updates': typeof AppUpdatesRoute
@@ -163,6 +170,7 @@ export interface FileRoutesByTo {
   '/licences': typeof AppLicencesRoute
   '/plans': typeof AppPlansRoute
   '/settings': typeof AppSettingsRoute
+  '/staff': typeof AppStaffRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
   '/updates': typeof AppUpdatesRoute
@@ -186,6 +194,7 @@ export interface FileRoutesById {
   '/_app/licences': typeof AppLicencesRoute
   '/_app/plans': typeof AppPlansRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/staff': typeof AppStaffRoute
   '/_app/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/_app/tenants': typeof AppTenantsRouteWithChildren
   '/_app/updates': typeof AppUpdatesRoute
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/licences'
     | '/plans'
     | '/settings'
+    | '/staff'
     | '/subscriptions'
     | '/tenants'
     | '/updates'
@@ -230,6 +240,7 @@ export interface FileRouteTypes {
     | '/licences'
     | '/plans'
     | '/settings'
+    | '/staff'
     | '/subscriptions'
     | '/tenants'
     | '/updates'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/_app/licences'
     | '/_app/plans'
     | '/_app/settings'
+    | '/_app/staff'
     | '/_app/subscriptions'
     | '/_app/tenants'
     | '/_app/updates'
@@ -362,6 +374,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/staff': {
+      id: '/_app/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof AppStaffRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/subscriptions': {
       id: '/_app/subscriptions'
       path: '/subscriptions'
@@ -470,6 +489,7 @@ interface AppRouteChildren {
   AppLicencesRoute: typeof AppLicencesRoute
   AppPlansRoute: typeof AppPlansRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppStaffRoute: typeof AppStaffRoute
   AppSubscriptionsRoute: typeof AppSubscriptionsRouteWithChildren
   AppTenantsRoute: typeof AppTenantsRouteWithChildren
   AppUpdatesRoute: typeof AppUpdatesRoute
@@ -485,6 +505,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppLicencesRoute: AppLicencesRoute,
   AppPlansRoute: AppPlansRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppStaffRoute: AppStaffRoute,
   AppSubscriptionsRoute: AppSubscriptionsRouteWithChildren,
   AppTenantsRoute: AppTenantsRouteWithChildren,
   AppUpdatesRoute: AppUpdatesRoute,

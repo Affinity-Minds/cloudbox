@@ -113,8 +113,39 @@ export const MEMBERSHIP_REVOKE_REASON_CODES = [
 const membershipRevoke = reasonRequest(MEMBERSHIP_REVOKE_REASON_CODES);
 export const MembershipRevokeReasonCode = membershipRevoke.ReasonCode;
 export type MembershipRevokeReasonCode = z.infer<typeof MembershipRevokeReasonCode>;
-export const RemoveMembershipRequest = membershipRevoke.Request;
+/**
+ * Unlike the other catalogues above, this one is optional: the ops console's tenant-detail
+ * dialog always sends the catalogued `{reasonCode, reasonText?}` shape (WT-2's `<ReasonSelect>`),
+ * but the customer portal's members page (WT-15, no dropdown there) sends a bare free-text
+ * `{reason}` or no body at all — a self-service removal is not held to the same bureaucratic
+ * standard as a staff action. The bare-`{}` branch (same pattern as `RevokeStaffRequest` below)
+ * lets a missing body still validate.
+ */
+export const RemoveMembershipRequest = z
+  .union([membershipRevoke.Request, z.object({}).strict()])
+  .transform((value) => ("reasonCode" in value ? value : {}));
 export type RemoveMembershipRequest = z.infer<typeof RemoveMembershipRequest>;
+
+/**
+ * WT-15's staff revoke reason predates this catalogue (`docs/handoffs/wt-p13-portal-staff.md`)
+ * and was, and stays, entirely optional — `revokeStaff()` sends no body at all when the operator
+ * gives no reason. Unlike every other catalogue above, the request schema is a union with a bare
+ * `{}` branch so a missing body still validates; `reasonCode`/`reasonText` are absent (not just
+ * `undefined`-typed) on that branch, transformed to `{}` rather than `{reasonCode: undefined, ...}`.
+ */
+export const STAFF_REVOKE_REASON_CODES = [
+  "role_change",
+  "offboarded",
+  "security_incident",
+  "other",
+] as const;
+const staffRevoke = reasonRequest(STAFF_REVOKE_REASON_CODES);
+export const StaffRevokeReasonCode = staffRevoke.ReasonCode;
+export type StaffRevokeReasonCode = z.infer<typeof StaffRevokeReasonCode>;
+export const RevokeStaffRequest = z
+  .union([staffRevoke.Request, z.object({}).strict()])
+  .transform((value) => ("reasonCode" in value ? value : {}));
+export type RevokeStaffRequest = z.infer<typeof RevokeStaffRequest>;
 
 export const EMAIL_PROVIDER_DELETE_REASON_CODES = [
   "replaced",

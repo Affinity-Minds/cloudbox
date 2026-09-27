@@ -16,6 +16,7 @@ import entitlements from "./entitlements";
 import me from "./me";
 import meAlerts from "./me-alerts";
 import memberships from "./memberships";
+import portal from "./portal";
 import realtime from "./realtime";
 import releases from "./releases";
 import screens from "./screens";
@@ -42,6 +43,7 @@ v1.route("/auth", auth); // WT-1
 v1.route("/staff", staff); // WT-1
 v1.route("/tenants", tenants); // WT-2
 v1.route("/tenants/:tenantId/memberships", memberships); // WT-2
+v1.route("/tenants/:tenantId/portal", portal); // WT-15
 v1.route("/me", me); // WT-2
 v1.route("/me", meAlerts); // WT-17: GET /me/alerts, same mount, second small router (see its file)
 v1.route("/tenants/:tenantId/enrollment-tokens", enrollment); // WT-3

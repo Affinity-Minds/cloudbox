@@ -291,12 +291,11 @@ router.delete(
       entityId: membershipId,
       actor: { type: "user", id: c.var.user.id, tenantId },
       before,
-      after: {
-        ...after,
-        reasonCode,
-        reasonText,
-        reason: formatReason({ reasonCode, reasonText }),
-      },
+      // reasonCode is absent, not just empty, on a self-service removal with no reason given
+      // (the portal's members page; see RemoveMembershipRequest's own doc comment).
+      after: reasonCode
+        ? { ...after, reasonCode, reasonText, reason: formatReason({ reasonCode, reasonText }) }
+        : after,
       correlationId: c.var.correlationId,
       source: "api",
     });

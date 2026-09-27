@@ -12,6 +12,7 @@ export * from "./license-keys";
 export * from "./memberships";
 export * from "./network";
 export * from "./onboarding";
+export * from "./portal";
 export * from "./realtime";
 export * from "./reasons";
 export * from "./releases";

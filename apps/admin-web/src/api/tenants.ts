@@ -71,10 +71,23 @@ export const updateMemberStanding = (
     body: JSON.stringify(input),
   });
 
-export const removeMember = (tenantId: string, membershipId: string, body: ReasonRequestBody) =>
+/**
+ * Two call sites, two shapes: the ops console's tenant-detail dialog always sends a catalogued
+ * `ReasonRequestBody` (WT-2's `<ReasonSelect>`); the customer portal's members page (WT-15, no
+ * dropdown there) sends a bare optional free-text reason, or nothing. The server accepts both
+ * (and nothing), per `packages/contracts/src/reasons.ts`'s `RemoveMembershipRequest`.
+ */
+export const removeMember = (
+  tenantId: string,
+  membershipId: string,
+  reason?: ReasonRequestBody | string,
+) =>
   api<Membership>(`/api/v1/tenants/${tenantId}/memberships/${membershipId}`, {
     method: "DELETE",
-    body: JSON.stringify(body),
+    body:
+      reason === undefined
+        ? undefined
+        : JSON.stringify(typeof reason === "string" ? { reason } : reason),
   });
 
 export const myTenantsQuery = queryOptions({
