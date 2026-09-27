@@ -117,6 +117,22 @@ customer-only without editing WT-6/WT-8 tests.
 - Worker: `test/server-setup.test.ts` 6 tests + route sweeps (`permission-matrix`, `phase-1-hardening`,
   `phase-1-second-pass`, `agent`) green locally; full `pnpm run verify`: see below.
 
+## Screenshots
+
+Reviewed the `ui-screenshots` artifact from the green Windows run (36317227265); all five render fully — no blank
+windows, no missing/clipped text.
+
+- `setup-welcome.png` — CloudBox Server Setup wizard, Welcome step: title, body copy, "Advanced" toggle and "Next"
+  button all render correctly.
+- `status-licensed.png` — Status app, licence Active (287 days remaining), Remote Users 6/6, Remote Access Healthy;
+  all fields populated.
+- `status-no-plan.png` — Status app, licence "No active plan" (red), Remote Users "Waiting for the licence"; correct
+  error-state copy, nothing blank.
+- `status-renewal-due.png` — Status app, licence "Expires in 21 days" with QR code and "Scan to renew" rendered;
+  Remote Users 6/6.
+- `status-revoked.png` — Status app, licence "Revoked" (red) with contact-admin copy; Remote Users 6/6, Remote Access
+  Healthy.
+
 ## What CI could not prove (owner lab run; fill in from `docs/runbooks/server-setup-lab.md`)
 
 | Item | CI | Owner lab result |
