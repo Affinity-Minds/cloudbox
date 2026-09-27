@@ -220,7 +220,13 @@ describe("staff management API", () => {
     const rows = await auditFor(target.userId);
     const last = rows.at(-1);
     expect(last?.event_type).toBe("STAFF_ROLE_REVOKED");
-    expect(JSON.parse(last?.after_json ?? "null")).toEqual({ reason: "role no longer needed" });
+    // Legacy bare {reason} maps to reasonCode "other" (packages/contracts/src/reasons.ts), so the
+    // audited `reason` is "other: <text>", not the bare text.
+    expect(JSON.parse(last?.after_json ?? "null")).toEqual({
+      reasonCode: "other",
+      reasonText: "role no longer needed",
+      reason: "other: role no longer needed",
+    });
   });
 
   it("refuses a cross-site grant", async () => {

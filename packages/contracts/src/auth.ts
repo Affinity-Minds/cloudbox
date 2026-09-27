@@ -90,4 +90,3 @@ export const StaffMember = z.object({
   lastSignInAt: z.string().nullable(),
 });
 export type StaffMember = z.infer<typeof StaffMember>;
-

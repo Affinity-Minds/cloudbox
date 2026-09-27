@@ -135,7 +135,13 @@ describe("GET /api/v1/tenants/:tenantId/portal/members", () => {
     )
       .bind(membership.id)
       .first<{ after_json: string }>();
-    expect(JSON.parse(row?.after_json ?? "null")).toMatchObject({ reason: "wrong organisation" });
+    // Legacy bare {reason} maps to reasonCode "other" (packages/contracts/src/reasons.ts), so the
+    // audited `reason` is "other: <text>", not the bare text.
+    expect(JSON.parse(row?.after_json ?? "null")).toMatchObject({
+      reasonCode: "other",
+      reasonText: "wrong organisation",
+      reason: "other: wrong organisation",
+    });
   });
 });
 

@@ -255,7 +255,7 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
     expect(eventsAfter.filter((e) => e.eventType === "USER_REMOVED")).toHaveLength(1);
   });
 
-  it("reason-code shape: missing/invalid code and other-without-text are 400", async () => {
+  it("reason-code shape: an omitted body revokes with no reason recorded; invalid code and other-without-text are 400", async () => {
     const tenant = await seedTenant(env.DB, { displayName: "Reason Shape Org" });
     const invited = (await (
       await call(`/api/v1/tenants/${tenant.tenantId}/memberships`, staffAdmin, {
@@ -265,7 +265,18 @@ describe("DELETE /api/v1/tenants/:tenantId/memberships/:id", () => {
     ).json()) as Membership;
     const path = `/api/v1/tenants/${tenant.tenantId}/memberships/${invited.id}`;
 
-    expect((await call(path, staffAdmin, { method: "DELETE", body: "{}" })).status).toBe(400);
+    // WT-15 (portal.test.ts): the customer portal's own members page has no reason catalogue and
+    // sends no body at all when the operator gives no reason (RemoveMembershipRequest's own doc
+    // comment) — unlike every other reasoned delete in this API, a fully-omitted reason is not a
+    // 400 here, and the audit row simply carries no reasonCode/reasonText/reason.
+    const omitted = await call(path, staffAdmin, { method: "DELETE", body: "{}" });
+    expect(omitted.status).toBe(200);
+    const events = await auditFor("membership", invited.id);
+    const removed = events.find((e) => e.eventType === "USER_REMOVED");
+    expect(removed?.after).not.toHaveProperty("reasonCode");
+    expect(removed?.after).not.toHaveProperty("reason");
+
+    // A shape that DOES attempt a reason must still be a valid one.
     expect(
       (
         await call(path, staffAdmin, {
