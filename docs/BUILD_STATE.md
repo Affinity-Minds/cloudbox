@@ -5,7 +5,7 @@ Phase 2 — Physical device enrollment and Windows acceptance (integration branc
 2.3 physical acceptance: the owner runs the `CloudBox.Agent-win-x64` artifact on the lab PC against production (enroll → Online → entitlement → uninstall → verify-clean).
 
 # Status
-Phase 2 cloud side integrated on `phase-2/devices` (626 worker tests incl. all WT-8 review tests; WT-8 verdict: merge approved, no Critical/High). Awaiting owner merge to `main`, then deploy + live verification, then the owner's lab run. Follow-ups: W-2 (fleet principal-type check), Staff management screen, real SMTP relay send verification, pin actions by SHA, plan-designer note that lowering max_devices blocks new licences, Connect timing parity, ownership transfer in the portal.
+Phase 2 cloud side MERGED to `main` (PR #22, production SHA ed59dcf, 2026-09-27 09:37 UTC) and live-verified; the owner's lab run is the remaining Phase 2 exit item. In progress: plan pricing/add-on users (WT-13 follow-up). Follow-ups: W-2 (fleet principal-type check), Staff management screen, real SMTP relay send verification, pin actions by SHA, plan-designer note that lowering max_devices blocks new licences, Connect timing parity, ownership transfer in the portal.
 
 # Demo path
 1. Staff: https://box.affinityminds.in/ops/login → email + initial password → forced password change → authenticator QR → console.
