@@ -55,6 +55,10 @@ export const toPlan = (row: PlanRow): Plan => ({
   renewalWarningDays: row.renewalWarningDays,
   status: row.status as Plan["status"],
   termDays: row.termDays,
+  priceAmount: row.priceAmount,
+  currency: row.currency as Plan["currency"],
+  addonUserPriceAmount: row.addonUserPriceAmount,
+  maxAddonUsers: row.maxAddonUsers,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -67,6 +71,7 @@ export const toSubscription = (row: SubscriptionRow): Subscription => ({
   validFrom: row.validFrom,
   validUntil: row.validUntil,
   maxManagedUsers: row.maxManagedUsers,
+  addonUsers: row.addonUsers,
   features: JSON.parse(row.featuresJson) as Feature[],
   offlineGraceDays: row.offlineGraceDays,
   renewalWarningDays: row.renewalWarningDays,
@@ -137,6 +142,10 @@ plans.post(
       renewalWarningDays: input.renewalWarningDays,
       status: "active",
       termDays: input.termDays,
+      priceAmount: input.priceAmount ?? 0,
+      currency: input.currency ?? "INR",
+      addonUserPriceAmount: input.addonUserPriceAmount ?? 0,
+      maxAddonUsers: input.maxAddonUsers ?? 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -182,6 +191,10 @@ plans.patch(
       offlineGraceDays: input.offlineGraceDays ?? current.offlineGraceDays,
       renewalWarningDays: input.renewalWarningDays ?? current.renewalWarningDays,
       termDays: input.termDays ?? current.termDays,
+      priceAmount: input.priceAmount ?? current.priceAmount,
+      currency: input.currency ?? current.currency,
+      addonUserPriceAmount: input.addonUserPriceAmount ?? current.addonUserPriceAmount,
+      maxAddonUsers: input.maxAddonUsers ?? current.maxAddonUsers,
       updatedAt: now,
     };
 
@@ -199,6 +212,10 @@ plans.patch(
           offlineGraceDays: next.offlineGraceDays,
           renewalWarningDays: next.renewalWarningDays,
           termDays: next.termDays,
+          priceAmount: next.priceAmount,
+          currency: next.currency,
+          addonUserPriceAmount: next.addonUserPriceAmount,
+          maxAddonUsers: next.maxAddonUsers,
           updatedAt: next.updatedAt,
         })
         .where(eq(plansTable.code, code)),
@@ -324,6 +341,11 @@ tenantSubscriptions.post(
     if (dated && !isoOrder(body.validFrom as string, body.validUntil as string)) {
       return c.json({ error: "invalid_request", detail: "valid_until_not_after_valid_from" }, 400);
     }
+    // Add-on users (migration 0011, owner addition): bounded by the plan, not a static Zod range.
+    const addonUsers = body.addonUsers ?? 0;
+    if (addonUsers > plan.maxAddonUsers) {
+      return c.json({ error: "invalid_request", detail: "addon_users_exceeds_plan_max" }, 400);
+    }
     // One commercial subscription per tenant at a time: renew by PATCHing dates, change plan by
     // cancelling and creating. (Concurrent creates are staff-only and rare; see handoff.)
     if (openRows[0]) {
@@ -339,6 +361,7 @@ tenantSubscriptions.post(
       validFrom: dated ? new Date(body.validFrom as string).toISOString() : null,
       validUntil: dated ? new Date(body.validUntil as string).toISOString() : null,
       maxManagedUsers: body.maxManagedUsers ?? plan.maxManagedUsers,
+      addonUsers,
       featuresJson: JSON.stringify(body.features ?? JSON.parse(plan.featuresJson)),
       offlineGraceDays: body.offlineGraceDays ?? plan.offlineGraceDays,
       renewalWarningDays: body.renewalWarningDays ?? plan.renewalWarningDays,
@@ -386,12 +409,25 @@ subscriptions.patch(
     // Cancelled is terminal: a new subscription is a new commercial agreement.
     if (current.status === "cancelled") return c.json({ error: "subscription_cancelled" }, 409);
 
+    // Add-on users (migration 0011, owner addition): bounded by the plan, checked only when
+    // touched, to keep the common PATCH (no addonUsers field) at its usual round trips.
+    if (body.addonUsers !== undefined) {
+      const [plan] = await db
+        .select({ maxAddonUsers: plansTable.maxAddonUsers })
+        .from(plansTable)
+        .where(eq(plansTable.code, current.planCode));
+      if (!plan || body.addonUsers > plan.maxAddonUsers) {
+        return c.json({ error: "invalid_request", detail: "addon_users_exceeds_plan_max" }, 400);
+      }
+    }
+
     const next: SubscriptionRow = {
       ...current,
       status: body.status ?? current.status,
       validFrom: body.validFrom ? new Date(body.validFrom).toISOString() : current.validFrom,
       validUntil: body.validUntil ? new Date(body.validUntil).toISOString() : current.validUntil,
       maxManagedUsers: body.maxManagedUsers ?? current.maxManagedUsers,
+      addonUsers: body.addonUsers ?? current.addonUsers,
       featuresJson: body.features ? JSON.stringify(body.features) : current.featuresJson,
       offlineGraceDays: body.offlineGraceDays ?? current.offlineGraceDays,
       renewalWarningDays: body.renewalWarningDays ?? current.renewalWarningDays,
@@ -423,6 +459,7 @@ subscriptions.patch(
           validFrom: next.validFrom,
           validUntil: next.validUntil,
           maxManagedUsers: next.maxManagedUsers,
+          addonUsers: next.addonUsers,
           featuresJson: next.featuresJson,
           offlineGraceDays: next.offlineGraceDays,
           renewalWarningDays: next.renewalWarningDays,

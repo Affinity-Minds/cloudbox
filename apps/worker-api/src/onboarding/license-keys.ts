@@ -193,8 +193,13 @@ export async function listLicenseKeys(
         revoked: sql<number>`sum(${licenseKeys.status} = 'revoked')`
           .mapWith(Number)
           .as("b_revoked"),
+        // Migration 0011 (owner addition): the plan's current price, for display only — see
+        // LicenseKeyBatch's own doc comment.
+        planPriceAmount: sql<number>`min(${plans.priceAmount})`.mapWith(Number).as("b_price"),
+        planCurrency: sql<string>`min(${plans.currency})`.as("b_currency"),
       })
       .from(licenseKeys)
+      .leftJoin(plans, eq(plans.code, licenseKeys.planCode))
       .groupBy(licenseKeys.batchId)
       .orderBy(desc(sql`b_created_at`)),
   ]);

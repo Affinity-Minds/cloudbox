@@ -5,6 +5,7 @@ import {
   type DeviceStatus,
   EntitlementClaims,
   type EntitlementRecord,
+  effectiveMaxManagedUsers,
   type Feature,
   type IssueEntitlementResponse,
   type RevokeEntitlementResponse,
@@ -95,6 +96,9 @@ export async function issueForDevice(
         validFrom: subscriptions.validFrom,
         validUntil: subscriptions.validUntil,
         maxManagedUsers: subscriptions.maxManagedUsers,
+        // Add-on users (migration 0011, owner addition): the entitlement claim's max_managed_users
+        // must be the effective limit, base + add-ons — see effectiveMaxManagedUsers below.
+        addonUsers: subscriptions.addonUsers,
         featuresJson: subscriptions.featuresJson,
         offlineGraceDays: subscriptions.offlineGraceDays,
         renewalWarningDays: subscriptions.renewalWarningDays,
@@ -192,7 +196,8 @@ export async function issueForDevice(
     tenant_id: ctx.tenantId,
     device_id: ctx.deviceId,
     device_key_thumbprint: ctx.deviceKeyThumbprint,
-    max_managed_users: ctx.maxManagedUsers,
+    // Migration 0011 (owner addition): the claim carries the effective limit, base + add-ons.
+    max_managed_users: effectiveMaxManagedUsers(ctx.maxManagedUsers ?? 0, ctx.addonUsers ?? 0),
     valid_from: issuedAt,
     valid_until: new Date(validUntilMs).toISOString(),
     renewal_warning_days: ctx.renewalWarningDays,

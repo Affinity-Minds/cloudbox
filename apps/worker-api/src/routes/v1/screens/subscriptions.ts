@@ -1,11 +1,13 @@
 // Owner: WT-5. GET /api/v1/screens/subscriptions and /:id. Each is one D1 round trip (db.batch).
 // Days remaining and expiry are derived here at read time from "now"; nothing derived is stored.
-import type {
-  EntitlementHistoryItem,
-  SubscriptionDetailScreen,
-  SubscriptionDevice,
-  SubscriptionListItem,
-  SubscriptionsScreen,
+import {
+  type EntitlementHistoryItem,
+  effectiveMaxManagedUsers,
+  type SubscriptionDetailScreen,
+  type SubscriptionDevice,
+  type SubscriptionListItem,
+  type SubscriptionsScreen,
+  totalPriceAmount,
 } from "@cloudbox/contracts";
 import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -22,6 +24,10 @@ const subscriptionColumns = {
   tenantCode: tenants.publicCode,
   tenantName: tenants.displayName,
   planName: plans.name,
+  // Migration 0011 (owner addition): needed to derive effectiveMaxManagedUsers/totalPriceAmount.
+  planPriceAmount: plans.priceAmount,
+  planCurrency: plans.currency,
+  planAddonUserPriceAmount: plans.addonUserPriceAmount,
 };
 
 /** Devices of the given tenants with their highest generation (one grouped query, no N+1). */
@@ -77,6 +83,9 @@ function toListItem(
     tenantCode: string | null;
     tenantName: string | null;
     planName: string | null;
+    planPriceAmount: number | null;
+    planCurrency: string | null;
+    planAddonUserPriceAmount: number | null;
   },
   deviceRows: DeviceRow[],
   now: Date,
@@ -89,6 +98,16 @@ function toListItem(
     planName: row.planName ?? subscription.planCode,
     ...subscriptionLifecycle(subscription, now),
     devices: deviceRows.filter((d) => d.tenantId === subscription.tenantId).map(toDevice),
+    effectiveMaxManagedUsers: effectiveMaxManagedUsers(
+      subscription.maxManagedUsers,
+      subscription.addonUsers,
+    ),
+    totalPriceAmount: totalPriceAmount(
+      row.planPriceAmount ?? 0,
+      row.planAddonUserPriceAmount ?? 0,
+      subscription.addonUsers,
+    ),
+    currency: (row.planCurrency ?? "INR") as SubscriptionListItem["currency"],
   };
 }
 

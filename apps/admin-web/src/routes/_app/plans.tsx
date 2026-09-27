@@ -8,7 +8,7 @@ import { Plus, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { plansScreenQuery } from "@/api/plans";
 import { EmptyState, ErrorState, PageHeader } from "@/components/page";
-import { FeaturePill, formatTermDays, PlanStatusPill } from "@/components/plan-bits";
+import { FeaturePill, formatMoney, formatTermDays, PlanStatusPill } from "@/components/plan-bits";
 import { PlanFormSheet } from "@/components/plan-form-sheet";
 import { RetirePlanDialog } from "@/components/retire-plan-dialog";
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,24 @@ const columns = column.columns([
     header: "Warns",
     cell: (info) => <span className="tabular-nums">{info.getValue()} d</span>,
   }),
+  column.display({
+    id: "price",
+    header: "Price",
+    cell: ({ row }) => (
+      <span className="tabular-nums">
+        {formatMoney(row.original.priceAmount, row.original.currency)}
+        {row.original.maxAddonUsers > 0 ? (
+          <span className="text-muted-foreground">
+            {" "}
+            + {formatMoney(row.original.addonUserPriceAmount, row.original.currency)}/user (≤
+            {row.original.maxAddonUsers})
+          </span>
+        ) : null}
+      </span>
+    ),
+  }),
   column.accessor("termDays", {
-    header: "Term",
+    header: "Validity",
     cell: (info) => formatTermDays(info.getValue()),
   }),
   column.accessor("status", {

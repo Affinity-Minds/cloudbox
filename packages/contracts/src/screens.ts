@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AuditEntry } from "./common";
 import { Device } from "./devices";
 import { Membership } from "./memberships";
-import { Subscription } from "./subscriptions";
+import { SubscriptionWithPricing } from "./subscriptions";
 import { Tenant } from "./tenants";
 
 /** `GET /api/v1/screens/overview`: real counts only, zero when empty. */
@@ -26,7 +26,7 @@ export const TenantDetailScreen = z.object({
   tenant: Tenant,
   memberships: z.array(Membership),
   devices: z.array(Device),
-  subscriptions: z.array(Subscription),
+  subscriptions: z.array(SubscriptionWithPricing),
   /** Last 20 audit events for this entity, newest first. */
   auditEvents: z.array(AuditEntry),
 });

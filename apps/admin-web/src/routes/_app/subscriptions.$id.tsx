@@ -21,6 +21,7 @@ import {
   updateSubscription,
 } from "@/api/subscriptions";
 import { EmptyState, ErrorState, Section } from "@/components/page";
+import { formatMoney } from "@/components/plan-bits";
 import { StatusPill } from "@/components/status-pill";
 import {
   ExpiryPill,
@@ -200,7 +201,13 @@ function DetailBody({
               </span>,
             ],
             ["Offline grace", `${sub.offlineGraceDays} days`],
-            ["Managed users", `${sub.maxManagedUsers}`],
+            [
+              "Managed users",
+              sub.addonUsers > 0
+                ? `${sub.effectiveMaxManagedUsers} (${sub.maxManagedUsers} + ${sub.addonUsers} add-on)`
+                : `${sub.maxManagedUsers}`,
+            ],
+            ["Price (per term)", formatMoney(sub.totalPriceAmount, sub.currency)],
             ["Devices (plan)", `${data.plan.maxDevices}`],
             [
               "Features",
@@ -551,6 +558,10 @@ function EditDialog({ data, onClose }: { data: SubscriptionDetailScreen; onClose
   const [status, setStatus] = useState<SubscriptionStatus>(sub.status);
   const [validUntil, setValidUntil] = useState(toDateInput(sub.validUntil));
   const [warningDays, setWarningDays] = useState(String(sub.renewalWarningDays));
+  const [addonUsers, setAddonUsers] = useState(String(sub.addonUsers));
+  const addonUsersCount = Math.max(0, Number(addonUsers) || 0);
+  const effectiveMaxUsers = sub.maxManagedUsers + addonUsersCount;
+  const totalPrice = data.plan.priceAmount + addonUsersCount * data.plan.addonUserPriceAmount;
   const mutation = useMutation({
     mutationFn: () =>
       updateSubscription(sub.id, {
@@ -558,6 +569,7 @@ function EditDialog({ data, onClose }: { data: SubscriptionDetailScreen; onClose
         // A pending subscription has no end date until it is redeemed (WT-14).
         ...(validUntil ? { validUntil: fromDateInput(validUntil) } : {}),
         renewalWarningDays: Number(warningDays),
+        addonUsers: addonUsersCount,
       }),
     onSuccess: async () => {
       toast.success("Subscription updated");
@@ -613,6 +625,35 @@ function EditDialog({ data, onClose }: { data: SubscriptionDetailScreen; onClose
                 onChange={(e) => setWarningDays(e.target.value)}
               />
             </Field>
+          </div>
+          <Field>
+            <FieldLabel htmlFor="edit-addon-users">Add-on users</FieldLabel>
+            <Input
+              id="edit-addon-users"
+              type="number"
+              min={0}
+              max={data.plan.maxAddonUsers}
+              disabled={data.plan.maxAddonUsers === 0}
+              value={addonUsers}
+              onChange={(e) => setAddonUsers(e.target.value)}
+            />
+            <FieldDescription>
+              {data.plan.maxAddonUsers > 0
+                ? `Up to ${data.plan.maxAddonUsers}, at ${formatMoney(data.plan.addonUserPriceAmount, data.plan.currency)} each per term.`
+                : "This plan does not offer add-on users."}
+            </FieldDescription>
+          </Field>
+          <div className="rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Effective managed users</span>
+              <span className="tabular-nums font-medium">{effectiveMaxUsers}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total price (per term)</span>
+              <span className="tabular-nums font-medium">
+                {formatMoney(totalPrice, data.plan.currency)}
+              </span>
+            </div>
           </div>
         </FieldGroup>
         <DialogFooter>
