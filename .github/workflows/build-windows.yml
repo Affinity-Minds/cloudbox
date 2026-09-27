@@ -62,6 +62,7 @@ jobs:
       # Evidence only: Status against sample pipe documents, Setup welcome screen, on the runner's desktop.
       - name: UI screenshots (evidence)
         continue-on-error: true
+        timeout-minutes: 5
         shell: pwsh
         run: ./apps/cloudbox-status/screenshots.ps1 -Publish publish -Out screenshots
 
