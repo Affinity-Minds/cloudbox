@@ -1,6 +1,7 @@
 // Owner: WT-3. Module `agent`, mounted at `/api/v1/agent` in routes/v1/index.ts.
-// Routes: POST /enroll (unauthenticated, token-gated), POST /heartbeat, GET /entitlement (Bearer
-// device-token via requireDevice(), which 401s once revoked), POST /uninstalled (Bearer
+// Routes: POST /enroll (unauthenticated, token-gated), POST /heartbeat, GET /entitlement, GET
+// /signing-keys (WT-10, additive) (Bearer device-token via requireDevice(), which 401s once
+// revoked), POST /uninstalled (Bearer
 // device-token via its own idempotent lookup — see below).
 //
 // Agent API contract is fixed (packages/contracts/src/agent.ts) — the Windows agent (WT-4) is
@@ -21,7 +22,13 @@ import { calculateJwkThumbprint } from "jose";
 import { audit } from "../../audit";
 import { isUniqueConstraintError, randomOpaqueToken, sha256Hex } from "../../crypto";
 import { createDb, type Db } from "../../db/client";
-import { deviceCredentials, devices, enrollmentTokens, tenants } from "../../db/schema";
+import {
+  deviceCredentials,
+  devices,
+  enrollmentTokens,
+  signingKeys,
+  tenants,
+} from "../../db/schema";
 import { checkEnrollRateLimit } from "../../devices/enroll-rate-limit";
 import { nextDeviceName } from "../../devices/naming";
 import { bearerToken, requireDevice, resolveDevice } from "../../devices/require-device";
@@ -29,6 +36,7 @@ import { bearerToken, requireDevice, resolveDevice } from "../../devices/require
 // generation, or null if there is none or the highest one is revoked (never falls back to an
 // older generation). Heartbeat and GET /entitlement both read through this, not the table directly.
 import { currentEntitlementForDevice } from "../../entitlement/service";
+import { ensureSigningKey, SigningKeyError } from "../../entitlement/signing-key";
 import type { AppDevice, AppEnv, Bindings } from "../../env";
 import { newId, nowIso } from "../../ids";
 // WT-9 (ADR 0007): mints this server's NetBird setup key at activation; revokes its peer/key on
@@ -310,6 +318,40 @@ agent.get("/entitlement", requireDevice(), async (c) => {
   c.header("Cache-Control", "no-store"); // the compact JWE is a confidential artefact
   if (!entitlement) return c.json({ error: "not_found" }, 404);
   return c.json({ entitlement: entitlement.token, generation: entitlement.generation });
+});
+
+// WT-10 (additive): the server's public entitlement-signing keys, which the Windows agent pins at
+// enrollment (and re-fetches only when a token names a kid it has not pinned: additive rotation,
+// ADR 0004). Public JWKs only; retired keys are included so leases signed before a rotation still
+// verify until they lapse. The current key is recorded first (idempotent, as issuance does).
+agent.get("/signing-keys", requireDevice(), async (c) => {
+  const db = createDb(c.env.DB);
+  try {
+    await ensureSigningKey(c.env, db);
+  } catch (error) {
+    if (!(error instanceof SigningKeyError)) throw error; // no secret yet: serve what is recorded
+  }
+  const rows = await db
+    .select({
+      kid: signingKeys.kid,
+      alg: signingKeys.alg,
+      status: signingKeys.status,
+      publicJwk: signingKeys.publicJwk,
+    })
+    .from(signingKeys);
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    keys: rows.map((row) => {
+      // Public members only, whatever the stored JSON holds.
+      const { kty, crv, x, y } = JSON.parse(row.publicJwk) as Record<string, string>;
+      return {
+        kid: row.kid,
+        alg: row.alg,
+        status: row.status,
+        jwk: { kty, crv, x, y, kid: row.kid, alg: row.alg, use: "sig" },
+      };
+    }),
+  });
 });
 
 // Not requireDevice(): a retried uninstall call must still 204 after the device (and its

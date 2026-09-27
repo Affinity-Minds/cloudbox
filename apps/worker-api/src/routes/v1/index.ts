@@ -16,6 +16,7 @@ import memberships from "./memberships";
 import realtime from "./realtime";
 import screens from "./screens";
 import selfService from "./self-service";
+import setup from "./setup";
 import staff from "./staff";
 import subscriptions, { plans, tenantSubscriptions } from "./subscriptions";
 import tenants from "./tenants";
@@ -50,5 +51,6 @@ v1.route("/realtime", realtime); // WT-16
 v1.route("/screens", screens); // WT-0 (+ one line per screen owner in screens/index.ts)
 v1.route("/audit", audit); // WT-0
 v1.route("/", selfService); // WT-14: /onboarding/*, /connect/*, /license-keys/*
+v1.route("/onboarding/setup", setup); // WT-10: Server Setup sign-in hand-off page
 
 export default v1;

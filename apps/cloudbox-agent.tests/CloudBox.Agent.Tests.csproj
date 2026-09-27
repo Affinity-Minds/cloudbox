@@ -19,4 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\cloudbox-agent\CloudBox.Agent.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- WT-5's committed entitlement test vector (throwaway keys): the .NET verifier's acceptance test. -->
+    <None Include="..\..\packages\licensing-contracts\test\vectors\v1.json" Link="vectors\v1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

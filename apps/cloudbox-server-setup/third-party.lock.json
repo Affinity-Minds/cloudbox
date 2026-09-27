@@ -1,0 +1,27 @@
+{
+  "$comment": "Third-party binaries embedded in CloudBox.Server.Setup.exe. CI downloads each from its pinned URL, refuses any SHA-256 mismatch, and embeds it. Binaries are never committed. Update: change url + sha256 together in one reviewed commit.",
+  "components": [
+    {
+      "name": "rdpWrapper",
+      "payload": "vendor/rdpWrapper_x64.exe",
+      "upstream": "https://github.com/sergiye/rdpWrapper",
+      "tag": "2.15",
+      "released": "2026-06-12",
+      "url": "https://github.com/sergiye/rdpWrapper/releases/download/2.15/rdpWrapper_x64.exe",
+      "size": 454376,
+      "sha256": "bcd0286dbf22bf38fa18010598a19fff476b82150c0199741eb3af37b699e048",
+      "licence": "No OSS licence in the upstream repository. Commercial bundling by direct permission of the author (Sergiy Egoshyn); evidence in the private legal records (spec §4.7). Bundled inside it: TermWrap, UmWrap, EndpWrap, RDPWrapOffsetFinder (llccd, MIT); rdpwrap.dll/ini (stascorp, Apache-2.0); Zydis (zyantific, MIT).",
+      "decision": "docs/decisions/0012-rdp-runtime-sergiye-rdpwrapper.md"
+    },
+    {
+      "name": "Microsoft Visual C++ 2015-2022 Redistributable (x64)",
+      "payload": "vendor/vc_redist.x64.exe",
+      "upstream": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+      "url": "https://download.visualstudio.microsoft.com/download/pr/bd1c8d9d-ba95-4eee-bc6e-df1fcc876373/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe",
+      "size": 25635768,
+      "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b",
+      "licence": "Microsoft Visual C++ Redistributable licence terms (redistribution permitted with an application).",
+      "decision": "Required by TermWrap (see rdpWrapper upstream README); retained on uninstall because other software shares it."
+    }
+  ]
+}

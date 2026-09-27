@@ -4,19 +4,24 @@ using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.ServiceProcess;
+using System.Text;
 using System.Text.Json.Nodes;
 using CloudBox.Agent.Identity;
+using CloudBox.Agent.ManagedUsers;
+using CloudBox.Agent.Rdp;
 using Microsoft.Win32;
 
 namespace CloudBox.Agent.Install;
 
 public static class WindowsSteps
 {
-    public static IReadOnlyList<IInstallStep> Create(IDeviceKeyStore keys) =>
+    /// <param name="keys">Device key store (cng_key entries).</param>
+    /// <param name="resources">Setup's embedded payload by name (file entries with <c>spec.resource</c>); null elsewhere.</param>
+    public static IReadOnlyList<IInstallStep> Create(IDeviceKeyStore keys, Func<string, Stream?>? resources = null) =>
     [
         new ServiceStep(),
         new DirectoryStep(),
-        new FileStep(),
+        new FileStep(resources),
         new RegistryKeyStep(Kinds.RegistryKey),
         new RegistryKeyStep(Kinds.ArpEntry),
         new RegistryValueStep(Kinds.RegistryValue),
@@ -27,7 +32,8 @@ public static class WindowsSteps
         new ScheduledTaskStep(),
         new CngKeyStep(keys),
         new EventLogSourceStep(),
-        new ThirdPartyComponentStep(),
+        new ThirdPartyComponentStep(new RdpRuntimeComponent(), new DefenderExclusionComponent(), new VcRedistComponent()),
+        new LocalGroupStep(),
     ];
 
     internal static JsonObject Existed(bool existed) => new() { ["existed"] = existed };
@@ -180,8 +186,8 @@ public sealed class DirectoryStep : IInstallStep
     public bool Remains(ManifestEntry e) => !e.PriorExisted && Directory.Exists(e.Id);
 }
 
-/// <summary>File. spec: { source }.</summary>
-public sealed class FileStep : IInstallStep
+/// <summary>File. spec: { source } (a path) or { resource } (a name in Setup's embedded payload).</summary>
+public sealed class FileStep(Func<string, Stream?>? resources = null) : IInstallStep
 {
     public string Kind => Kinds.File;
 
@@ -189,7 +195,17 @@ public sealed class FileStep : IInstallStep
 
     public void Apply(ManifestEntry e)
     {
-        var source = e.Spec?["source"]?.GetValue<string>() ?? throw new ArgumentException("file spec needs source");
+        if (e.Spec?["resource"]?.GetValue<string>() is { } name)
+        {
+            using var stream = resources?.Invoke(name)
+                               ?? throw new InvalidOperationException($"Setup payload '{name}' is not available in this build");
+            var tmp = e.Id + ".partial";
+            using (var target = File.Create(tmp)) stream.CopyTo(target);
+            File.Move(tmp, e.Id, overwrite: true);
+            return;
+        }
+
+        var source = e.Spec?["source"]?.GetValue<string>() ?? throw new ArgumentException("file spec needs source or resource");
         if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(e.Id), StringComparison.OrdinalIgnoreCase))
         {
             File.Copy(source, e.Id, overwrite: true);
@@ -397,33 +413,68 @@ public sealed class FirewallRuleStep : IInstallStep
     public bool Remains(ManifestEntry e) => !e.PriorExisted && Exists(e.Id);
 }
 
-/// <summary>Local user. Created disabled without a password; the owning slice sets credentials through its own
-/// reversible steps. Passwords never enter the manifest.</summary>
-public sealed class LocalUserStep : IInstallStep
+/// <summary>Local user via System.DirectoryServices.AccountManagement. Created disabled with a throwaway random password;
+/// the owning slice (managed users) sets the real credential and enables it. Passwords never enter the manifest.</summary>
+public sealed class LocalUserStep(ILocalAccounts? accounts = null) : IInstallStep
 {
+    private readonly ILocalAccounts _accounts = accounts ?? new WindowsLocalAccounts();
+
     public string Kind => Kinds.LocalUser;
 
-    private static bool Exists(string name) => ProcessRunner.Run("net.exe", ["user", name]).ExitCode == 0;
+    public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(_accounts.UserExists(id));
 
-    public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(Exists(id));
-
-    public void Apply(ManifestEntry e) =>
-        ProcessRunner.RunChecked("net.exe", "user", e.Id, "/add", "/active:no", "/passwordreq:yes");
+    public void Apply(ManifestEntry e)
+    {
+        if (!_accounts.UserExists(e.Id))
+        {
+            WindowsLocalAccounts.CreateUser(e.Id, e.Spec?["description"]?.GetValue<string>() ?? "CloudBox");
+        }
+    }
 
     public RevertOutcome Revert(ManifestEntry e, RevertContext context)
     {
         if (e.PriorExisted) return RevertOutcome.Restored;
-        if (!Exists(e.Id)) return RevertOutcome.Missing;
-        ProcessRunner.RunChecked("net.exe", "user", e.Id, "/delete");
+        if (!_accounts.UserExists(e.Id)) return RevertOutcome.Missing;
+        WindowsLocalAccounts.DeleteUser(e.Id); // The profile folder (customer work) is left in place.
         return RevertOutcome.Removed;
     }
 
-    public bool Remains(ManifestEntry e) => !e.PriorExisted && Exists(e.Id);
+    public bool Remains(ManifestEntry e) => !e.PriorExisted && _accounts.UserExists(e.Id);
+}
+
+/// <summary>Local group (kind local_group), e.g. CloudBoxUsers. spec: { description }.</summary>
+public sealed class LocalGroupStep(ILocalAccounts? accounts = null) : IInstallStep
+{
+    private readonly ILocalAccounts _accounts = accounts ?? new WindowsLocalAccounts();
+
+    public string Kind => Kinds.LocalGroup;
+
+    public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(_accounts.GroupExists(id));
+
+    public void Apply(ManifestEntry e)
+    {
+        if (!_accounts.GroupExists(e.Id))
+        {
+            WindowsLocalAccounts.CreateGroup(e.Id, e.Spec?["description"]?.GetValue<string>() ?? "CloudBox");
+        }
+    }
+
+    public RevertOutcome Revert(ManifestEntry e, RevertContext context)
+    {
+        if (e.PriorExisted) return RevertOutcome.Restored;
+        if (!_accounts.GroupExists(e.Id)) return RevertOutcome.Missing;
+        WindowsLocalAccounts.DeleteGroup(e.Id);
+        return RevertOutcome.Removed;
+    }
+
+    public bool Remains(ManifestEntry e) => !e.PriorExisted && _accounts.GroupExists(e.Id);
 }
 
 /// <summary>Local group membership. id = "Group|User".</summary>
-public sealed class LocalGroupMembershipStep : IInstallStep
+public sealed class LocalGroupMembershipStep(ILocalAccounts? accounts = null) : IInstallStep
 {
+    private readonly ILocalAccounts _accounts = accounts ?? new WindowsLocalAccounts();
+
     public string Kind => Kinds.LocalGroupMembership;
 
     private static (string Group, string User) Split(string id)
@@ -432,11 +483,10 @@ public sealed class LocalGroupMembershipStep : IInstallStep
         return i < 0 ? throw new ArgumentException($"membership id must be 'group|user': {id}") : (id[..i], id[(i + 1)..]);
     }
 
-    private static bool IsMember(string id)
+    private bool IsMember(string id)
     {
         var (group, user) = Split(id);
-        var r = ProcessRunner.Run("net.exe", ["localgroup", group]);
-        return r.ExitCode == 0 && r.Output.Split('\n').Any(l => string.Equals(l.Trim(), user, StringComparison.OrdinalIgnoreCase));
+        return _accounts.IsMember(group, user);
     }
 
     public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(IsMember(id));
@@ -444,7 +494,7 @@ public sealed class LocalGroupMembershipStep : IInstallStep
     public void Apply(ManifestEntry e)
     {
         var (group, user) = Split(e.Id);
-        ProcessRunner.RunChecked("net.exe", "localgroup", group, user, "/add");
+        WindowsLocalAccounts.AddMember(group, user);
     }
 
     public RevertOutcome Revert(ManifestEntry e, RevertContext context)
@@ -452,14 +502,21 @@ public sealed class LocalGroupMembershipStep : IInstallStep
         if (e.PriorExisted) return RevertOutcome.Restored;
         if (!IsMember(e.Id)) return RevertOutcome.Missing;
         var (group, user) = Split(e.Id);
-        ProcessRunner.RunChecked("net.exe", "localgroup", group, user, "/delete");
+        WindowsLocalAccounts.RemoveMember(group, user);
         return RevertOutcome.Removed;
     }
 
-    public bool Remains(ManifestEntry e) => !e.PriorExisted && IsMember(e.Id);
+    public bool Remains(ManifestEntry e)
+    {
+        if (e.PriorExisted) return false;
+        var (group, user) = Split(e.Id);
+        // A deleted account is no longer a member of anything.
+        return _accounts.GroupExists(group) && _accounts.UserExists(user) && _accounts.IsMember(group, user);
+    }
 }
 
-/// <summary>Scheduled task via schtasks. id = task path (e.g. \CloudBox\Status); spec: { args: [...] } for /create.</summary>
+/// <summary>Scheduled task via schtasks. id = task name (root folder, so no empty task folder is left behind);
+/// spec: { xml: "<Task …>" } (Task Scheduler XML, no credentials) or { args: [...] } for /create.</summary>
 public sealed class ScheduledTaskStep : IInstallStep
 {
     public string Kind => Kinds.ScheduledTask;
@@ -468,8 +525,26 @@ public sealed class ScheduledTaskStep : IInstallStep
 
     public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(Exists(id));
 
-    public void Apply(ManifestEntry e) =>
+    public void Apply(ManifestEntry e)
+    {
+        if (e.Spec?["xml"]?.GetValue<string>() is { } xml)
+        {
+            var file = Path.Combine(Path.GetTempPath(), $"cloudbox-task-{Guid.NewGuid():N}.xml");
+            File.WriteAllText(file, xml, Encoding.Unicode);
+            try
+            {
+                ProcessRunner.RunChecked("schtasks.exe", "/create", "/tn", e.Id, "/xml", file, "/f");
+            }
+            finally
+            {
+                File.Delete(file);
+            }
+
+            return;
+        }
+
         ProcessRunner.RunChecked("schtasks.exe", ["/create", "/tn", e.Id, .. WindowsSteps.Args(e.Spec), "/f"]);
+    }
 
     public RevertOutcome Revert(ManifestEntry e, RevertContext context)
     {
@@ -526,22 +601,45 @@ public sealed class EventLogSourceStep : IInstallStep
     public bool Remains(ManifestEntry e) => !e.PriorExisted && EventLog.SourceExists(e.Id);
 }
 
-/// <summary>Bundled third-party component (RDP Wrapper, Netclient, ...). spec: { install: {file, args[]},
-/// uninstall: {file, args[]}, probe: path-or-registry-key proving presence }.</summary>
-public sealed class ThirdPartyComponentStep : IInstallStep
+/// <summary>Handler for a named third-party component entry (RDP runtime, Defender exclusion, VC++ runtime, ...).</summary>
+public interface IComponentHandler
+{
+    bool Handles(string id);
+
+    bool Present(string id, JsonObject? spec);
+
+    void Install(string id, JsonObject? spec);
+
+    void Uninstall(string id, JsonObject? spec);
+
+    /// <summary>Shared prerequisites (VC++ runtime) stay installed on uninstall: revert reports "restored" and
+    /// verify-clean does not count them.</summary>
+    bool RetainOnUninstall => false;
+}
+
+/// <summary>Bundled third-party component. A registered <see cref="IComponentHandler"/> owns ids it handles; any other
+/// id uses spec: { install: {file, args[]}, uninstall: {file, args[]}, probe: path-or-registry-key proving presence }.</summary>
+public sealed class ThirdPartyComponentStep(params IComponentHandler[] handlers) : IInstallStep
 {
     public string Kind => Kinds.ThirdPartyComponent;
 
-    private static bool Present(JsonObject? spec)
+    private IComponentHandler? Handler(string id) => handlers.FirstOrDefault(h => h.Handles(id));
+
+    private bool Present(string id, JsonObject? spec)
     {
+        if (Handler(id) is { } h) return h.Present(id, spec);
         var probe = spec?["probe"]?.GetValue<string>();
         if (string.IsNullOrEmpty(probe)) return false;
         return probe.StartsWith("HK", StringComparison.OrdinalIgnoreCase) ? Reg.KeyExists(probe) : Path.Exists(probe);
     }
 
-    public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(Present(spec));
+    public JsonObject CapturePriorState(string id, JsonObject? spec) => WindowsSteps.Existed(Present(id, spec));
 
-    public void Apply(ManifestEntry e) => RunCommand(e.Spec?["install"] as JsonObject);
+    public void Apply(ManifestEntry e)
+    {
+        if (Handler(e.Id) is { } h) h.Install(e.Id, e.Spec);
+        else RunCommand(e.Spec?["install"] as JsonObject);
+    }
 
     private static void RunCommand(JsonObject? cmd)
     {
@@ -552,10 +650,14 @@ public sealed class ThirdPartyComponentStep : IInstallStep
     public RevertOutcome Revert(ManifestEntry e, RevertContext context)
     {
         if (e.PriorExisted) return RevertOutcome.Restored;
-        if (!Present(e.Spec)) return RevertOutcome.Missing;
-        RunCommand(e.Spec?["uninstall"] as JsonObject);
+        var h = Handler(e.Id);
+        if (h?.RetainOnUninstall == true) return RevertOutcome.Restored;
+        if (!Present(e.Id, e.Spec)) return RevertOutcome.Missing;
+        if (h is not null) h.Uninstall(e.Id, e.Spec);
+        else RunCommand(e.Spec?["uninstall"] as JsonObject);
         return RevertOutcome.Removed;
     }
 
-    public bool Remains(ManifestEntry e) => !e.PriorExisted && Present(e.Spec);
+    public bool Remains(ManifestEntry e) =>
+        !e.PriorExisted && Handler(e.Id)?.RetainOnUninstall != true && Present(e.Id, e.Spec);
 }

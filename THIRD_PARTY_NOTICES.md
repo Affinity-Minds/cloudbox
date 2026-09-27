@@ -58,7 +58,7 @@ To verify: Exact license during Phase 6 implementation before final release.
 
 ### RDP Wrapper (v2.15, licensed)
 
-**Repository:** https://github.com/stascorp/rdpwrap (archived); maintained fork: https://github.com/sergiye/rdpwrap  
+**Repository:** https://github.com/sergiye/rdpWrapper (release 2.15, 2026-06-12; asset `rdpWrapper_x64.exe`, SHA-256 pinned in `apps/cloudbox-server-setup/third-party.lock.json`, ADR 0012)  
 **License:** Commercial — **direct permission from author Sergiy Egoshyn**  
 **Usage:** Embedded in CloudBox.Server.Setup.exe; silent runtime for concurrent RDP sessions  
 **Bundled:** Yes (in Windows binary)
@@ -67,17 +67,17 @@ Verification (2026-09-27): Direct commercial license agreement with author. Not 
 
 ### RDP Wrapper bundled components
 
-Verified (2026-09-27) in rdpWrapper repository and embedded binaries:
+Verified (2026-09-27) in rdpWrapper repository and embedded binaries (binary names/extensions per WT-10's build output):
 
 | Binary | Author | License | Purpose | Bundled |
 |--------|--------|---------|---------|---------|
-| `TermWrap.exe` | llccd | MIT | Terminal wrapper for RDP sessions | Yes |
-| `UmWrap.exe` | llccd | MIT | User mode wrapper utility | Yes |
-| `EndpWrap.exe` | llccd | MIT | Endpoint wrapper | Yes |
-| `RDPWrapOffsetFinder.exe` | llccd | MIT | Binary offset discovery tool (build-time) | No |
+| `TermWrap.dll` | llccd | MIT | Terminal wrapper for RDP concurrent session support | Yes |
+| `UmWrap.dll` | llccd | MIT | User mode wrapper utility | Yes |
+| `EndpWrap.dll` | llccd | MIT | Endpoint wrapper | Yes |
+| `RDPWrapOffsetFinder.exe` | llccd | MIT | Binary offset discovery tool (build-time only) | No |
 | `rdpwrap.dll` | stascorp | Apache-2.0 | Core RDP Wrapper runtime library | Yes |
-| `rdpwrap.ini` | stascorp | Apache-2.0 | Configuration and offset database | Yes |
-| Zydis disassembler | zyantific | MIT | Binary analysis utility (build-time) | No |
+| `rdpwrap.ini` | stascorp | Apache-2.0 | Configuration file and offset database | Yes |
+| Zydis disassembler | zyantific | MIT | Binary analysis utility (bundled, build-time use) | No |
 
 Notes:
 - MIT-licensed components freely redistributable.
@@ -175,6 +175,23 @@ Notes:
 **Source:** `.csproj` files in `apps/cloudbox-agent/`, `apps/cloudbox-server-setup/`, etc.  
 **Verified:** 2026-09-27 from .csproj files  
 **Scope:** Production runtime dependencies only
+
+### CloudBox.Server.Setup (installer, Status, local verifier)
+
+**Added by WT-10 (Server Setup, Status, local verifier):**
+- `jose-jwt` 5.3.0 (MIT) — entitlement JWE decrypt (RSA-OAEP-256/A256GCM; Microsoft.IdentityModel lacks RSA-OAEP-256)
+- `Microsoft.IdentityModel.JsonWebTokens` 8.23.0 (MIT) — entitlement ES256 JWS verification
+- `System.DirectoryServices.AccountManagement` 10.0.12 (MIT, .NET) — managed local users
+- `QRCoder` 1.8.0 (MIT) — CloudBox Status renewal QR
+- `Microsoft.Web.WebView2` 1.0.4191.47 (Microsoft WebView2 SDK licence, redistributable) — Setup sign-up page
+
+**Expected major packages (not exhaustive):**
+- `Microsoft.Extensions.Hosting.WindowsServices` (Microsoft, proprietary)
+- `Serilog` (Apache-2.0)
+- `System.IdentityModel.Tokens.Jwt` (Microsoft, proprietary)
+- `Microsoft.IdentityModel.Tokens` (Microsoft, proprietary)
+- Windows Installer SDK (Microsoft, proprietary)
+- and transitive dependencies
 
 ### CloudBox.Agent (Windows service)
 

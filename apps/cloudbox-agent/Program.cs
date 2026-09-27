@@ -49,10 +49,13 @@ try
     builder.Services.AddSingleton<ILocalStateStore>(_ => FileStateStore.CreateDefault());
     builder.Services.AddSingleton(_ => new AgentApiClient(AgentApiClient.CreateHttpClient()));
     builder.Services.AddSingleton(sp =>
+        ServerRuntime.CreateDefault(sp.GetRequiredService<IDeviceKeyStore>(), sp.GetRequiredService<AgentApiClient>()));
+    builder.Services.AddSingleton(sp =>
     {
         var api = sp.GetRequiredService<AgentApiClient>();
         return new HeartbeatCycle(sp.GetRequiredService<ILocalStateStore>(), sp.GetRequiredService<IDeviceKeyStore>(),
-            api, api, sp.GetRequiredService<AgentStatus>(), TimeProvider.System, Random.Shared);
+            api, api, sp.GetRequiredService<AgentStatus>(), TimeProvider.System, Random.Shared,
+            server: sp.GetRequiredService<ServerRuntime>());
     });
     builder.Services.AddHostedService<AgentWorker>();
     builder.Services.AddHostedService(sp => new StatusPipeServer(sp.GetRequiredService<AgentStatus>()));
