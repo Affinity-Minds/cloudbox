@@ -13,11 +13,19 @@ same-LAN network only (`LanDirect`; the real private overlay is WT-9's `NetBird`
 ## Current status
 
 - Branch `wt/p6-connect-client`, parent `phase-2/devices` (based on `main` 33862a5).
-- Cloud side (`apps/worker-api`, `packages/contracts`): `pnpm run verify` — **green, exit 0** (see
-  Tests). Fully verified locally; this box has Node/pnpm but no `dotnet`.
-- Windows client (`apps/cloudbox-connect`, `apps/cloudbox-connect.tests`): **not yet built or run
-  anywhere** — this box has no .NET SDK. Draft PR opened specifically to get a first
-  `Build Connect client` CI run; iterate from there (see Safe next action / Known failures).
+- Draft PR: https://github.com/Affinity-Minds/cloudbox/pull/28.
+- Cloud side (`apps/worker-api`, `packages/contracts`): `pnpm run verify` — **green, exit 0**, run
+  locally on this box (no `dotnet` here, but Node/pnpm work fine) and confirmed again by CI's `web`
+  job on the PR.
+- Windows client (`apps/cloudbox-connect`, `apps/cloudbox-connect.tests`): **green on CI** —
+  `Build Connect client` (https://github.com/Affinity-Minds/cloudbox/actions/runs/36317651445):
+  build, 35/35 tests, publish, artifact `CloudBox.Connect-win-x64` uploaded. `ci.yml`'s
+  `windows-solution` job (`dotnet build CloudBox.slnx`) also green, so `build-windows.yml`
+  (WT-10's workflow, untouched by this branch) still builds cleanly with `cloudbox-connect` present
+  in the solution.
+- This box has no .NET SDK, so nothing here was compiled locally — the client was iterated purely
+  against CI logs (`gh run view --log-failed`); see Known failures/deviations for exactly what that
+  first round of failures was and how it was fixed.
 
 ## Commits ready for merge
 
@@ -134,10 +142,15 @@ vitest run                Test Files  35 passed (35)  |  Tests  643 passed (643)
 vite build (admin-web) + wrangler deploy --dry-run (worker-api) — both clean
 ```
 
-### Windows client (`apps/cloudbox-connect`, `apps/cloudbox-connect.tests`) — **not run yet**
+### Windows client (`apps/cloudbox-connect`, `apps/cloudbox-connect.tests`) — **green on CI**
 
-No `dotnet` on this box (per the brief). 30 xUnit tests written, covering exactly what the brief
-asked for:
+No `dotnet` on this box (per the brief), so this was iterated purely against
+`Build Connect client` run logs. Final green run:
+https://github.com/Affinity-Minds/cloudbox/actions/runs/36317651445 —
+`dotnet build` (app + tests, 0 warnings/errors each), `dotnet test`: **Total tests: 35, Passed:
+35**, `dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true`, artifact
+`CloudBox.Connect-win-x64` (the exe plus WPF's own native interop DLLs — see Known
+failures/deviations below). 35 xUnit tests, covering exactly what the brief asked for:
 - **Sign-in flow state machine** (`SignInFlowTests.cs`): send-code normalises and moves to the code
   screen; empty fields refused client-side; resend blocked until the 30 s cooldown elapses; verify
   success persists the session and immediately loads devices using the stored cookie; every verify
@@ -166,29 +179,50 @@ asked for:
   asking the cloud for a credential; a 409 from the session endpoint surfaces the same plain-English
   message either way.
 
-**None of this has been compiled.** The code was written against `apps/cloudbox-agent`'s established
-patterns (DPAPI store, `Json` options, `ProcessRunner`-style launcher abstraction, xUnit + fakes
-project shape) and cross-checked by hand against the actual contract files
-(`packages/contracts/src/connect.ts`, `devices.ts`), but a first `dotnet build` is very likely to
-surface real compile errors (namespaces, nullable-reference warnings promoted to errors by
-`TreatWarningsAsErrors`, WPF XAML/code-behind name mismatches). That is expected — see Safe next
-action.
+The code was written against `apps/cloudbox-agent`'s established patterns (DPAPI store, `Json`
+options, `ProcessRunner`-style launcher abstraction, xUnit + fakes project shape) and cross-checked
+by hand against the actual contract files (`packages/contracts/src/connect.ts`, `devices.ts`), then
+iterated to green purely from `gh run view --log-failed` output (three rounds — see deviations
+below); nothing was compiled or run locally.
 
 ## Demo path
 
-`docs/runbooks/connect-lab.md` (two Windows PCs on one LAN). Not run — needs the artifact to exist
-first (see Known failures) and, per the brief, a second physical Windows machine.
+`docs/runbooks/connect-lab.md` (two Windows PCs on one LAN). Not run — needs a second physical
+Windows machine, and (see Known failures) two things WT-10 hasn't built yet.
+
+## Deviations from the literal brief
+
+- **RDP launch mechanics.** The brief says "launch `mstsc.exe /v:<address> /f` with an `.rdp` file
+  that has no password." Read literally that's two different invocations (a `/v:` flag *and* a
+  file); this build does the file-based form only — `full address:s:<address>` inside the `.rdp`
+  file, launched as `mstsc.exe <file> /f`, no separate `/v:` — because `mstsc` resolves the
+  Credential Manager entry by matching the file's `full address` value, and passing both would be
+  redundant at best, contradictory at worst if they ever disagreed. The hard constraint (no password
+  on the command line or in the file) is met either way.
+- **`System.Security.Cryptography.ProtectedData` package reference.** Removed after the first CI
+  round: for `net10.0-windows`, .NET 10 ships it in the shared framework, and an explicit
+  `PackageReference` is now a warning-as-error (`NU1510`). Worth flagging for WT-10/WT-4: the Agent's
+  `.csproj` still references it explicitly at a pinned version and may hit the same error on its
+  next CI run.
+- **Explicit `GlobalUsings.cs`** in both the app and its test project. The Windows Desktop SDK's
+  (`UseWPF`) implicit-usings set turned out to differ from the plain `Microsoft.NET.Sdk` one
+  `apps/cloudbox-agent` relies on — `System.Net.Http` wasn't implicit, breaking `HttpClient` et al.
+  Rather than guess the exact WPF list, the needed BCL namespaces are declared once, by hand.
+- **Publish artifact is a folder, not a single exe.** WPF cannot bundle its own native interop DLLs
+  (`D3DCompiler_47_cor3.dll`, `PresentationNative_cor3.dll`, `wpfgfx_cor3.dll`, `PenImc_cor3.dll`,
+  `vcruntime140_cor3.dll`) into `PublishSingleFile` output — a documented .NET/WPF limitation, not a
+  build misconfiguration. `CloudBox.Connect-win-x64` is the whole `publish/` folder; the runbook
+  says so.
 
 ## Known failures / what is unproven without hardware
 
 | Item | Status |
 |---|---|
-| `dotnet build`/`dotnet test` for `apps/cloudbox-connect(.tests)` | **Not run anywhere yet.** First CI run is the first real signal. |
-| WPF XAML compiles and binds correctly (`MainWindow.xaml` ↔ `.xaml.cs` names/types) | Not run. Highest-risk area given no local Windows/dotnet. |
 | `mstsc` actually authenticates silently against a real `TERMSRV/<address>` target | Needs a second physical machine (spec's own acceptance bar, §61) — not provable in CI. |
 | The Agent applying `SET_MANAGED_USER_PASSWORD` | **Not implemented anywhere.** This worktree only defines and queues the command (ADR 0013); WT-10 owns applying it. Until then, `mstsc` will only skip the credential prompt if the managed account's real Windows password happens to already match what Connect just wrote to Credential Manager. |
 | The Agent reporting `network.lan_address` | **Not implemented anywhere either.** `LanDirect` reads a field nobody populates yet; the runbook includes a manual SQL seed step to unblock the demo in the meantime. |
 | Two simultaneous independent RDP sessions (spec §61) | Cloud side is ready (each grant gets its own slot); unproven end-to-end without hardware and without the two items above. |
+| WPF UI actually rendering/looking right (spec §59: "Visual work is not accepted without actual render/screenshot inspection") | **Not verified.** CI proves it compiles and the underlying logic classes are correct; nobody has looked at the running window. No screenshot exists under `docs/evidence/` for this reason — flagging rather than claiming done. |
 
 ## Decisions needed
 
@@ -214,14 +248,19 @@ first (see Known failures) and, per the brief, a second physical Windows machine
 
 ## Safe next action
 
-This PR is opened as a **draft** specifically so the `Build Connect client` workflow runs for the
-first time. The very next action is: read that run's log (`gh run view --log-failed`), fix whatever
-the compiler says (expect WPF/XAML and nullable-reference issues first), push, and repeat until
-green — then move on to a real two-machine lab run using `docs/runbooks/connect-lab.md`, which
-itself is blocked on WT-10's two items above.
+CI is green (cloud + Windows client); the PR is left as a **draft** because the demo path is
+genuinely blocked on hardware and on WT-10's two outstanding items, not because anything here is
+unfinished. The safe next action is for WT-10 to implement `SET_MANAGED_USER_PASSWORD` and
+`network.lan_address` reporting, and for the owner to run `docs/runbooks/connect-lab.md` on two
+physical machines and paste the evidence back into this handoff's tables — only then should the PR
+move out of draft.
 
 ## Appendix: Evidence
 
-- Cloud test output: captured above (this handoff), reproducible with `pnpm run verify` from the
-  repo root.
-- Windows CI run: see the PR's checks tab once `Build Connect client` has run at least once.
+- Cloud: `pnpm run verify` output captured above (reproducible from the repo root); confirmed again
+  by CI's `web` job on the PR.
+- Windows: `Build Connect client` run https://github.com/Affinity-Minds/cloudbox/actions/runs/36317651445
+  (build 0/0 warnings/errors, 35/35 tests, artifact `CloudBox.Connect-win-x64`); `windows-solution`
+  (`ci.yml`) green on the same commit.
+- No `docs/evidence/wt-p6-connect-client/` screenshot exists — the UI has never been visually
+  inspected (see Known failures). Physical two-machine run: pending owner report.
