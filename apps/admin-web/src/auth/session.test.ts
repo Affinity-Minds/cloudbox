@@ -12,9 +12,7 @@ describe("safeRedirect", () => {
     expect(safeRedirect(undefined)).toBe("/");
     expect(safeRedirect("/\\evil.example")).toBe("/");
     expect(safeRedirect("/\t/evil.example")).toBe("/");
-    expect(safeRedirect("/%5Cevil.example", "https://box.affinityminds.in")).toBe(
-      "/%5Cevil.example",
-    );
+    expect(safeRedirect("/%5Cevil.example", "https://box.affinity.ai.in")).toBe("/%5Cevil.example");
   });
 });
 

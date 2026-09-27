@@ -236,7 +236,7 @@ describe("staff management API", () => {
         method: "POST",
         headers: {
           cookie: root.cookie,
-          origin: "https://box.affinityminds.in.evil.example",
+          origin: "https://box.affinity.ai.in.evil.example",
           "content-type": "application/json",
         },
         body: JSON.stringify({ email: "csrf@example.test", role: "super_admin" }),

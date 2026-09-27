@@ -12,7 +12,7 @@
 //   3. GET /api/v1/connect/devices (same session) → ConnectDevicesResponse.
 //
 // Both auth writes need a same-origin `Origin` header (login-CSRF rule, as /login); the desktop
-// client sends `Origin: https://box.affinityminds.in`.
+// client sends `Origin: https://box.affinity.ai.in`.
 import { z } from "zod";
 import { Email } from "./auth";
 import { LicenseState } from "./devices";

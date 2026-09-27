@@ -159,7 +159,7 @@ describe("P2-3 (Low): Cloudflare testing keys are accepted whenever ENVIRONMENT 
     const ok = await verifyTurnstile(
       { TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA", ENVIRONMENT: undefined },
       "XXXX.DUMMY.TOKEN.XXXX",
-      { host: "box.affinityminds.in", ip: null },
+      { host: "box.affinity.ai.in", ip: null },
     );
     expect(ok).toBe(false);
   });

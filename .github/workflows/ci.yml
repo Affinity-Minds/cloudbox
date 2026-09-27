@@ -9,7 +9,7 @@ on:
       base_url:
         description: "Deployment to smoke-test"
         required: false
-        default: "https://box.affinityminds.in"
+        default: "https://box.affinity.ai.in"
       expected_sha:
         description: "Expected /api/version gitSha (blank skips that check)"
         required: false

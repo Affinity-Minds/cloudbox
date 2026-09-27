@@ -308,5 +308,5 @@ selector, timezone selector" — do not merge without a human decision, per the 
   files).
 - Test output: see "Tests run and results" above; reproduce with
   `corepack pnpm run verify` from the repo root (about 1–2 minutes).
-- Not deployed to `box.affinityminds.in` — this worktree never deploys; that happens after merge
+- Not deployed to `box.affinity.ai.in` — this worktree never deploys; that happens after merge
   via the existing GitHub Actions workflow.

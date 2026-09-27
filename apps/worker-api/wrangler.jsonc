@@ -6,7 +6,7 @@
   "workers_dev": false,
   "routes": [
     {
-      "pattern": "box.affinityminds.in",
+      "pattern": "box.affinity.ai.in",
       "custom_domain": true
     }
   ],

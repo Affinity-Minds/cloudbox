@@ -1,6 +1,6 @@
 # Common rules — paste this block at the bottom of every worktree prompt
 
-Repository: `Affinity-Minds/cloudbox` (GitHub, org secrets already configured). Production: `https://box.affinityminds.in`. Commit author: `Soren Singh Dary <67230851+sorensd@users.noreply.github.com>`. Never push to `main`. Never add agent co-author trailers.
+Repository: `Affinity-Minds/cloudbox` (GitHub, org secrets already configured). Production: `https://box.affinity.ai.in`. Commit author: `Soren Singh Dary <67230851+sorensd@users.noreply.github.com>`. Never push to `main`. Never add agent co-author trailers.
 
 Read first, in this order: `CLOUDBOX_MASTER_AGENT_BUILD_SPEC.md` (Section 0 and your slice in Section 56), `AGENTS.md`, `docs/handoffs/foundation.md` (exact table/column/route names — never guess), then only the `sorensd/agent-notes` files named in your brief (local clone at `../agent-notes` or GitHub `sorensd/agent-notes`).
 

@@ -1,10 +1,10 @@
 # ADR 0001 — Monorepo and Cloudflare Worker origin
 
 ## Context
-CloudBox contains a SaaS control plane, several Windows executables, shared contracts, infrastructure adapters, tests, and operating documentation. The production web origin is `box.affinityminds.in`.
+CloudBox contains a SaaS control plane, several Windows executables, shared contracts, infrastructure adapters, tests, and operating documentation. The production web origin is `box.affinity.ai.in`.
 
 ## Decision
-Use one monorepo. The production web app is a React/Vite SPA served as Cloudflare Worker static assets, with Hono handling `/api/*`. `box.affinityminds.in` is configured as a Worker Custom Domain. Static assets remain off the Worker execution path except for API routes.
+Use one monorepo. The production web app is a React/Vite SPA served as Cloudflare Worker static assets, with Hono handling `/api/*`. `box.affinity.ai.in` is configured as a Worker Custom Domain. Static assets remain off the Worker execution path except for API routes.
 
 ## Alternatives considered
 - Separate repositories for cloud and Windows components.

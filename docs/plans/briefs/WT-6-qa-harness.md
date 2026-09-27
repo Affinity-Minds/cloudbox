@@ -13,4 +13,4 @@ Deliver:
 5. Playwright (`tests/e2e-cloud`): production smoke against `BASE_URL` — `/api/health`, `/api/version` equals `EXPECTED_SHA`, shell renders (title, sidebar), `/login` shows the email step; screenshot to `docs/evidence/e2e/`. Runs on `workflow_dispatch` only tonight.
 6. Report in the handoff which tests other worktrees still need to write.
 
-Demo path: `pnpm --filter @cloudbox/worker-api test` shows real-D1 tests green; deliberately break an index and show the query-plan test fail; run the Playwright smoke against `https://box.affinityminds.in` after the Phase 0 deploy.
+Demo path: `pnpm --filter @cloudbox/worker-api test` shows real-D1 tests green; deliberately break an index and show the query-plan test fail; run the Playwright smoke against `https://box.affinity.ai.in` after the Phase 0 deploy.

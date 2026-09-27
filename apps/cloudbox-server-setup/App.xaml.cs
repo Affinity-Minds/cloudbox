@@ -6,11 +6,11 @@ namespace CloudBox.Server.Setup;
 
 /// <summary>
 /// CloudBox Server Setup. Wizard by default; silent mode for staff-minted codes:
-/// <c>CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinityminds.in]</c>.
+/// <c>CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinity.ai.in]</c>.
 /// </summary>
 public partial class App : Application
 {
-    public const string DefaultBaseUrl = "https://box.affinityminds.in";
+    public const string DefaultBaseUrl = "https://box.affinity.ai.in";
 
     [DllImport("kernel32.dll")]
     private static extern bool AttachConsole(int processId);
@@ -55,7 +55,7 @@ public partial class App : Application
         if (string.IsNullOrWhiteSpace(token) || !Uri.TryCreate(baseText, UriKind.Absolute, out var baseUrl) ||
             (baseUrl.Scheme != Uri.UriSchemeHttps && !baseUrl.IsLoopback))
         {
-            Log("Usage: CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinityminds.in]");
+            Log("Usage: CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinity.ai.in]");
             return 2;
         }
 

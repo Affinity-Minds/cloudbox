@@ -15,7 +15,7 @@ The production deploy is triggered on every push to `main` branch via GitHub Act
 4. **Stamp build** — Inject commit SHA and timestamp into `wrangler.jsonc`.
 5. **Deploy to Cloudflare** — `wrangler deploy` (worker code, D1 migrations, R2 bindings).
 6. **Publish admin web** — Upload compiled React app to R2 (served from CDN).
-7. **Validate** — Health check on `https://box.affinityminds.in/api/health`.
+7. **Validate** — Health check on `https://box.affinity.ai.in/api/health`.
 8. **Cleanup** — Delete temporary build artifacts and secrets.
 
 **Deployment is atomic:** The entire job runs in a single GitHub Environments deployment; rollback is a revert commit + re-push to main.

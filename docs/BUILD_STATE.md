@@ -8,7 +8,7 @@ Post-integration: open the `phase-2/devices` → `main` PR, watch every CI check
 Every slice in the Phase 2 queue is merged into `phase-2/devices`, each gated individually (`pnpm check`/`typecheck`/per-package `vitest run`/`build`, a clean `drizzle-kit generate --name probe`, `check-workflows.py`) and pushed: WT-10 (Windows Server Setup, RDP runtime, managed users, licence gate, Status app), WT-11 (CloudBox Connect client + RDP credential broker), the reason-dropdowns slice (WT-2, `packages/contracts/src/reasons.ts` catalogue on every revoke/retire/archive/delete), WT-19 (backups), WT-17 (alerts — its cron folded into one `src/scheduled.ts` alongside WT-19's, one `wrangler.jsonc` crons entry), the licence-hold fix (WT-14 follow-up, migration `0019`), WT-18 (OTA releases, new `@cloudbox/update-contracts` package), and WT-15 (customer portal + staff screen, reconciled onto the reasons.ts catalogue). Post-merge consolidation done: WT-11's `rdp_session_grants` table folded from its own file into `db/schema.ts` (one-line re-export shim left behind); the drizzle-kit meta snapshot chain caught up to every hand-written migration this phase added (docs/ISSUE_LOG.md P2-7); a `RELEASE_SIGNING_JWK` sync step added to `deploy-cloudflare.yml` (no-ops with `::warning::` until the secret is provisioned); `docs/WORKTREE_REGISTRY.md` updated for WT-9/10/11/15/16/17/18/19/20. Known gaps found in passing, not fixed: `ops-shell.ts`'s `OPS_ROUTES` regex still lacks `/alerts`, `/backups`, `/updates` (flagged separately, pre-existing). Follow-ups carried from earlier: W-2 (fleet principal-type check), real SMTP relay send verification, pin actions by SHA, plan-designer note that lowering max_devices blocks new licences, Connect timing parity, ownership transfer in the portal.
 
 # Demo path
-1. Staff: https://box.affinityminds.in/ops/login → email + initial password → forced password change → authenticator QR → console.
+1. Staff: https://box.affinity.ai.in/ops/login → email + initial password → forced password change → authenticator QR → console.
 2. Tenants → New tenant → Enrollment → New enrollment code (shown once).
 3. Lab PC (elevated PowerShell, artifact extracted): run `CloudBox.Server.Setup.exe` (or its silent `/S --enroll-token`) → sign in → pick/create organisation → activate → Fleet shows the server Online, licensed, RDP gate open.
 4. Second PC: `mstsc` into two managed users (`cloud01`, `cloud02`) at once; CloudBox Connect can also mint an RDP credential from the tenant's device list.
@@ -33,6 +33,9 @@ Every slice in the Phase 2 queue is merged into `phase-2/devices`, each gated in
 # Blockers
 None on the cloud side.
 
+# Pending ops change (not yet merged)
+`fix/production-domain` (worktree `wt-domain`, ADR `docs/decisions/0014-production-domain-box-affinity-ai-in.md`): moves the production hostname from `box.affinityminds.in` to `box.affinity.ai.in` and removes every `affinityminds.in` reference from the repo, to fully free that zone. PR open against `main`, not merged. Two dashboard prerequisites before/at merge: the `affinity.ai.in` zone must be in the Worker's Cloudflare account, and the Turnstile widget's hostname allow-list must include `box.affinity.ai.in`. After the deploy that lands this: verify the old `box.affinityminds.in` custom domain is gone from the Worker (Wrangler drops routes no longer in `wrangler.jsonc`), and verify no DNS record for `box` survives under `affinityminds.in` in the dashboard — delete it by hand if it does.
+
 # Completed phases
 ## Phase 1 — Identity, tenancy, devices, entitlements — DONE 2026-09-27 03:15 IST
 - Merged to `main` via PR #12 at `6c522a3cf7613d2569b2d4142ea56fd2ad405cfb` after WT-8's fifth-pass verdict (no Critical/High). Integration branch `phase-1/identity` (final `91ef989`).
@@ -49,7 +52,7 @@ None on the cloud side.
 - Merged to `main` via PR #1 (fix commit `584aa9e`) and deploy hotfix PR #3 (`89fc59c`); production SHA `8f16cde9a904bc8c21328d0e6fbef1fc7e351f2e`.
 - Deploy run: GitHub Actions "Deploy CloudBox" succeeded; D1 `cloudbox-db` recreated in APAC while empty; R2 binding deferred with a workflow warning until R2 is enabled on the account.
 - Live verification (curl, 00:24 IST): `GET /api/health` 200 `{"status":"ok"}`; `GET /api/version` gitSha equals `main`; `GET /api/v1` carries `X-API-Version: v1`; `GET /api/v1/foundation` returns `release.status=deployed`, `release.sha` = main SHA, and the audited `foundation.release.changed` row by `github-actions` with before/after; `GET /` serves the SPA shell (200, text/html).
-- Rendered evidence: `docs/evidence/phase-0/live-shell.png` (Playwright Chromium against https://box.affinityminds.in, shows Release deployed, Build and Audited SHA `8f16cde9a904`, 2 audit records).
+- Rendered evidence: `docs/evidence/phase-0/live-shell.png` (Playwright Chromium against https://box.affinity.ai.in, shows Release deployed, Build and Audited SHA `8f16cde9a904`, 2 audit records).
 - Exit criteria per spec: staging/production deployable ✓, versioned ✓, testable (`pnpm run verify`, 5 tests at the time) ✓, every later slice has a home ✓, audited administrative state change proven live ✓.
 - Deferred: R2 bucket (account-level enablement), Windows physical checks (none required by Phase 0).
 

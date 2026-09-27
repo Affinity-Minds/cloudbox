@@ -96,7 +96,7 @@ c4f53a8 Merge remote-tracking branch 'origin/phase-1/identity' into wt/p1-qa
   - Screenshots land in `docs/evidence/e2e/`: `guard-redirect.png`, `login.png`, and (local-only)
     `shell.png`.
 - **`.github/workflows/ci.yml`** (the one permitted edit): added `workflow_dispatch` with inputs
-  `base_url` (default `https://box.affinityminds.in`) and `expected_sha`, and a new job
+  `base_url` (default `https://box.affinity.ai.in`) and `expected_sha`, and a new job
   `e2e-smoke` gated on `if: github.event_name == 'workflow_dispatch'` — never runs on
   `pull_request`/`push`. Installs Chromium, runs `pnpm --filter @cloudbox/e2e-cloud e2e` with
   `BASE_URL`/`EXPECTED_SHA` from the inputs, uploads `docs/evidence/e2e/` as an artifact.
@@ -238,7 +238,7 @@ it, which is exactly the kind of thing a smoke suite is for):
   `standing` as given — read `fixtures.README.md` before adding your own tenant-lifecycle
   fixtures so we don't end up with two ways to seed the same row.
 - **Whoever owns the next production deploy:** run the `e2e-smoke` `workflow_dispatch` job
-  against `https://box.affinityminds.in` with `expected_sha` set to the deployed commit, once
+  against `https://box.affinity.ai.in` with `expected_sha` set to the deployed commit, once
   after this merges to `main` and a deploy has run — it hasn't been run against the real
   production URL yet, only proved locally (see "Demo path").
 

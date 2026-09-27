@@ -14,7 +14,7 @@ These items were outstanding until owner confirmation. All now resolved:
 
 4. **Uninstaller in scope:** Confirmed. Slice 2.5 (WT-4 owns) reverses every install step via manifest, restores pre-install state. Customer data in `D:\CloudBoxData` never deleted unless `--purge-data` with typed machine name (logged as SECURITY).
 
-5. **Cloudflare account token:** If custom-domain provisioning fails on first deploy, org Cloudflare token needs Zone:DNS:Edit on `affinityminds.in`. To verify during bootstrap.
+5. **Cloudflare account token:** If custom-domain provisioning fails on first deploy, org Cloudflare token needs Zone:DNS:Edit on `affinity.ai.in`. To verify during bootstrap.
 
 6. **VPN self-hosting:** Confirmed. NetBird v0.79.0 self-hosted on customer VPS. Management and signal servers run in a Docker Compose stack. See ADR 0007 and handoff WT-9 for architecture.
 

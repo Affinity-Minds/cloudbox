@@ -33,5 +33,5 @@
   "rdp": { "state": "healthy", "listener": true, "detail": "Remote sessions available" },
   "network": "not_configured",
   "supportAccessActive": false,
-  "renewalUrl": "https://box.affinityminds.in/portal?renew=CBX-00001"
+  "renewalUrl": "https://box.affinity.ai.in/portal?renew=CBX-00001"
 }

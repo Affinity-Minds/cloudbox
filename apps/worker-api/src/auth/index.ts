@@ -24,7 +24,7 @@ import {
   readCounter,
 } from "./counters";
 
-export const PRODUCTION_ORIGIN = "https://box.affinityminds.in";
+export const PRODUCTION_ORIGIN = "https://box.affinity.ai.in";
 const VITE_DEV_ORIGIN = "http://localhost:5173";
 
 /**

@@ -14,7 +14,7 @@ CloudBox is a managed SaaS appliance platform: a physical Windows PC becomes a c
 - Cloud business authority does not live solely in the VPN controller; state is authoritative in D1.
 - Windows privileged actions (install, uninstall, update, device revocation) go through the Agent.
 - Customer UIs see CloudBox concepts, not upstream VPN/RDP implementation details.
-- API contract begins at `/api/v1/*`. Production origin is `https://box.affinityminds.in`.
+- API contract begins at `/api/v1/*`. Production origin is `https://box.affinity.ai.in`.
 - Staff operations run on the separate `/api/ops/*` base path with their own authentication and authorization layer.
 
 ## Identity systems (ADR 0002)
@@ -125,7 +125,7 @@ erDiagram
 
 ### Installer onboarding (tenant self-service)
 
-1. **Start** → Customer visits `https://box.affinityminds.in/start` and enters email.
+1. **Start** → Customer visits `https://box.affinity.ai.in/start` and enters email.
    - Turnstile verification required (P2-3: testing keys only in dev).
    - OTP sent (3 / 60 s per IP, 5 per email+IP per 15 min, 30 per email per hour, 10 per 24 h to new addresses).
    - Audit: `AUTH_OTP_SENT`.

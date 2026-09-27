@@ -27,7 +27,7 @@ reg query "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConn
 ## 1. Install (wizard)
 
 1. Double-click `CloudBox.Server.Setup.exe` → UAC **Yes**.
-2. **Welcome → Next.** (Advanced shows the server address; default `https://box.affinityminds.in`.)
+2. **Welcome → Next.** (Advanced shows the server address; default `https://box.affinity.ai.in`.)
 3. **Sign in:** type your email → **Send code** → type the six digits (auto-submits).
    New customer? **Open the CloudBox sign-up page** → the `/start` page opens inside Setup (Turnstile + code) → it
    closes by itself when you are signed in.
@@ -46,7 +46,7 @@ Screenshot: the summary and the Status window → `docs/evidence/wt-p5-server-se
 Silent alternative (staff-minted code from the console Enrollment page):
 
 ```powershell
-.\CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinityminds.in]
+.\CloudBox.Server.Setup.exe /S --enroll-token CBX-ENROLL-XXXX-XXXX [--base-url https://box.affinity.ai.in]
 # exit code 0 ok / 1 failed and rolled back / 2 usage; log: $env:TEMP\CloudBox-Setup-*.log
 ```
 

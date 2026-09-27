@@ -14,7 +14,7 @@ public class SessionPersistenceTests : IDisposable
     }
 
     private static readonly ConnectSession Sample = new(
-        "https://box.affinityminds.in",
+        "https://box.affinity.ai.in",
         "__Secure-cbx_session=super-secret-value",
         "usr_1",
         "person@example.test",
