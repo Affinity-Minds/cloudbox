@@ -1,5 +1,6 @@
 export * from "./agent";
 export * from "./auth";
+export * from "./backups";
 export * from "./common";
 export * from "./connect";
 export * from "./devices";

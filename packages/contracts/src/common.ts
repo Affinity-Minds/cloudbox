@@ -16,6 +16,10 @@ export const ID_PREFIX = {
   emailProvider: "eprv_",
   licenseKey: "lkey_",
   licenseKeyBatch: "lkb_",
+  // WT-19 (migration 0017): backups.
+  backupJob: "bkj_",
+  backupArtifact: "bka_",
+  restoreTest: "rst_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

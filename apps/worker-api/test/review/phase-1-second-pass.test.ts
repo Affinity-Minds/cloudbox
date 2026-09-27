@@ -340,7 +340,10 @@ describe("S-6 (holds): every /api/v1 route answers setup_required to staff mid-s
             !PUBLIC.has(`${r.method} ${r.path}`) &&
             !OPEN_DURING_SETUP.has(`${r.method} ${r.path}`) &&
             !CUSTOMER_ONLY(r.path) &&
-            !r.path.startsWith("/api/v1/agent"),
+            !r.path.startsWith("/api/v1/agent") &&
+            // WT-19: device-Bearer routes, not staff/session-gated (same story as /agent above).
+            r.path !== "/api/v1/backups/policy" &&
+            !r.path.startsWith("/api/v1/backups/jobs"),
         )
         .map((r) => [`${r.method} ${r.path}`, r]),
     ).values(),

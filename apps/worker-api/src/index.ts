@@ -15,6 +15,7 @@ import { onboardingAuth } from "./onboarding/auth-routes";
 import { serveAsset } from "./ops-shell";
 import v1 from "./routes/v1";
 import { logoutFor } from "./routes/v1/auth";
+import { scheduled } from "./scheduled";
 
 export type { Bindings } from "./env";
 
@@ -238,4 +239,9 @@ app.notFound((c) => {
   return serveAsset(c);
 });
 
-export default app;
+// WT-19: the Worker's Cron entry point (`src/scheduled.ts`'s own hook list). A module worker's
+// default export needs a `scheduled` method alongside `fetch` for Cron Triggers to fire
+// (`wrangler.jsonc`'s `triggers.crons`) — attached to the same `app` object, not a replacement
+// default export, so every existing test's `app.request(...)` (Hono's own test helper) keeps
+// working unchanged; Hono's `fetch` is already an instance property, so this only adds one.
+export default Object.assign(app, { scheduled });

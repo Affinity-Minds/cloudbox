@@ -12,6 +12,9 @@ import { signInAs } from "./fixtures";
  *  - unversioned or index routes with no auth story of their own
  *  - `/api/auth/*`: Better Auth's own handler, not a `/api/v1` route
  *  - `/api/v1/agent/*`: device-Bearer auth, not staff/session auth — covered by WT-3's own tests
+ *  - `/api/v1/backups/jobs*`, `/api/v1/backups/policy`: same story, device-Bearer auth via
+ *    `requireDevice()` — covered by WT-19's own tests (`backups.test.ts`). `/api/v1/backups`
+ *    itself is not exempt: `POST /restore-tests` there is staff/`backup.restore`-gated.
  *  - any route whose current handler is still the foundation's `{ module, status: 'stub' }`
  *    placeholder, which answers 200 to everything until its owner implements it
  */
@@ -19,6 +22,9 @@ function isAllowlisted(path: string): boolean {
   if (path === "/api/v1" || path === "/api/v1/") return true;
   // WT-14: `/api/v1/onboarding/config` is public by design (the /start page's Turnstile site key).
   if (path === "/api/v1/onboarding/config") return true;
+  // WT-19: device-Bearer routes, not staff/session-gated (see the doc comment above).
+  if (path === "/api/v1/backups/policy") return true;
+  if (path === "/api/v1/backups/jobs" || path.startsWith("/api/v1/backups/jobs/")) return true;
   return ["/api/health", "/api/version", "/api/auth", "/api/v1/agent"].some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );

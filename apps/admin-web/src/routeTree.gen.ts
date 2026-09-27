@@ -15,6 +15,7 @@ import { Route as SetupAuthenticatorRouteImport } from './routes/setup-authentic
 import { Route as SetupPasswordRouteImport } from './routes/setup-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
+import { Route as AppBackupsRouteImport } from './routes/_app/backups'
 import { Route as AppEnrollmentRouteImport } from './routes/_app/enrollment'
 import { Route as AppFleetRouteImport } from './routes/_app/fleet'
 import { Route as AppLicencesRouteImport } from './routes/_app/licences'
@@ -22,6 +23,7 @@ import { Route as AppPlansRouteImport } from './routes/_app/plans'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSubscriptionsRouteImport } from './routes/_app/subscriptions'
 import { Route as AppTenantsRouteImport } from './routes/_app/tenants'
+import { Route as AppBackupsDeviceIdRouteImport } from './routes/_app/backups.$deviceId'
 import { Route as AppFleetDeviceIdRouteImport } from './routes/_app/fleet.$deviceId'
 import { Route as AppSubscriptionsIdRouteImport } from './routes/_app/subscriptions.$id'
 import { Route as AppTenantsTenantIdRouteImport } from './routes/_app/tenants.$tenantId'
@@ -53,6 +55,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBackupsRoute = AppBackupsRouteImport.update({
+  id: '/backups',
+  path: '/backups',
   getParentRoute: () => AppRoute,
 } as any)
 const AppEnrollmentRoute = AppEnrollmentRouteImport.update({
@@ -90,6 +97,11 @@ const AppTenantsRoute = AppTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBackupsDeviceIdRoute = AppBackupsDeviceIdRouteImport.update({
+  id: '/$deviceId',
+  path: '/$deviceId',
+  getParentRoute: () => AppBackupsRoute,
+} as any)
 const AppFleetDeviceIdRoute = AppFleetDeviceIdRouteImport.update({
   id: '/$deviceId',
   path: '/$deviceId',
@@ -112,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
+  '/backups': typeof AppBackupsRouteWithChildren
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
   '/licences': typeof AppLicencesRoute
@@ -119,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
+  '/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -128,6 +142,7 @@ export interface FileRoutesByTo {
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/audit': typeof AppAuditRoute
+  '/backups': typeof AppBackupsRouteWithChildren
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
   '/licences': typeof AppLicencesRoute
@@ -136,6 +151,7 @@ export interface FileRoutesByTo {
   '/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/tenants': typeof AppTenantsRouteWithChildren
   '/': typeof AppIndexRoute
+  '/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -147,6 +163,7 @@ export interface FileRoutesById {
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
   '/_app/audit': typeof AppAuditRoute
+  '/_app/backups': typeof AppBackupsRouteWithChildren
   '/_app/enrollment': typeof AppEnrollmentRoute
   '/_app/fleet': typeof AppFleetRouteWithChildren
   '/_app/licences': typeof AppLicencesRoute
@@ -155,6 +172,7 @@ export interface FileRoutesById {
   '/_app/subscriptions': typeof AppSubscriptionsRouteWithChildren
   '/_app/tenants': typeof AppTenantsRouteWithChildren
   '/_app/': typeof AppIndexRoute
+  '/_app/backups/$deviceId': typeof AppBackupsDeviceIdRoute
   '/_app/fleet/$deviceId': typeof AppFleetDeviceIdRoute
   '/_app/subscriptions/$id': typeof AppSubscriptionsIdRoute
   '/_app/tenants/$tenantId': typeof AppTenantsTenantIdRoute
@@ -167,6 +185,7 @@ export interface FileRouteTypes {
     | '/setup-authenticator'
     | '/setup-password'
     | '/audit'
+    | '/backups'
     | '/enrollment'
     | '/fleet'
     | '/licences'
@@ -174,6 +193,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/subscriptions'
     | '/tenants'
+    | '/backups/$deviceId'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
     | '/tenants/$tenantId'
@@ -183,6 +203,7 @@ export interface FileRouteTypes {
     | '/setup-authenticator'
     | '/setup-password'
     | '/audit'
+    | '/backups'
     | '/enrollment'
     | '/fleet'
     | '/licences'
@@ -191,6 +212,7 @@ export interface FileRouteTypes {
     | '/subscriptions'
     | '/tenants'
     | '/'
+    | '/backups/$deviceId'
     | '/fleet/$deviceId'
     | '/subscriptions/$id'
     | '/tenants/$tenantId'
@@ -201,6 +223,7 @@ export interface FileRouteTypes {
     | '/setup-authenticator'
     | '/setup-password'
     | '/_app/audit'
+    | '/_app/backups'
     | '/_app/enrollment'
     | '/_app/fleet'
     | '/_app/licences'
@@ -209,6 +232,7 @@ export interface FileRouteTypes {
     | '/_app/subscriptions'
     | '/_app/tenants'
     | '/_app/'
+    | '/_app/backups/$deviceId'
     | '/_app/fleet/$deviceId'
     | '/_app/subscriptions/$id'
     | '/_app/tenants/$tenantId'
@@ -265,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/backups': {
+      id: '/_app/backups'
+      path: '/backups'
+      fullPath: '/backups'
+      preLoaderRoute: typeof AppBackupsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/enrollment': {
       id: '/_app/enrollment'
       path: '/enrollment'
@@ -314,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTenantsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/backups/$deviceId': {
+      id: '/_app/backups/$deviceId'
+      path: '/$deviceId'
+      fullPath: '/backups/$deviceId'
+      preLoaderRoute: typeof AppBackupsDeviceIdRouteImport
+      parentRoute: typeof AppBackupsRoute
+    }
     '/_app/fleet/$deviceId': {
       id: '/_app/fleet/$deviceId'
       path: '/$deviceId'
@@ -337,6 +375,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppBackupsRouteChildren {
+  AppBackupsDeviceIdRoute: typeof AppBackupsDeviceIdRoute
+}
+
+const AppBackupsRouteChildren: AppBackupsRouteChildren = {
+  AppBackupsDeviceIdRoute: AppBackupsDeviceIdRoute,
+}
+
+const AppBackupsRouteWithChildren = AppBackupsRoute._addFileChildren(
+  AppBackupsRouteChildren,
+)
 
 interface AppFleetRouteChildren {
   AppFleetDeviceIdRoute: typeof AppFleetDeviceIdRoute
@@ -375,6 +425,7 @@ const AppTenantsRouteWithChildren = AppTenantsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
+  AppBackupsRoute: typeof AppBackupsRouteWithChildren
   AppEnrollmentRoute: typeof AppEnrollmentRoute
   AppFleetRoute: typeof AppFleetRouteWithChildren
   AppLicencesRoute: typeof AppLicencesRoute
@@ -387,6 +438,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
+  AppBackupsRoute: AppBackupsRouteWithChildren,
   AppEnrollmentRoute: AppEnrollmentRoute,
   AppFleetRoute: AppFleetRouteWithChildren,
   AppLicencesRoute: AppLicencesRoute,

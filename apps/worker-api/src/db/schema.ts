@@ -671,3 +671,134 @@ export const emailProviders = sqliteTable(
     ),
   ],
 );
+
+// ─── Backups (migration 0017, WT-19) ─────────────────────────────────────────────────────────
+// master spec §23 (all subsections), §46; Slices 9.3-9.5 cloud halves. `backup_jobs` is the local
+// backup's own metadata (§23.8 "backup success is not upload success" — job state tracks local
+// verification separately from cloud upload/verify); `backup_artifacts` is the R2 object's state,
+// one row per job once an upload attempt begins. Never delete the newest `cloud_verified`
+// artifact per device regardless of policy (retention.ts).
+
+export const BACKUP_JOB_KINDS = ["frequent", "nightly", "manual", "pre_upgrade"] as const;
+export const BACKUP_JOB_STATES = [
+  "created",
+  "verified_local",
+  "upload_started",
+  "upload_completed",
+  "cloud_verified",
+  "retention_applied",
+  "failed",
+] as const;
+export const RETENTION_CLASSES = ["recent", "daily", "weekly", "monthly", "yearly"] as const;
+export const RESTORE_OUTCOMES = ["success", "failure", "partial"] as const;
+
+/** Per-tenant retention policy (§23.7). No row = the tenant follows the global default stored at
+ * `settings['backups.default_policy']` (resolved server-side by `backups/policy.ts`, never by the
+ * client guessing). */
+export const backupPolicies = sqliteTable("backup_policies", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id),
+  frequentHours: integer("frequent_hours").notNull().default(4),
+  dailyKeep: integer("daily_keep").notNull().default(30),
+  weeklyKeep: integer("weekly_keep").notNull().default(12),
+  monthlyKeep: integer("monthly_keep").notNull().default(12),
+  yearlyKeep: integer("yearly_keep").notNull().default(0),
+  offsiteEnabled: integer("offsite_enabled", { mode: "boolean" }).notNull().default(true),
+  updatedBy: text("updated_by"),
+  updatedAt: text("updated_at").notNull().default(isoNow),
+});
+
+export const backupJobs = sqliteTable(
+  "backup_jobs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    kind: text("kind", { enum: BACKUP_JOB_KINDS }).notNull(),
+    state: text("state", { enum: BACKUP_JOB_STATES }).notNull().default("created"),
+    startedAt: text("started_at").notNull().default(isoNow),
+    finishedAt: text("finished_at"),
+    sourceDataset: text("source_dataset").notNull(),
+    appVersion: text("app_version"),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    localPathHint: text("local_path_hint"),
+    errorJson: text("error_json"),
+  },
+  (table) => [
+    index("backup_jobs_tenant_device_idx").on(table.tenantId, table.deviceId, table.startedAt),
+    index("backup_jobs_device_state_idx").on(table.deviceId, table.state),
+    check(
+      "backup_jobs_kind_check",
+      sql`${table.kind} IN ('frequent', 'nightly', 'manual', 'pre_upgrade')`,
+    ),
+    check(
+      "backup_jobs_state_check",
+      sql`${table.state} IN ('created', 'verified_local', 'upload_started', 'upload_completed', 'cloud_verified', 'retention_applied', 'failed')`,
+    ),
+  ],
+);
+
+export const backupArtifacts = sqliteTable(
+  "backup_artifacts",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id")
+      .notNull()
+      .unique()
+      .references(() => backupJobs.id),
+    r2Key: text("r2_key").notNull().unique(),
+    sizeBytes: integer("size_bytes"),
+    sha256: text("sha256"),
+    encryptionJson: text("encryption_json"),
+    uploadedAt: text("uploaded_at"),
+    verifiedAt: text("verified_at"),
+    retentionClass: text("retention_class", { enum: RETENTION_CLASSES }),
+    expiresAt: text("expires_at"),
+    deletedAt: text("deleted_at"),
+    /** In-flight R2 multipart upload id (owner addition, not in the spec's column list — needed
+     * to resume `PUT .../parts/:n` and `POST .../complete` against the same R2 upload). Cleared
+     * (left as-is; harmless) once `complete` succeeds. */
+    multipartUploadId: text("multipart_upload_id"),
+  },
+  (table) => [
+    index("backup_artifacts_job_idx").on(table.jobId),
+    check(
+      "backup_artifacts_retention_class_check",
+      sql`${table.retentionClass} IS NULL OR ${table.retentionClass} IN ('recent', 'daily', 'weekly', 'monthly', 'yearly')`,
+    ),
+  ],
+);
+
+export const restoreTests = sqliteTable(
+  "restore_tests",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => backupArtifacts.id),
+    performedBy: text("performed_by").notNull(),
+    performedAt: text("performed_at").notNull().default(isoNow),
+    outcome: text("outcome", { enum: RESTORE_OUTCOMES }).notNull(),
+    notes: text("notes"),
+  },
+  (table) => [
+    index("restore_tests_device_idx").on(table.deviceId, table.performedAt),
+    index("restore_tests_tenant_idx").on(table.tenantId, table.performedAt),
+    check(
+      "restore_tests_outcome_check",
+      sql`${table.outcome} IN ('success', 'failure', 'partial')`,
+    ),
+  ],
+);

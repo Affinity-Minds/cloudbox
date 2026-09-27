@@ -2,6 +2,7 @@
 import {
   Building2,
   CreditCard,
+  DatabaseBackup,
   KeyRound,
   LayoutDashboard,
   type LucideIcon,
@@ -20,6 +21,7 @@ export type NavKey =
   | "subscriptions"
   | "plans"
   | "licences"
+  | "backups"
   | "audit"
   | "settings";
 
@@ -34,6 +36,7 @@ export type NavItem = {
     | "/subscriptions"
     | "/plans"
     | "/licences"
+    | "/backups"
     | "/audit"
     | "/settings";
   icon: LucideIcon;
@@ -49,6 +52,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: "enrollment", title: "Enrollment", to: "/enrollment", icon: KeyRound },
       { key: "subscriptions", title: "Subscriptions", to: "/subscriptions", icon: CreditCard },
       { key: "licences", title: "Licence keys", to: "/licences", icon: Ticket }, // WT-14
+      { key: "backups", title: "Backups", to: "/backups", icon: DatabaseBackup }, // WT-19
     ],
   },
   {
