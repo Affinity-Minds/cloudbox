@@ -17,7 +17,7 @@ const RETENTION_THROTTLE_KEY = "backups.retention_sweep.last_run_at";
 const RETENTION_THROTTLE_MS = 60 * 60_000; // hourly
 
 /**
- * WT-17: the alerts evaluator runs every tick (the cron is now `*/5 * * * *`, the cadence
+ * WT-17: the alerts evaluator runs every tick (the cron is now every 5 minutes, the cadence
  * `evaluate.ts`'s own doc comment assumes for its offline/cooldown windows).
  */
 async function alertsEvaluationHook(env: Bindings): Promise<void> {
