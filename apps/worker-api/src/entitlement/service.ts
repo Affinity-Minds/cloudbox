@@ -7,6 +7,7 @@ import {
   type EntitlementRecord,
   effectiveMaxManagedUsers,
   type Feature,
+  formatReason,
   type IssueEntitlementResponse,
   type RevokeEntitlementResponse,
   type SubscriptionStatus,
@@ -282,10 +283,10 @@ export async function issueForDevice(
 /** Revokes every live entitlement of the device. The operator's typed reason is audited. */
 export async function revokeForDevice(
   db: Db,
-  input: { deviceId: string; reason: string; actor: Actor },
+  input: { deviceId: string; reasonCode: string; reasonText?: string; actor: Actor },
   now = new Date(),
 ): Promise<RevokeEntitlementResponse> {
-  const { deviceId, reason, actor } = input;
+  const { deviceId, reasonCode, reasonText, actor } = input;
   const [deviceRows, liveRows] = await db.batch([
     db
       .select({ id: devices.id, tenantId: devices.tenantId })
@@ -315,7 +316,15 @@ export async function revokeForDevice(
       entityId: newest.id,
       actor: { type: "user", id: actor.id },
       before: { deviceId, tenantId: device.tenantId, generations, revokedAt: null },
-      after: { deviceId, tenantId: device.tenantId, generations, revokedAt, reason },
+      after: {
+        deviceId,
+        tenantId: device.tenantId,
+        generations,
+        revokedAt,
+        reasonCode,
+        reasonText,
+        reason: formatReason({ reasonCode, reasonText }),
+      },
       correlationId: actor.correlationId,
       source: "api",
     }),

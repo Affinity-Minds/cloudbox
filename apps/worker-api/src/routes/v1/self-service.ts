@@ -406,9 +406,11 @@ router.post(
   validate("json", RevokeLicenseKeyRequest),
   async (c) => {
     try {
+      const { reasonCode, reasonText } = c.req.valid("json");
       await revokeLicenseKey(createDb(c.env.DB), {
         id: c.req.param("id"),
-        reason: c.req.valid("json").reason,
+        reasonCode,
+        reasonText,
         actorId: c.var.user.id,
         correlationId: c.var.correlationId,
       });

@@ -1,7 +1,11 @@
 // Owner: WT-12. Settings → "Email providers": ordered table, add/edit sheet (react-hook-form),
 // test-send with a visible result, delete with typed-name confirmation. Operational console
 // density; an empty registry is not an error (the Cloudflare Email binding is used instead).
-import type { EmailProvider, EmailProviderKind } from "@cloudbox/contracts";
+import {
+  EMAIL_PROVIDER_DELETE_REASON_CODES,
+  type EmailProvider,
+  type EmailProviderKind,
+} from "@cloudbox/contracts";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
@@ -18,7 +22,24 @@ import {
   updateEmailProvider,
 } from "@/api/email-providers";
 import { EmptyState, ErrorState, Section } from "@/components/page";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { StatusPill } from "@/components/status-pill";
+
+const EMAIL_PROVIDER_DELETE_REASON_LABELS: Record<
+  (typeof EMAIL_PROVIDER_DELETE_REASON_CODES)[number],
+  string
+> = {
+  replaced: "Replaced by another provider",
+  credentials_rotated: "Credentials rotated",
+  unused: "Unused",
+  other: "Other",
+};
+
 import { NativeSelect } from "@/components/subscription-bits";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,7 +146,8 @@ export function EmailProvidersSection() {
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => deleteEmailProvider(id),
+    mutationFn: ({ id, reason }: { id: string; reason: ReasonValue }) =>
+      deleteEmailProvider(id, reasonRequestBody(reason)),
     onSuccess: async () => {
       toast.success("Provider deleted");
       setDeleteTarget(null);
@@ -304,7 +326,7 @@ export function EmailProvidersSection() {
         key={deleteTarget?.id ?? "none"}
         target={deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
+        onConfirm={(reason) => deleteTarget && remove.mutate({ id: deleteTarget.id, reason })}
         pending={remove.isPending}
       />
     </>
@@ -522,10 +544,11 @@ function DeleteDialog({
 }: {
   target: EmailProvider | null;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+  onConfirm: (reason: ReasonValue) => void;
   pending: boolean;
 }) {
   const [typed, setTyped] = useState("");
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
 
   return (
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
@@ -536,11 +559,18 @@ function DeleteDialog({
             This cannot be undone. Type the provider's name to confirm.
           </DialogDescription>
         </DialogHeader>
+        <ReasonSelect
+          options={EMAIL_PROVIDER_DELETE_REASON_CODES.map((code) => ({
+            code,
+            label: EMAIL_PROVIDER_DELETE_REASON_LABELS[code],
+          }))}
+          value={reason}
+          onChange={setReason}
+        />
         <Input
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder={target?.name}
-          autoFocus
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -548,8 +578,8 @@ function DeleteDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={typed !== target?.name || pending}
-            onClick={onConfirm}
+            disabled={typed !== target?.name || !isReasonValid(reason) || pending}
+            onClick={() => onConfirm(reason)}
           >
             {pending ? "Deleting…" : "Delete"}
           </Button>

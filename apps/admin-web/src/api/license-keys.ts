@@ -6,7 +6,7 @@ import type {
   LicenseKeysResponse,
 } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 export const licenseKeysQuery = (filter: LicenseKeysQuery) =>
   queryOptions({
@@ -26,10 +26,10 @@ export const generateLicenseKeys = (body: GenerateLicenseKeysRequest) =>
     body: JSON.stringify(body),
   });
 
-export const revokeLicenseKey = (id: string, reason: string) =>
+export const revokeLicenseKey = (id: string, body: ReasonRequestBody) =>
   api<null>(`/api/v1/license-keys/${encodeURIComponent(id)}/revoke`, {
     method: "POST",
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify(body),
   });
 
 /** CSV of a generated batch, built client-side from the one response (no second request). */

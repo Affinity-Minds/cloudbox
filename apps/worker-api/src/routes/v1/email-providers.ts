@@ -5,7 +5,9 @@
 // and audited EMAIL_PROVIDER_CREATED/UPDATED/DELETED/TESTED with before/after minus secrets.
 import {
   CreateEmailProviderRequest,
+  DeleteEmailProviderRequest,
   type EmailProvider,
+  formatReason,
   SmtpConfig,
   UpdateEmailProviderRequest,
 } from "@cloudbox/contracts";
@@ -228,31 +230,37 @@ emailProvidersRoute.patch(
   },
 );
 
-emailProvidersRoute.delete("/:id", requirePermission("settings.manage"), async (c) => {
-  const id = c.req.param("id");
-  const db = createDb(c.env.DB);
-  const existing = await findRow(db, id);
-  if (!existing) return c.json({ error: "not_found" }, 404);
-  if (existing.enabled && (await isOnlyEnabled(db, id))) {
-    return c.json({ error: "conflict", detail: "last_enabled_provider" }, 409);
-  }
+emailProvidersRoute.delete(
+  "/:id",
+  requirePermission("settings.manage"),
+  validate("json", DeleteEmailProviderRequest),
+  async (c) => {
+    const { reasonCode, reasonText } = c.req.valid("json");
+    const id = c.req.param("id");
+    const db = createDb(c.env.DB);
+    const existing = await findRow(db, id);
+    if (!existing) return c.json({ error: "not_found" }, 404);
+    if (existing.enabled && (await isOnlyEnabled(db, id))) {
+      return c.json({ error: "conflict", detail: "last_enabled_provider" }, 409);
+    }
 
-  await db.batch([
-    db.delete(emailProviders).where(eq(emailProviders.id, id)),
-    audit(db, {
-      eventType: "EMAIL_PROVIDER_DELETED",
-      entityType: "email_provider",
-      entityId: id,
-      actor: { type: "user", id: c.var.user.id },
-      before: toEmailProvider(existing),
-      after: null,
-      correlationId: c.var.correlationId,
-      source: "api",
-    }),
-  ]);
-  invalidateProviderCache(c.env);
-  return c.body(null, 204);
-});
+    await db.batch([
+      db.delete(emailProviders).where(eq(emailProviders.id, id)),
+      audit(db, {
+        eventType: "EMAIL_PROVIDER_DELETED",
+        entityType: "email_provider",
+        entityId: id,
+        actor: { type: "user", id: c.var.user.id },
+        before: toEmailProvider(existing),
+        after: { reasonCode, reasonText, reason: formatReason({ reasonCode, reasonText }) },
+        correlationId: c.var.correlationId,
+        source: "api",
+      }),
+    ]);
+    invalidateProviderCache(c.env);
+    return c.body(null, 204);
+  },
+);
 
 emailProvidersRoute.post("/:id/test", requirePermission("settings.manage"), async (c) => {
   const id = c.req.param("id");

@@ -6,13 +6,14 @@
 // (100 bits, WT-3's `randomCrockfordBase32`), four groups of five (the brief's four groups and its
 // 20 symbols / ~100 bits cannot both hold with groups of four; see the WT-14 handoff). Only the SHA-256 is stored, plus the last four symbols
 // for support lookups; the plaintext exists once, in the generation response.
-import type {
-  GenerateLicenseKeysRequest,
-  GenerateLicenseKeysResponse,
-  LicenseKeyBatch,
-  LicenseKeyListItem,
-  LicenseKeysQuery,
-  LicenseKeysResponse,
+import {
+  formatReason,
+  type GenerateLicenseKeysRequest,
+  type GenerateLicenseKeysResponse,
+  type LicenseKeyBatch,
+  type LicenseKeyListItem,
+  type LicenseKeysQuery,
+  type LicenseKeysResponse,
 } from "@cloudbox/contracts";
 import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { audit } from "../audit";
@@ -217,12 +218,19 @@ export async function listLicenseKeys(
 
 export async function revokeLicenseKey(
   db: Db,
-  input: { id: string; reason: string; actorId: string; correlationId: string | null },
+  input: {
+    id: string;
+    reasonCode: string;
+    reasonText?: string;
+    actorId: string;
+    correlationId: string | null;
+  },
 ): Promise<void> {
   const revokedAt = new Date().toISOString();
+  const revokeReason = formatReason(input);
   const [row] = await db
     .update(licenseKeys)
-    .set({ status: "revoked", revokedAt, revokeReason: input.reason })
+    .set({ status: "revoked", revokedAt, revokeReason })
     .where(and(eq(licenseKeys.id, input.id), eq(licenseKeys.status, "unredeemed")))
     .returning({
       batchId: licenseKeys.batchId,
@@ -243,7 +251,14 @@ export async function revokeLicenseKey(
     entityId: input.id,
     actor: { type: "user", id: input.actorId },
     before: { status: "unredeemed" },
-    after: { status: "revoked", revokedAt, reason: input.reason, ...row },
+    after: {
+      status: "revoked",
+      revokedAt,
+      reasonCode: input.reasonCode,
+      reasonText: input.reasonText,
+      reason: revokeReason,
+      ...row,
+    },
     correlationId: input.correlationId,
     source: "api",
   });

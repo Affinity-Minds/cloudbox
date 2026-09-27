@@ -250,11 +250,16 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
     return created;
   }
 
+  const archiveBody = JSON.stringify({ reasonCode: "churned" });
+
   it("refuses with a reason when a device is still enrolled", async () => {
     const tenant = await seedArchiveCandidate();
     await seedDevice(env.DB, { tenantId: tenant.id });
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
+    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+      method: "POST",
+      body: archiveBody,
+    });
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: string; detail: string };
     expect(body.error).toBe("conflict");
@@ -265,15 +270,21 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
     const tenant = await seedArchiveCandidate();
     await seedSubscription(env.DB, { tenantId: tenant.id, validUntil: "2027-01-01T00:00:00.000Z" });
 
-    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
+    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+      method: "POST",
+      body: archiveBody,
+    });
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: string; detail: string };
     expect(body.detail).toMatch(/subscription/i);
   });
 
-  it("archives cleanly and audits TENANT_ARCHIVED when nothing blocks it", async () => {
+  it("archives cleanly and audits TENANT_ARCHIVED with the reason code and text", async () => {
     const tenant = await seedArchiveCandidate();
-    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
+    const response = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+      method: "POST",
+      body: JSON.stringify({ reasonCode: "other", reasonText: "Business closed down" }),
+    });
     expect(response.status).toBe(200);
     const archived = (await response.json()) as Tenant;
     expect(archived.status).toBe("archived");
@@ -282,11 +293,44 @@ describe("POST /api/v1/tenants/:tenantId/archive", () => {
     const events = await auditFor("tenant", tenant.id);
     const archiveEvent = events.find((e) => e.eventType === "TENANT_ARCHIVED");
     expect(archiveEvent?.before).toMatchObject({ status: "active" });
-    expect(archiveEvent?.after).toMatchObject({ status: "archived" });
+    expect(archiveEvent?.after).toMatchObject({
+      status: "archived",
+      reasonCode: "other",
+      reasonText: "Business closed down",
+      reason: "other: Business closed down",
+    });
 
     // Idempotent-ish: archiving again is a conflict, not a silent 200.
-    const again = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST" });
+    const again = await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+      method: "POST",
+      body: archiveBody,
+    });
     expect(again.status).toBe(409);
+  });
+
+  it("reason-code shape: missing/invalid code and other-without-text are 400", async () => {
+    const tenant = await seedArchiveCandidate();
+
+    expect(
+      (await call(`/api/v1/tenants/${tenant.id}/archive`, admin, { method: "POST", body: "{}" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+          method: "POST",
+          body: JSON.stringify({ reasonCode: "not_a_real_code" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(`/api/v1/tenants/${tenant.id}/archive`, admin, {
+          method: "POST",
+          body: JSON.stringify({ reasonCode: "other" }),
+        })
+      ).status,
+    ).toBe(400);
   });
 });
 
@@ -427,7 +471,7 @@ describe("POST /api/v1/tenants: the primary contact becomes the first Owner memb
     const response = await call(
       `/api/v1/tenants/${created.id}/memberships/${membership.id}`,
       admin,
-      { method: "DELETE" },
+      { method: "DELETE", body: JSON.stringify({ reasonCode: "role_change" }) },
     );
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: "last_owner" });

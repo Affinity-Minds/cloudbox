@@ -4,7 +4,6 @@ import type {
   CreateSubscriptionRequest,
   IssueEntitlementRequest,
   IssueEntitlementResponse,
-  RevokeEntitlementRequest,
   RevokeEntitlementResponse,
   Subscription,
   SubscriptionDetailScreen,
@@ -12,7 +11,7 @@ import type {
   UpdateSubscriptionRequest,
 } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 export const subscriptionsQuery = queryOptions({
   queryKey: ["screens", "subscriptions"],
@@ -59,7 +58,7 @@ export const issueEntitlement = (
     body,
   );
 
-export const revokeEntitlement = (deviceId: string, body: RevokeEntitlementRequest) =>
+export const revokeEntitlement = (deviceId: string, body: ReasonRequestBody) =>
   post<RevokeEntitlementResponse>(
     `/api/v1/devices/${encodeURIComponent(deviceId)}/entitlements/revoke`,
     body,

@@ -8,7 +8,12 @@
 // existing owner keeps their access and the new contact is not auto-added; only tenant creation
 // provisions a membership. See the "Standing ranking" section of the handoff for why the
 // last-active-owner guard in memberships.ts already covers this auto-created row correctly.
-import { CreateTenantRequest, UpdateTenantRequest } from "@cloudbox/contracts";
+import {
+  ArchiveTenantRequest,
+  CreateTenantRequest,
+  formatReason,
+  UpdateTenantRequest,
+} from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -228,71 +233,87 @@ router.patch(
   },
 );
 
-router.post("/:tenantId/archive", requirePermission("tenant.manage"), async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const db = createDb(c.env.DB);
+router.post(
+  "/:tenantId/archive",
+  requirePermission("tenant.manage"),
+  zValidator("json", ArchiveTenantRequest, (result, c) => {
+    if (!result.success) return c.json({ error: "invalid_request" }, 400);
+  }),
+  async (c) => {
+    const { reasonCode, reasonText } = c.req.valid("json");
+    const tenantId = c.req.param("tenantId");
+    const db = createDb(c.env.DB);
 
-  const [tenantRows, deviceRows, subscriptionRows] = await db.batch([
-    db.select().from(tenants).where(eq(tenants.id, tenantId)),
-    db
-      .select({ n: sql<number>`count(*)`.mapWith(Number) })
-      .from(devices)
-      .where(sql`${devices.tenantId} = ${tenantId} and ${devices.status} = 'enrolled'`),
-    db
-      .select({ n: sql<number>`count(*)`.mapWith(Number) })
-      .from(subscriptions)
-      .where(
-        sql`${subscriptions.tenantId} = ${tenantId} and ${subscriptions.status} in ${OPEN_SUBSCRIPTION_STATUSES}`,
-      ),
-  ]);
+    const [tenantRows, deviceRows, subscriptionRows] = await db.batch([
+      db.select().from(tenants).where(eq(tenants.id, tenantId)),
+      db
+        .select({ n: sql<number>`count(*)`.mapWith(Number) })
+        .from(devices)
+        .where(sql`${devices.tenantId} = ${tenantId} and ${devices.status} = 'enrolled'`),
+      db
+        .select({ n: sql<number>`count(*)`.mapWith(Number) })
+        .from(subscriptions)
+        .where(
+          sql`${subscriptions.tenantId} = ${tenantId} and ${subscriptions.status} in ${OPEN_SUBSCRIPTION_STATUSES}`,
+        ),
+    ]);
 
-  const before = tenantRows[0];
-  if (!before) return c.json({ error: "not_found" }, 404);
-  if (before.status === "archived") {
-    return c.json({ error: "conflict", detail: "Tenant is already archived." }, 409);
-  }
+    const before = tenantRows[0];
+    if (!before) return c.json({ error: "not_found" }, 404);
+    if (before.status === "archived") {
+      return c.json({ error: "conflict", detail: "Tenant is already archived." }, 409);
+    }
 
-  const enrolledDevices = deviceRows[0]?.n ?? 0;
-  const openSubscriptions = subscriptionRows[0]?.n ?? 0;
-  if (enrolledDevices > 0) {
-    return c.json(
-      {
-        error: "conflict",
-        detail: `Cannot archive: ${enrolledDevices} device${enrolledDevices === 1 ? "" : "s"} still enrolled. Revoke every device first.`,
-      },
-      409,
-    );
-  }
-  if (openSubscriptions > 0) {
-    return c.json(
-      {
-        error: "conflict",
-        detail: `Cannot archive: an active subscription exists. Cancel the subscription first.`,
-      },
-      409,
-    );
-  }
+    const enrolledDevices = deviceRows[0]?.n ?? 0;
+    const openSubscriptions = subscriptionRows[0]?.n ?? 0;
+    if (enrolledDevices > 0) {
+      return c.json(
+        {
+          error: "conflict",
+          detail: `Cannot archive: ${enrolledDevices} device${enrolledDevices === 1 ? "" : "s"} still enrolled. Revoke every device first.`,
+        },
+        409,
+      );
+    }
+    if (openSubscriptions > 0) {
+      return c.json(
+        {
+          error: "conflict",
+          detail: `Cannot archive: an active subscription exists. Cancel the subscription first.`,
+        },
+        409,
+      );
+    }
 
-  const now = nowIso();
-  const [[archived]] = await db.batch([
-    db
-      .update(tenants)
-      .set({ status: "archived", archivedAt: now, updatedAt: now })
-      .where(eq(tenants.id, tenantId))
-      .returning(),
-    audit(db, {
-      eventType: "TENANT_ARCHIVED",
-      entityType: "tenant",
-      entityId: tenantId,
-      actor: { type: "user", id: c.var.user.id },
-      before,
-      after: { ...before, status: "archived", archivedAt: now, updatedAt: now },
-      correlationId: c.var.correlationId,
-      source: "api",
-    }),
-  ]);
+    const now = nowIso();
+    const [[archived]] = await db.batch([
+      db
+        .update(tenants)
+        .set({ status: "archived", archivedAt: now, updatedAt: now })
+        .where(eq(tenants.id, tenantId))
+        .returning(),
+      audit(db, {
+        eventType: "TENANT_ARCHIVED",
+        entityType: "tenant",
+        entityId: tenantId,
+        actor: { type: "user", id: c.var.user.id },
+        before,
+        after: {
+          ...before,
+          status: "archived",
+          archivedAt: now,
+          updatedAt: now,
+          reasonCode,
+          reasonText,
+          reason: formatReason({ reasonCode, reasonText }),
+        },
+        correlationId: c.var.correlationId,
+        source: "api",
+      }),
+    ]);
 
-  return c.json(archived);
-});
+    return c.json(archived);
+  },
+);
 
 export default router;
