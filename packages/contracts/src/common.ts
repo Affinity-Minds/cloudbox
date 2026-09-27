@@ -23,6 +23,8 @@ export const ID_PREFIX = {
   backupJob: "bkj_",
   backupArtifact: "bka_",
   restoreTest: "rst_",
+  /** WT-17. */
+  alert: "alrt_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

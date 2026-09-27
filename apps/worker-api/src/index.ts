@@ -230,9 +230,10 @@ app.notFound((c) => {
   return serveAsset(c);
 });
 
-// WT-19: the Worker's Cron entry point (`src/scheduled.ts`'s own hook list). A module worker's
-// default export needs a `scheduled` method alongside `fetch` for Cron Triggers to fire
-// (`wrangler.jsonc`'s `triggers.crons`) — attached to the same `app` object, not a replacement
-// default export, so every existing test's `app.request(...)` (Hono's own test helper) keeps
-// working unchanged; Hono's `fetch` is already an instance property, so this only adds one.
+// WT-19/WT-17: the Worker's Cron entry point (`src/scheduled.ts`'s own hook list, which runs both
+// the alerts evaluator and the backup retention sweep). A module worker's default export needs a
+// `scheduled` method alongside `fetch` for Cron Triggers to fire (`wrangler.jsonc`'s
+// `triggers.crons`) — attached to the same `app` object, not a replacement default export, so
+// every existing test's `app.request(...)` (Hono's own test helper) keeps working unchanged;
+// Hono's `fetch` is already an instance property, so this only adds one.
 export default Object.assign(app, { scheduled });

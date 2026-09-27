@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { requireStaff } from "../../auth/middleware";
 import type { AppEnv } from "../../env";
 import agent from "./agent";
+import alerts, { alertsSettings } from "./alerts";
 import audit from "./audit";
 import auth from "./auth";
 import backups, { meBackups, tenantBackupPolicy } from "./backups";
@@ -13,6 +14,7 @@ import emailProviders from "./email-providers";
 import enrollment from "./enrollment";
 import entitlements from "./entitlements";
 import me from "./me";
+import meAlerts from "./me-alerts";
 import memberships from "./memberships";
 import realtime from "./realtime";
 import screens from "./screens";
@@ -40,6 +42,7 @@ v1.route("/staff", staff); // WT-1
 v1.route("/tenants", tenants); // WT-2
 v1.route("/tenants/:tenantId/memberships", memberships); // WT-2
 v1.route("/me", me); // WT-2
+v1.route("/me", meAlerts); // WT-17: GET /me/alerts, same mount, second small router (see its file)
 v1.route("/tenants/:tenantId/enrollment-tokens", enrollment); // WT-3
 v1.route("/devices", devices); // WT-3
 v1.route("/agent", agent); // WT-3
@@ -52,6 +55,8 @@ v1.route("/realtime", realtime); // WT-16
 v1.route("/backups", backups); // WT-19
 v1.route("/tenants/:tenantId/backup-policy", tenantBackupPolicy); // WT-19
 v1.route("/me/backups", meBackups); // WT-19
+v1.route("/settings/alerts", alertsSettings); // WT-17
+v1.route("/alerts", alerts); // WT-17
 v1.route("/screens", screens); // WT-0 (+ one line per screen owner in screens/index.ts)
 v1.route("/audit", audit); // WT-0
 v1.route("/", selfService); // WT-14: /onboarding/*, /connect/*, /license-keys/*

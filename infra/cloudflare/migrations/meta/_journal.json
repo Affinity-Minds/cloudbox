@@ -47,6 +47,13 @@
     {
       "idx": 6,
       "version": "6",
+      "when": 1790509127778,
+      "tag": "0015_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
       "when": 1790514936803,
       "tag": "0017_backups",
       "breakpoints": true
