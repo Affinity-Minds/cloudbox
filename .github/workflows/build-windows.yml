@@ -73,6 +73,7 @@ jobs:
           name: CloudBox.Server-win-x64
           path: |
             publish/setup/CloudBox.Server.Setup.exe
+            publish/agent/CloudBox.Agent.exe
             publish/status/*
             !publish/status/*.pdb
           if-no-files-found: error

@@ -14,7 +14,23 @@ public sealed class LocalLicense(IDeviceKeyStore keys, ISigningKeysClient signin
 {
     private readonly ILogger _log = Log.ForContext<LocalLicense>();
 
+    // The health loop re-evaluates every cycle; the device-key decrypt (TPM) runs only when the lease or the pinned key
+    // set changed. Claims are not secret; the cache lives in this process only.
+    private (string Token, int Pinned, string Thumbprint, EntitlementClaims? Claims, string? Error)? _last;
+
     public async Task<(EntitlementClaims? Claims, string? Error)> VerifyAsync(AgentState state, string token)
+    {
+        if (_last is { } c && c.Token == token && c.Pinned == state.PinnedSigningKeys.Count && c.Thumbprint == state.KeyThumbprint)
+        {
+            return (c.Claims, c.Error);
+        }
+
+        var result = await VerifyUncachedAsync(state, token);
+        _last = (token, state.PinnedSigningKeys.Count, state.KeyThumbprint, result.Claims, result.Error);
+        return result;
+    }
+
+    private async Task<(EntitlementClaims? Claims, string? Error)> VerifyUncachedAsync(AgentState state, string token)
     {
         var info = keys.TryOpen();
         using var rsa = keys.OpenPrivateKey();

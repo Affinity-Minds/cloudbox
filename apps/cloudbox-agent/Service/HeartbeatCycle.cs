@@ -89,6 +89,19 @@ public sealed class HeartbeatCycle(
                 Security.Log.Warning("Cloud reports no live entitlement; generation {Generation} treated as revoked", state.EntitlementGeneration);
             }
 
+            if (server is not null && state.PinnedSigningKeys.Count == 0)
+            {
+                // Enrolled before keys could be pinned (or by an older agent): pin them now, over this authenticated channel.
+                try
+                {
+                    await server.License.RefreshPinnedKeysAsync(state, ct);
+                }
+                catch (CloudApiException ex)
+                {
+                    _log.Warning("Could not pin the server signing keys yet: {Error}", ex.Message);
+                }
+            }
+
             if (res.EntitlementGeneration is { } gen && gen > state.EntitlementGeneration)
             {
                 var ent = await entitlements.GetEntitlementAsync(baseUrl, state.DeviceToken, ct);
@@ -116,7 +129,8 @@ public sealed class HeartbeatCycle(
             ConsecutiveFailures++;
             cloud = ex.State;
             error = ex.Message;
-            if (ex.Failure == CloudFailure.Unauthorized && !state.DeviceRevoked)
+            // 401 only: requireDevice answers 401 for a revoked device; a 403 can be an edge/WAF refusal.
+            if (ex.Status == 401 && !state.DeviceRevoked)
             {
                 state.DeviceRevoked = true;
                 Security.Log.Warning("Cloud refused this device's credential; remote access treated as revoked");

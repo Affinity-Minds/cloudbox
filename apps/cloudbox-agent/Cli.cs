@@ -251,6 +251,7 @@ public static class Cli
     {
         var context = new RevertContext();
         StopAgentService(); // Nothing may re-create managed users or reopen the gate while the manifest is replayed.
+        StopStatusApps(); // A running Status window would keep its exe locked.
         Func<CancellationToken, Task>? notify = state is null
             ? null
             : ct => api.NotifyUninstalledAsync(new Uri(state.BaseUrl), state.DeviceToken, ct);
@@ -296,6 +297,25 @@ public static class Cli
         catch (Exception ex) when (ex is InvalidOperationException or System.ServiceProcess.TimeoutException)
         {
             Console.Error.WriteLine($"Could not stop {AgentPaths.ServiceName} first ({ex.Message}); continuing");
+        }
+    }
+
+    private static void StopStatusApps()
+    {
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(AgentPaths.StatusExe)))
+        {
+            using (p)
+            {
+                try
+                {
+                    p.Kill();
+                    p.WaitForExit(5000);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    // Already gone.
+                }
+            }
         }
     }
 
