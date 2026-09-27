@@ -38,6 +38,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+/** The `{ reasonCode, reasonText? }` wire shape every revoke/retire/archive/delete endpoint
+ * accepts (`reason-select.tsx` builds one from the dropdown's value; the server validates the
+ * exact codes against the action's own zod enum in `@cloudbox/contracts/reasons`). */
+export type ReasonRequestBody = { reasonCode: string; reasonText?: string };
+
 export function describeError(error: unknown): string {
   if (error instanceof ApiError)
     return error.status ? `${error.status} ${error.error}` : error.error;

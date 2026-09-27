@@ -11,7 +11,7 @@ import type {
   UpdateTenantRequest,
 } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 export type TenantsFilter = {
   status?: string;
@@ -49,8 +49,11 @@ export const createTenant = (input: CreateTenantRequest) =>
 export const updateTenant = (tenantId: string, input: UpdateTenantRequest) =>
   api<Tenant>(`/api/v1/tenants/${tenantId}`, { method: "PATCH", body: JSON.stringify(input) });
 
-export const archiveTenant = (tenantId: string) =>
-  api<Tenant>(`/api/v1/tenants/${tenantId}/archive`, { method: "POST" });
+export const archiveTenant = (tenantId: string, body: ReasonRequestBody) =>
+  api<Tenant>(`/api/v1/tenants/${tenantId}/archive`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 export const inviteMember = (tenantId: string, input: CreateMembershipRequest) =>
   api<Membership>(`/api/v1/tenants/${tenantId}/memberships`, {
@@ -68,9 +71,10 @@ export const updateMemberStanding = (
     body: JSON.stringify(input),
   });
 
-export const removeMember = (tenantId: string, membershipId: string) =>
+export const removeMember = (tenantId: string, membershipId: string, body: ReasonRequestBody) =>
   api<Membership>(`/api/v1/tenants/${tenantId}/memberships/${membershipId}`, {
     method: "DELETE",
+    body: JSON.stringify(body),
   });
 
 export const myTenantsQuery = queryOptions({

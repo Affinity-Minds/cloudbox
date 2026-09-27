@@ -186,7 +186,9 @@ describe("plan CRUD", () => {
 describe("plan lifecycle: retire and reactivate", () => {
   it("retiring blocks the plan for a new tenant (409 plan_retired)", async () => {
     const plan = await createPlan();
-    expect((await call("POST", `/plans/${plan.code}/retire`)).status).toBe(200);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" })).status,
+    ).toBe(200);
 
     const response = await call("POST", "/tenants", {
       displayName: "Retired Plan Tenant",
@@ -200,7 +202,9 @@ describe("plan lifecycle: retire and reactivate", () => {
   it("retiring blocks the plan for a new subscription (409 plan_retired)", async () => {
     const plan = await createPlan();
     const { tenantId } = await seedTenant(env.DB, {});
-    expect((await call("POST", `/plans/${plan.code}/retire`)).status).toBe(200);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" })).status,
+    ).toBe(200);
 
     const response = await call("POST", `/tenants/${tenantId}/subscriptions`, {
       planCode: plan.code,
@@ -216,7 +220,9 @@ describe("plan lifecycle: retire and reactivate", () => {
     const { tenantId } = await seedTenant(env.DB, {});
     const { subscriptionId } = await seedSubscription(env.DB, { tenantId, planCode: plan.code });
 
-    const retireResponse = await call("POST", `/plans/${plan.code}/retire`);
+    const retireResponse = await call("POST", `/plans/${plan.code}/retire`, {
+      reasonCode: "discontinued",
+    });
     expect(retireResponse.status).toBe(200);
     const retireBody = (await retireResponse.json()) as { subscriptionCount: number };
     expect(retireBody.subscriptionCount).toBe(1);
@@ -235,7 +241,9 @@ describe("plan lifecycle: retire and reactivate", () => {
   it("cannot update a tenant to a retired plan either", async () => {
     const plan = await createPlan();
     const { tenantId } = await seedTenant(env.DB, {});
-    expect((await call("POST", `/plans/${plan.code}/retire`)).status).toBe(200);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" })).status,
+    ).toBe(200);
 
     const response = await call("PATCH", `/tenants/${tenantId}`, { planCode: plan.code });
     expect(response.status).toBe(409);
@@ -244,8 +252,10 @@ describe("plan lifecycle: retire and reactivate", () => {
 
   it("retiring twice is a 409, not a silent 200; reactivate un-blocks selection", async () => {
     const plan = await createPlan();
-    expect((await call("POST", `/plans/${plan.code}/retire`)).status).toBe(200);
-    const again = await call("POST", `/plans/${plan.code}/retire`);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" })).status,
+    ).toBe(200);
+    const again = await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" });
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: "already_retired" });
 
@@ -269,13 +279,17 @@ describe("plan lifecycle: retire and reactivate", () => {
   });
 
   it("retire/reactivate 404 on an unknown code", async () => {
-    expect((await call("POST", "/plans/does-not-exist/retire")).status).toBe(404);
+    expect(
+      (await call("POST", "/plans/does-not-exist/retire", { reasonCode: "discontinued" })).status,
+    ).toBe(404);
     expect((await call("POST", "/plans/does-not-exist/reactivate")).status).toBe(404);
   });
 
   it("a retired plan is excluded from the default GET /plans list but included with ?include=retired", async () => {
     const plan = await createPlan();
-    expect((await call("POST", `/plans/${plan.code}/retire`)).status).toBe(200);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "discontinued" })).status,
+    ).toBe(200);
 
     const defaultList = await call("GET", "/plans");
     const defaultCodes = ((await defaultList.json()) as { items: Plan[] }).items.map((p) => p.code);
@@ -284,6 +298,32 @@ describe("plan lifecycle: retire and reactivate", () => {
     const withRetired = await call("GET", "/plans?include=retired");
     const retiredCodes = ((await withRetired.json()) as { items: Plan[] }).items.map((p) => p.code);
     expect(retiredCodes).toContain(plan.code);
+  });
+
+  it("retire's reason-code shape: missing/invalid code and other-without-text are 400, a valid code+text audits both", async () => {
+    const plan = await createPlan();
+
+    expect((await call("POST", `/plans/${plan.code}/retire`, {})).status).toBe(400);
+    expect(
+      (await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "not_a_real_code" })).status,
+    ).toBe(400);
+    expect((await call("POST", `/plans/${plan.code}/retire`, { reasonCode: "other" })).status).toBe(
+      400,
+    );
+
+    const retired = await call("POST", `/plans/${plan.code}/retire`, {
+      reasonCode: "pricing_change",
+      reasonText: "Moving everyone to the new tiered pricing",
+    });
+    expect(retired.status).toBe(200);
+
+    const events = await auditFor(plan.code);
+    const retiredEvent = events.find((e) => e.eventType === "PLAN_RETIRED");
+    expect(retiredEvent?.after).toMatchObject({
+      reasonCode: "pricing_change",
+      reasonText: "Moving everyone to the new tiered pricing",
+      reason: "pricing_change: Moving everyone to the new tiered pricing",
+    });
   });
 });
 

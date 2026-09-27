@@ -11,7 +11,9 @@
 // propagate a parent router's path params into a sub-router's own param-key typing otherwise).
 import {
   CreateMembershipRequest,
+  formatReason,
   type MembershipStanding,
+  RemoveMembershipRequest,
   UpdateMembershipRequest,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
@@ -237,51 +239,67 @@ router.patch(
   },
 );
 
-router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const membershipId = c.req.param("id");
-  const db = createDb(c.env.DB);
+router.delete(
+  "/:id",
+  requireTenantManageOrAdmin(),
+  zValidator("json", RemoveMembershipRequest, (result, c) => {
+    if (!result.success) return c.json({ error: "invalid_request" }, 400);
+  }),
+  async (c) => {
+    const { reasonCode, reasonText } = c.req.valid("json");
+    const tenantId = c.req.param("tenantId");
+    const membershipId = c.req.param("id");
+    const db = createDb(c.env.DB);
 
-  const before = await db
-    .select()
-    .from(tenantMemberships)
-    .where(and(eq(tenantMemberships.id, membershipId), eq(tenantMemberships.tenantId, tenantId)))
-    .get();
-  if (!before) return c.json({ error: "not_found" }, 404);
-  if (before.status === "revoked") return c.json(before);
+    const before = await db
+      .select()
+      .from(tenantMemberships)
+      .where(and(eq(tenantMemberships.id, membershipId), eq(tenantMemberships.tenantId, tenantId)))
+      .get();
+    if (!before) return c.json({ error: "not_found" }, 404);
+    if (before.status === "revoked") return c.json(before);
 
-  const principal = await getPrincipal(c);
-  if (!principal) return c.json({ error: "unauthenticated" }, 401);
-  const rankDenied = await assertStandingRank(c, principal, tenantId, {
-    currentStanding: before.standing,
-  });
-  if (rankDenied) return rankDenied;
+    const principal = await getPrincipal(c);
+    if (!principal) return c.json({ error: "unauthenticated" }, 401);
+    const rankDenied = await assertStandingRank(c, principal, tenantId, {
+      currentStanding: before.standing,
+    });
+    if (rankDenied) return rankDenied;
 
-  const result = await db
-    .update(tenantMemberships)
-    .set({ status: "revoked" })
-    .where(and(eq(tenantMemberships.id, membershipId), keepsAnOwner(tenantId, membershipId)))
-    .run();
-  if (!changed(result)) {
-    return c.json(
-      { error: "last_owner", detail: "Promote another member to owner before revoking this one." },
-      409,
-    );
-  }
+    const result = await db
+      .update(tenantMemberships)
+      .set({ status: "revoked" })
+      .where(and(eq(tenantMemberships.id, membershipId), keepsAnOwner(tenantId, membershipId)))
+      .run();
+    if (!changed(result)) {
+      return c.json(
+        {
+          error: "last_owner",
+          detail: "Promote another member to owner before revoking this one.",
+        },
+        409,
+      );
+    }
 
-  const after = { ...before, status: "revoked" as const };
-  await audit(db, {
-    eventType: "USER_REMOVED",
-    entityType: "membership",
-    entityId: membershipId,
-    actor: { type: "user", id: c.var.user.id, tenantId },
-    before,
-    after,
-    correlationId: c.var.correlationId,
-    source: "api",
-  });
+    const after = { ...before, status: "revoked" as const };
+    await audit(db, {
+      eventType: "USER_REMOVED",
+      entityType: "membership",
+      entityId: membershipId,
+      actor: { type: "user", id: c.var.user.id, tenantId },
+      before,
+      after: {
+        ...after,
+        reasonCode,
+        reasonText,
+        reason: formatReason({ reasonCode, reasonText }),
+      },
+      correlationId: c.var.correlationId,
+      source: "api",
+    });
 
-  return c.json(after);
-});
+    return c.json(after);
+  },
+);
 
 export default router;

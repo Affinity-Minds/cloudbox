@@ -1,11 +1,12 @@
 // Owner: WT-2. Tenant detail: tabs Overview / Members / Devices / Subscription / Audit.
 // Tab lives in the query string (agent-notes ux-patterns "Routes, not tab state").
-import type {
-  AuditEntry,
-  Device,
-  Membership,
-  SubscriptionWithPricing,
-  Tenant,
+import {
+  type AuditEntry,
+  type Device,
+  MEMBERSHIP_REVOKE_REASON_CODES,
+  type Membership,
+  type SubscriptionWithPricing,
+  type Tenant,
 } from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -17,10 +18,27 @@ import { describeError } from "@/api/client";
 import { inviteMember, removeMember, tenantDetailQuery, updateMemberStanding } from "@/api/tenants";
 import { EmptyState, ErrorState, PageHeader, Section } from "@/components/page";
 import { formatMoney } from "@/components/plan-bits";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { StatusPill, type Tone } from "@/components/status-pill";
 import { ArchiveTenantDialog } from "@/components/tenants/archive-tenant-dialog";
 import { InviteMemberDialog } from "@/components/tenants/invite-member-dialog";
 import { TenantFormSheet } from "@/components/tenants/tenant-form-sheet";
+
+const MEMBERSHIP_REVOKE_REASON_LABELS: Record<
+  (typeof MEMBERSHIP_REVOKE_REASON_CODES)[number],
+  string
+> = {
+  left_organisation: "Left the organisation",
+  role_change: "Role change",
+  security_incident: "Security incident",
+  other: "Other",
+};
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -224,6 +242,7 @@ function MembersTab({ tenantId, memberships }: { tenantId: string; memberships: 
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [revoking, setRevoking] = useState<Membership | null>(null);
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["screens", "tenants", tenantId] });
@@ -240,11 +259,12 @@ function MembersTab({ tenantId, memberships }: { tenantId: string; memberships: 
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (id: string) => removeMember(tenantId, id),
+    mutationFn: (id: string) => removeMember(tenantId, id, reasonRequestBody(reason)),
     onSuccess: () => {
       invalidate();
       toast.success("Membership revoked");
       setRevoking(null);
+      setReason({ code: "" });
     },
     onError: (error) => toast.error("Could not revoke", { description: describeError(error) }),
   });
@@ -343,7 +363,15 @@ function MembersTab({ tenantId, memberships }: { tenantId: string; memberships: 
 
       <InviteMemberDialog tenantId={tenantId} open={inviteOpen} onOpenChange={setInviteOpen} />
 
-      <Dialog open={revoking !== null} onOpenChange={(open) => !open && setRevoking(null)}>
+      <Dialog
+        open={revoking !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevoking(null);
+            setReason({ code: "" });
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Revoke {revoking?.name || revoking?.email}?</DialogTitle>
@@ -352,10 +380,18 @@ function MembersTab({ tenantId, memberships }: { tenantId: string; memberships: 
               so it can be reinstated later.
             </DialogDescription>
           </DialogHeader>
+          <ReasonSelect
+            options={MEMBERSHIP_REVOKE_REASON_CODES.map((code) => ({
+              code,
+              label: MEMBERSHIP_REVOKE_REASON_LABELS[code],
+            }))}
+            value={reason}
+            onChange={setReason}
+          />
           <DialogFooter>
             <Button
               variant="destructive"
-              disabled={revokeMutation.isPending}
+              disabled={!isReasonValid(reason) || revokeMutation.isPending}
               onClick={() => revoking && revokeMutation.mutate(revoking.id)}
             >
               {revokeMutation.isPending ? "Revoking…" : "Revoke"}

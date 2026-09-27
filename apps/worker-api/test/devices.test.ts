@@ -48,7 +48,11 @@ describe("revokeDevice (handler logic, bypassing the staff gate)", () => {
     const { deviceId } = await enrollFreshDevice("devices-unit-1");
     const db = createDb(env.DB);
 
-    const first = await revokeDevice(db, { deviceId, actorId: "u1" });
+    const first = await revokeDevice(db, {
+      deviceId,
+      reasonCode: "decommissioned",
+      actorId: "u1",
+    });
     expect(first).toBe("revoked");
 
     const [device] = await db.select().from(devices).where(eq(devices.id, deviceId));
@@ -59,13 +63,21 @@ describe("revokeDevice (handler logic, bypassing the staff gate)", () => {
       .where(and(eq(deviceCredentials.deviceId, deviceId), isNull(deviceCredentials.revokedAt)));
     expect(activeCreds).toHaveLength(0);
 
-    const second = await revokeDevice(db, { deviceId, actorId: "u1" });
+    const second = await revokeDevice(db, {
+      deviceId,
+      reasonCode: "decommissioned",
+      actorId: "u1",
+    });
     expect(second).toBe("already_revoked");
   });
 
   it("reports not_found for an unknown device id", async () => {
     const db = createDb(env.DB);
-    const result = await revokeDevice(db, { deviceId: "dev_does-not-exist", actorId: "u1" });
+    const result = await revokeDevice(db, {
+      deviceId: "dev_does-not-exist",
+      reasonCode: "decommissioned",
+      actorId: "u1",
+    });
     expect(result).toBe("not_found");
   });
 });
@@ -91,7 +103,7 @@ describe("POST /api/v1/devices/:deviceId/revoke (staff gate)", () => {
     expect(denied.status).toBe(401);
   });
 
-  it("204s for staff holding device.manage and audits DEVICE_REVOKED", async () => {
+  it("204s for staff holding device.manage and audits DEVICE_REVOKED with the reason code and text", async () => {
     const { deviceId } = await enrollFreshDevice("devices-http-2");
     const { headers } = await signInAs(env, {
       email: "devices-staff@example.test",
@@ -100,17 +112,24 @@ describe("POST /api/v1/devices/:deviceId/revoke (staff gate)", () => {
 
     const response = await app.request(
       `/api/v1/devices/${deviceId}/revoke`,
-      { method: "POST", headers },
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "other", reasonText: "Hardware returned to vendor" }),
+      },
       env,
     );
     expect(response.status).toBe(204);
 
     const auditRow = await env.DB.prepare(
-      "SELECT actor_type FROM audit_log WHERE event_type = 'DEVICE_REVOKED' AND entity_id = ?",
+      "SELECT actor_type, after_json FROM audit_log WHERE event_type = 'DEVICE_REVOKED' AND entity_id = ?",
     )
       .bind(deviceId)
-      .first<{ actor_type: string }>();
+      .first<{ actor_type: string; after_json: string }>();
     expect(auditRow?.actor_type).toBe("user");
+    const after = JSON.parse(auditRow?.after_json ?? "{}");
+    expect(after.reasonCode).toBe("other");
+    expect(after.reasonText).toBe("Hardware returned to vendor");
   });
 
   it("404s an unknown device", async () => {
@@ -120,9 +139,63 @@ describe("POST /api/v1/devices/:deviceId/revoke (staff gate)", () => {
     });
     const response = await app.request(
       "/api/v1/devices/dev_does-not-exist/revoke",
-      { method: "POST", headers },
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "decommissioned" }),
+      },
       env,
     );
     expect(response.status).toBe(404);
+  });
+
+  it("400s a missing reason code", async () => {
+    const { deviceId } = await enrollFreshDevice("devices-http-3");
+    const { headers } = await signInAs(env, {
+      email: "devices-staff3@example.test",
+      staffRole: "admin",
+    });
+    const response = await app.request(
+      `/api/v1/devices/${deviceId}/revoke`,
+      { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" },
+      env,
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("400s an invalid reason code", async () => {
+    const { deviceId } = await enrollFreshDevice("devices-http-4");
+    const { headers } = await signInAs(env, {
+      email: "devices-staff4@example.test",
+      staffRole: "admin",
+    });
+    const response = await app.request(
+      `/api/v1/devices/${deviceId}/revoke`,
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "not_a_real_code" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it('400s "other" with no reason text', async () => {
+    const { deviceId } = await enrollFreshDevice("devices-http-5");
+    const { headers } = await signInAs(env, {
+      email: "devices-staff5@example.test",
+      staffRole: "admin",
+    });
+    const response = await app.request(
+      `/api/v1/devices/${deviceId}/revoke`,
+      {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ reasonCode: "other" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
   });
 });

@@ -1,13 +1,14 @@
 // Owner: WT-3. Device detail drawer: /api/v1/screens/fleet/:deviceId (Overview + License + Health
 // + Audit tabs, one request). Licensing actions (Issue/Renew/Revoke) are WT-5's — this tab links to
 // the Subscriptions drawer rather than duplicating them (WT-5's handoff).
-import type {
-  AgentHealth,
-  AuditEntry,
-  FleetDeviceDetail,
-  FleetEntitlementRow,
-  LicenseState,
-  TenantPlan,
+import {
+  type AgentHealth,
+  type AuditEntry,
+  DEVICE_REVOKE_REASON_CODES,
+  type FleetDeviceDetail,
+  type FleetEntitlementRow,
+  type LicenseState,
+  type TenantPlan,
 } from "@cloudbox/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -18,6 +19,12 @@ import { describeError } from "@/api/client";
 import { fleetDetailQuery, revokeDevice } from "@/api/devices";
 import { KeyProtectionPill, LicenseStatePill, OnlinePill } from "@/components/device-bits";
 import { EmptyState, ErrorState } from "@/components/page";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { KeyValue } from "@/components/subscription-bits";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +52,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatAgo, formatTimestamp } from "@/lib/time";
+
+const DEVICE_REVOKE_REASON_LABELS: Record<(typeof DEVICE_REVOKE_REASON_CODES)[number], string> = {
+  decommissioned: "Decommissioned",
+  replaced: "Replaced",
+  lost_or_stolen: "Lost or stolen",
+  tenant_offboarded: "Tenant offboarded",
+  security_incident: "Security incident",
+  other: "Other",
+};
 
 export const Route = createFileRoute("/_app/fleet/$deviceId")({
   loader: ({ context, params }) => {
@@ -361,8 +377,9 @@ function RevokeDialog({
   deviceName: string;
 }) {
   const queryClient = useQueryClient();
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
   const mutation = useMutation({
-    mutationFn: () => revokeDevice(deviceId),
+    mutationFn: () => revokeDevice(deviceId, reasonRequestBody(reason)),
     onSuccess: async () => {
       toast.success(`${deviceName} revoked`);
       onOpenChange(false);
@@ -372,7 +389,13 @@ function RevokeDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setReason({ code: "" });
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Revoke {deviceName}?</DialogTitle>
@@ -381,6 +404,14 @@ function RevokeDialog({
             immediately and needs a fresh enrollment token to come back.
           </DialogDescription>
         </DialogHeader>
+        <ReasonSelect
+          options={DEVICE_REVOKE_REASON_CODES.map((code) => ({
+            code,
+            label: DEVICE_REVOKE_REASON_LABELS[code],
+          }))}
+          value={reason}
+          onChange={setReason}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -388,7 +419,7 @@ function RevokeDialog({
           <Button
             variant="destructive"
             onClick={() => mutation.mutate()}
-            disabled={mutation.isPending}
+            disabled={!isReasonValid(reason) || mutation.isPending}
           >
             {mutation.isPending ? "Revoking…" : "Revoke device"}
           </Button>

@@ -150,26 +150,61 @@ describe("update (reorder, enable/disable)", () => {
 });
 
 describe("delete", () => {
+  const deleteReason = { reasonCode: "unused" };
+
   it("refuses to delete the only enabled provider", async () => {
     // Wipe first so an earlier test's rows cannot mask the "only enabled" rule.
     await env.DB.prepare("DELETE FROM email_providers").run();
     const only = await createBinding(uniqueName("Only enabled"));
 
-    const refused = await call("DELETE", `/${only.id}`);
+    const refused = await call("DELETE", `/${only.id}`, deleteReason);
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({ error: "conflict", detail: "last_enabled_provider" });
 
     // A second enabled provider frees it up.
     const second = await createBinding(uniqueName("Second enabled"));
-    expect((await call("DELETE", `/${only.id}`)).status).toBe(204);
+    expect((await call("DELETE", `/${only.id}`, deleteReason)).status).toBe(204);
     const list = (await (await call("GET", "")).json()) as { items: EmailProvider[] };
     expect(list.items.find((i) => i.id === only.id)).toBeUndefined();
 
-    await call("DELETE", `/${second.id}`);
+    await call("DELETE", `/${second.id}`, deleteReason);
   });
 
   it("404s a missing provider", async () => {
-    expect((await call("DELETE", "/eprv_missing")).status).toBe(404);
+    expect((await call("DELETE", "/eprv_missing", deleteReason)).status).toBe(404);
+  });
+
+  it("audits EMAIL_PROVIDER_DELETED with the reason code and text", async () => {
+    const provider = await createBinding(uniqueName("Audited delete"));
+    await createBinding(uniqueName("Keeps it non-last"));
+    const response = await call("DELETE", `/${provider.id}`, {
+      reasonCode: "other",
+      reasonText: "Switching providers entirely",
+    });
+    expect(response.status).toBe(204);
+
+    const row = await env.DB.prepare(
+      "SELECT after_json FROM audit_log WHERE event_type = 'EMAIL_PROVIDER_DELETED' AND entity_id = ?",
+    )
+      .bind(provider.id)
+      .first<{ after_json: string }>();
+    const after = JSON.parse(row?.after_json ?? "{}");
+    expect(after).toMatchObject({
+      reasonCode: "other",
+      reasonText: "Switching providers entirely",
+      reason: "other: Switching providers entirely",
+    });
+  });
+
+  it("reason-code shape: missing/invalid code and other-without-text are 400", async () => {
+    const provider = await createBinding(uniqueName("Reason shape"));
+    await createBinding(uniqueName("Reason shape sibling"));
+
+    expect((await call("DELETE", `/${provider.id}`, {})).status).toBe(400);
+    expect(
+      (await call("DELETE", `/${provider.id}`, { reasonCode: "not_a_real_code" })).status,
+    ).toBe(400);
+    expect((await call("DELETE", `/${provider.id}`, { reasonCode: "other" })).status).toBe(400);
   });
 });
 

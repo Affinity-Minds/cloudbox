@@ -1,11 +1,17 @@
 // Typed-name confirmation (agent-notes ux-patterns "Confirmations"): not security, a moment to
 // notice which record is selected. Stays open on failure (409 refusal) and shows the reason.
-import type { Tenant } from "@cloudbox/contracts";
+import { TENANT_ARCHIVE_REASON_CODES, type Tenant } from "@cloudbox/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/api/client";
 import { archiveTenant } from "@/api/tenants";
+import {
+  isReasonValid,
+  ReasonSelect,
+  type ReasonValue,
+  reasonRequestBody,
+} from "@/components/reason-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,6 +23,14 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+
+const TENANT_ARCHIVE_REASON_LABELS: Record<(typeof TENANT_ARCHIVE_REASON_CODES)[number], string> = {
+  churned: "Churned",
+  duplicate: "Duplicate tenant",
+  test_tenant: "Test tenant",
+  merged: "Merged into another tenant",
+  other: "Other",
+};
 
 export function ArchiveTenantDialog({
   tenant,
@@ -30,14 +44,16 @@ export function ArchiveTenantDialog({
   onArchived?: (tenant: Tenant) => void;
 }) {
   const [typed, setTyped] = useState("");
+  const [reason, setReason] = useState<ReasonValue>({ code: "" });
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () => archiveTenant(tenant.id),
+    mutationFn: () => archiveTenant(tenant.id, reasonRequestBody(reason)),
     onSuccess: (archived) => {
       queryClient.invalidateQueries({ queryKey: ["screens", "tenants"] });
       toast.success(`${archived.displayName} archived`);
       setTyped("");
+      setReason({ code: "" });
       onOpenChange(false);
       onArchived?.(archived);
     },
@@ -53,7 +69,10 @@ export function ArchiveTenantDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setTyped("");
+        if (!next) {
+          setTyped("");
+          setReason({ code: "" });
+        }
         onOpenChange(next);
       }}
     >
@@ -65,13 +84,20 @@ export function ArchiveTenantDialog({
             the active tenant list. This cannot be undone from here.
           </DialogDescription>
         </DialogHeader>
+        <ReasonSelect
+          options={TENANT_ARCHIVE_REASON_CODES.map((code) => ({
+            code,
+            label: TENANT_ARCHIVE_REASON_LABELS[code],
+          }))}
+          value={reason}
+          onChange={setReason}
+        />
         <Field>
           <FieldLabel htmlFor="confirm-name">
             Type <span className="font-medium">{tenant.displayName}</span> to confirm
           </FieldLabel>
           <Input
             id="confirm-name"
-            autoFocus
             autoComplete="off"
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
@@ -92,7 +118,7 @@ export function ArchiveTenantDialog({
         <DialogFooter>
           <Button
             variant="destructive"
-            disabled={!matches || mutation.isPending}
+            disabled={!matches || !isReasonValid(reason) || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? "Archiving…" : "Archive tenant"}

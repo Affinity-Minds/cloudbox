@@ -7,7 +7,7 @@ import type {
   FleetScreen,
 } from "@cloudbox/contracts";
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, type ReasonRequestBody } from "./client";
 
 export type FleetFilters = { tenant?: string; online?: boolean; q?: string };
 
@@ -32,8 +32,11 @@ export const fleetDetailQuery = (deviceId: string) =>
     queryFn: () => api<FleetDetailScreen>(`/api/v1/screens/fleet/${encodeURIComponent(deviceId)}`),
   });
 
-export const revokeDevice = (deviceId: string) =>
-  api<void>(`/api/v1/devices/${encodeURIComponent(deviceId)}/revoke`, { method: "POST" });
+export const revokeDevice = (deviceId: string, body: ReasonRequestBody) =>
+  api<void>(`/api/v1/devices/${encodeURIComponent(deviceId)}/revoke`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 export const enrollmentTokensQuery = (tenantId: string) =>
   queryOptions({
