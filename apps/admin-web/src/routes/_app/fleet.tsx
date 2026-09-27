@@ -21,7 +21,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useFleetPresence } from "@/hooks/use-fleet-presence";
 import { formatAgo, formatTimestamp } from "@/lib/time";
+import { cn } from "@/lib/utils";
+
+/** A Fleet row with the FleetPresence WebSocket feed (WT-16) layered on top when it has heard
+ * about this device: fresher `online`/`lastSeenAt`, plus `activeSessions`, which the REST screen
+ * loader does not carry at all (it is ephemeral, DO-only state — spec §5.3). */
+type LiveFleetRow = FleetListItem & { activeSessions: number | null };
 
 export const Route = createFileRoute("/_app/fleet")({
   loader: ({ context }) => {
@@ -33,7 +40,7 @@ export const Route = createFileRoute("/_app/fleet")({
 type OnlineFilter = "all" | "online" | "offline";
 
 const features = tableFeatures({});
-const column = createColumnHelper<typeof features, FleetListItem>();
+const column = createColumnHelper<typeof features, LiveFleetRow>();
 
 const columns = column.columns([
   column.display({
@@ -97,6 +104,17 @@ const columns = column.columns([
     header: "License",
     cell: ({ row }) => <LicenseStatePill state={row.original.licenseState} />,
   }),
+  column.display({
+    id: "sessions",
+    header: "Sessions",
+    // WT-16: only the live WebSocket feed knows this; unknown (no live data yet) renders "—",
+    // never 0 — the same "don't guess a number you don't have" convention as the Health tab.
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">
+        {row.original.activeSessions ?? <span className="text-muted-foreground">—</span>}
+      </span>
+    ),
+  }),
   column.accessor("enrolledAt", {
     header: "Enrolled",
     cell: (info) => (
@@ -107,12 +125,35 @@ const columns = column.columns([
   }),
 ]);
 
+/** Small header badge for the FleetPresence WebSocket feed's own connection state (WT-16) — not
+ * the REST loader's `query.isFetching`, which the Refresh button already covers. "Live" is the
+ * steady state; "Connecting"/"Reconnecting" and "Offline" are honest about what they are, never
+ * silently retried forever without telling anyone (the REST loader keeps serving in the
+ * meantime — this badge is additive, never load-bearing). */
+function LiveIndicator({ status }: { status: "connecting" | "open" | "closed" }) {
+  const label = status === "open" ? "Live" : status === "connecting" ? "Connecting…" : "Offline";
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          status === "open" && "bg-emerald-500",
+          status === "connecting" && "animate-pulse bg-amber-500",
+          status === "closed" && "bg-muted-foreground/50",
+        )}
+      />
+      {label}
+    </span>
+  );
+}
+
 function FleetPage() {
   const [tenant, setTenant] = useState("");
   const [onlineFilter, setOnlineFilter] = useState<OnlineFilter>("all");
   const [degradedOnly, setDegradedOnly] = useState(false);
   const [q, setQ] = useState("");
   const navigate = useNavigate();
+  const { presence, status: liveStatus } = useFleetPresence();
 
   const query = useQuery(
     fleetQuery({
@@ -124,8 +165,27 @@ function FleetPage() {
 
   const items = useMemo(() => {
     const all = query.data?.items ?? [];
-    return degradedOnly ? all.filter((d) => d.keyProtection === "software") : all;
-  }, [query.data, degradedOnly]);
+    const withLiveState: LiveFleetRow[] = all.map((item) => {
+      const live = presence[item.id];
+      return live
+        ? {
+            ...item,
+            online: live.online,
+            lastSeenAt: live.lastSeenAt,
+            activeSessions: live.activeSessions,
+          }
+        : { ...item, activeSessions: null };
+    });
+    // The online filter is applied client-side too, in case a device's live state moved since
+    // the REST loader ran (fresh push vs. a filter chosen a moment earlier).
+    const onlineFiltered =
+      onlineFilter === "all"
+        ? withLiveState
+        : withLiveState.filter((d) => d.online === (onlineFilter === "online"));
+    return degradedOnly
+      ? onlineFiltered.filter((d) => d.keyProtection === "software")
+      : onlineFiltered;
+  }, [query.data, degradedOnly, onlineFilter, presence]);
 
   const table = useTable({ features, columns, data: items, getRowId: (row) => row.id });
   const tenants = query.data?.tenants ?? [];
@@ -137,15 +197,18 @@ function FleetPage() {
         title="Fleet"
         description="Enrolled devices with online state, agent version and last heartbeat."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => query.refetch()}
-            disabled={query.isFetching}
-          >
-            <RefreshCw className={query.isFetching ? "animate-spin" : undefined} />
-            Refresh
-          </Button>
+          <>
+            <LiveIndicator status={liveStatus} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => query.refetch()}
+              disabled={query.isFetching}
+            >
+              <RefreshCw className={query.isFetching ? "animate-spin" : undefined} />
+              Refresh
+            </Button>
+          </>
         }
       />
 

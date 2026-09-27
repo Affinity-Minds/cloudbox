@@ -33,6 +33,8 @@ import type { AppDevice, AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 // WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
 import { activateLicense } from "../../onboarding/activation";
+// WT-16: best-effort push to the FleetPresence Durable Object; never fails the heartbeat itself.
+import { notifyHeartbeatPresence } from "../../realtime/notify-presence";
 
 const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
 
@@ -252,6 +254,13 @@ agent.post(
     const db = createDb(c.env.DB);
     const response = await recordHeartbeat(db, c.var.device, health);
     if (response.entitlementGeneration !== null) {
+      await notifyHeartbeatPresence(c.env, {
+        deviceId: c.var.device.id,
+        tenantId: c.var.device.tenantId,
+        agentVersion: health.agent.version,
+        licenseState: "active",
+        activeSessions: health.users?.active_sessions ?? null,
+      });
       return c.json({ ...response, licenseState: "licensed" as const });
     }
     // No live entitlement: redeem/issue if the tenant's plan allows it (WT-14 auto-issuance).
@@ -261,6 +270,13 @@ agent.post(
     }).catch((error: unknown) => {
       console.error("heartbeat: auto-issuance failed", c.var.device.id, error);
       return { generation: null } as Awaited<ReturnType<typeof activateLicense>>;
+    });
+    await notifyHeartbeatPresence(c.env, {
+      deviceId: c.var.device.id,
+      tenantId: c.var.device.tenantId,
+      agentVersion: health.agent.version,
+      licenseState: licence.generation !== null ? "active" : "none",
+      activeSessions: health.users?.active_sessions ?? null,
     });
     return c.json({
       ...response,

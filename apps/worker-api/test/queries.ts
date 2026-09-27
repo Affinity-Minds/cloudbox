@@ -61,6 +61,14 @@ export const queries: RegisteredQuery[] = [
     sql: `SELECT "tenant_memberships"."tenant_id" FROM "tenant_memberships" WHERE "tenant_memberships"."user_id" = ? AND "tenant_memberships"."status" = 'active'`,
     params: ["u_test"],
   },
+  // ─── routes/v1/realtime.ts (resolveRealtimeAccess): a customer's active tenant memberships,
+  // same index as screens.fleet's own lookup above but built through drizzle's `and()` (parens,
+  // both sides parameterised) rather than a literal `sql` template ────────────────────────────
+  {
+    name: "realtime.fleet: resolveRealtimeAccess — the caller's active tenant memberships",
+    sql: `select "tenant_memberships"."tenant_id" from "tenant_memberships" where ("tenant_memberships"."user_id" = ? and "tenant_memberships"."status" = ?)`,
+    params: ["u_test", "active"],
+  },
   // ─── screens/fleet.ts (loadFleetDetail): one device, its entitlement history, its audit trail ──
   {
     name: "screens.fleet: device detail by id, joined to its tenant",

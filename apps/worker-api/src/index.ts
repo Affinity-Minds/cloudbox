@@ -8,28 +8,19 @@ import { customerCodeStepUp } from "./auth/challenge";
 import { guardFor, isSameOriginWrite } from "./auth/middleware";
 import { ensureBootstrapSuperAdmin } from "./auth/users";
 import { createDb } from "./db/client";
-import type { AppEnv, Bindings } from "./env";
+import type { AppEnv } from "./env";
 import { changeFoundationRelease, loadFoundation } from "./foundation";
 import { apiVersion, correlationId } from "./http";
 import { onboardingAuth } from "./onboarding/auth-routes";
 import { serveAsset } from "./ops-shell";
+// WT-16: the FleetPresence Durable Object lives in src/realtime/fleet-presence.ts; re-exported
+// here because `main`/`exports` (wrangler.jsonc) bind the class from this file.
+import { FleetPresence } from "./realtime/fleet-presence";
 import v1 from "./routes/v1";
 import { logoutFor } from "./routes/v1/auth";
 
 export type { Bindings } from "./env";
-
-export class FleetPresence {
-  constructor(
-    private readonly state: DurableObjectState,
-    private readonly env: Bindings,
-  ) {}
-
-  async fetch(): Promise<Response> {
-    void this.state;
-    void this.env;
-    return new Response(null, { status: 204 });
-  }
-}
+export { FleetPresence };
 
 const app = new Hono<AppEnv>();
 
