@@ -24,10 +24,13 @@ jobs:
       - run: dotnet build apps/cloudbox-connect.tests/CloudBox.Connect.Tests.csproj --configuration Release
       - run: dotnet test apps/cloudbox-connect.tests/CloudBox.Connect.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal"
       - run: dotnet publish apps/cloudbox-connect/CloudBox.Connect.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
-      - name: List published files (must be the one exe only)
+      # WPF's own native interop DLLs (D3DCompiler, PresentationNative, wpfgfx, PenImc, vcruntime)
+      # cannot be bundled into the single file (a documented .NET limitation for WPF apps) — they
+      # publish alongside CloudBox.Connect.exe, not inside it. The artifact is the whole folder.
+      - name: List published files (the exe plus WPF's native dependencies)
         run: Get-ChildItem publish | Format-Table Name, Length -AutoSize
       - uses: actions/upload-artifact@v4
         with:
           name: CloudBox.Connect-win-x64
-          path: publish/CloudBox.Connect.exe
+          path: publish/
           if-no-files-found: error

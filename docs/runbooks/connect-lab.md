@@ -35,9 +35,11 @@ does not block on a separate Agent change.
    ```
 2. **Download the build** on PC B. GitHub → Affinity-Minds/cloudbox → PR "WT-11: CloudBox Connect
    client" → Checks → *Build Connect client* → run summary → Artifacts → `CloudBox.Connect-win-x64`.
-   Extract; it contains `CloudBox.Connect.exe` only. No admin, no install step — just run it (unblock
-   the download mark first if Windows flags it: right-click → Properties → Unblock, or
-   `Get-Item .\CloudBox.Connect.exe | Unblock-File`).
+   Extract; it contains `CloudBox.Connect.exe` plus a handful of WPF native DLLs (D3DCompiler,
+   PresentationNative, wpfgfx, PenImc, vcruntime — WPF cannot bundle these into the single file,
+   unlike the Agent's exe) that must stay next to it. No admin, no install step — just run the exe
+   from that folder (unblock the download mark first if Windows flags it:
+   `Get-ChildItem | Unblock-File`).
 3. **Sign in.** Enter the tenant's public code (e.g. `CBX-00001`, shown in the console's tenant
    page) and the member's email → **Send code**. Check that inbox (or the console's `AUTH_OTP_SENT`
    audit row in a dev environment where email delivery is stubbed) for the 6-digit code, type it (or
