@@ -3,6 +3,7 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { evaluateAlerts } from "./alerts/evaluate";
 import { authContextFor, createAuth, customerAuthFor, HONEYPOT_HEADER } from "./auth";
 import { customerCodeStepUp } from "./auth/challenge";
 import { guardFor, isSameOriginWrite } from "./auth/middleware";
@@ -222,6 +223,23 @@ app.patch("/api/v1/foundation/release", async (c) => {
 
 app.route("/api/v1", v1);
 
+/**
+ * WT-17, additive: the alerts evaluator, on the Cron Trigger configured in `wrangler.jsonc`
+ * (`triggers.crons`). Attached to the same object `export default app` already exports — Hono
+ * app instances are plain objects (see `Object.assign` below), so this does not disturb `.request`
+ * (used by every existing test) or any other export. Never throws: a failed tick is logged and the
+ * next tick (5 minutes later) retries from D1 state, since the evaluator is idempotent.
+ */
+async function runAlertsCron(env: Bindings): Promise<void> {
+  try {
+    const db = createDb(env.DB);
+    const result = await evaluateAlerts(env, db);
+    console.log("alerts cron", JSON.stringify(result));
+  } catch (error) {
+    console.error("alerts cron failed", error);
+  }
+}
+
 app.onError((error, c) => {
   if (error instanceof HTTPException) return error.getResponse();
   console.error("unhandled", c.var.correlationId, error);
@@ -238,4 +256,11 @@ app.notFound((c) => {
   return serveAsset(c);
 });
 
-export default app;
+// WT-17, additive: attaches `.scheduled` to the same exported object (still `app`, same
+// `.request`/`.fetch`; `Object.assign` mutates and returns the target, it does not clone it), so
+// workerd's Cron Trigger finds it on the default export alongside `fetch`.
+export default Object.assign(app, {
+  scheduled: async (_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
+    ctx.waitUntil(runAlertsCron(env));
+  },
+});

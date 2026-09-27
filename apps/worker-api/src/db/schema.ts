@@ -671,3 +671,66 @@ export const emailProviders = sqliteTable(
     ),
   ],
 );
+
+// ─── Alerts (migration 0015, WT-17) ──────────────────────────────────────────────────────────
+// Stateful alert records (spec §25/§44), evaluated on a cron (src/alerts/evaluate.ts): one row
+// per `dedupe_key` for the lifetime of the deployment — a resolved alert's row is reopened
+// (never re-inserted) when its condition recurs, so the UNIQUE constraint below is never a
+// collision waiting to happen.
+
+export const ALERT_CATEGORIES = [
+  "device_offline",
+  "license_expiring",
+  "license_expired",
+  "no_active_plan",
+  "clock_tamper",
+  "device_binding_failure",
+  "backup_failed",
+  "backup_overdue",
+  "disk_low",
+  "agent_outdated",
+  "update_failed",
+  "reboot_required",
+  "private_network_failed",
+  "rdp_unhealthy",
+  "break_glass_active",
+] as const;
+
+export const ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
+export const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
+
+export const alerts = sqliteTable(
+  "alerts",
+  {
+    id: text("id").primaryKey(),
+    /** Null for a category with no tenant scope (there is none today, but kept nullable per the
+     * brief's exact column list). */
+    tenantId: text("tenant_id").references(() => tenants.id),
+    /** Null for a tenant-level category (`license_expiring`/`license_expired`). */
+    deviceId: text("device_id").references(() => devices.id),
+    category: text("category", { enum: ALERT_CATEGORIES }).notNull(),
+    severity: text("severity", { enum: ALERT_SEVERITIES }).notNull(),
+    status: text("status", { enum: ALERT_STATUSES }).notNull().default("open"),
+    /** `${category}:${deviceId ?? tenantId}` — the identity of one alert "slot"; see the evaluator. */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    openedAt: text("opened_at").notNull().default(isoNow),
+    lastEvidenceJson: text("last_evidence_json"),
+    lastSeenAt: text("last_seen_at"),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgedAt: text("acknowledged_at"),
+    resolvedAt: text("resolved_at"),
+    /** Last time an email went out for this dedupe key (6h cooldown; src/alerts/notify.ts). */
+    notifiedAt: text("notified_at"),
+  },
+  (table) => [
+    index("alerts_status_severity_idx").on(table.status, table.severity),
+    index("alerts_tenant_status_idx").on(table.tenantId, table.status),
+    index("alerts_device_status_idx").on(table.deviceId, table.status),
+    check(
+      "alerts_category_check",
+      sql`${table.category} IN ('device_offline', 'license_expiring', 'license_expired', 'no_active_plan', 'clock_tamper', 'device_binding_failure', 'backup_failed', 'backup_overdue', 'disk_low', 'agent_outdated', 'update_failed', 'reboot_required', 'private_network_failed', 'rdp_unhealthy', 'break_glass_active')`,
+    ),
+    check("alerts_severity_check", sql`${table.severity} IN ('info', 'warning', 'critical')`),
+    check("alerts_status_check", sql`${table.status} IN ('open', 'acknowledged', 'resolved')`),
+  ],
+);

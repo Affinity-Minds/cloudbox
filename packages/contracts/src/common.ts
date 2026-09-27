@@ -16,6 +16,8 @@ export const ID_PREFIX = {
   emailProvider: "eprv_",
   licenseKey: "lkey_",
   licenseKeyBatch: "lkb_",
+  /** WT-17. */
+  alert: "alrt_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

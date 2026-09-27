@@ -42,6 +42,10 @@
       "name": "EMAIL"
     }
   ],
+  // WT-17: the alerts evaluator (src/alerts/evaluate.ts), every 5 minutes.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "exports": {
     "FleetPresence": {
       "type": "durable-object",

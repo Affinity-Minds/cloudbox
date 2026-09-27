@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetupAuthenticatorRouteImport } from './routes/setup-authenticator'
 import { Route as SetupPasswordRouteImport } from './routes/setup-password'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAlertsRouteImport } from './routes/_app/alerts'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppEnrollmentRouteImport } from './routes/_app/enrollment'
 import { Route as AppFleetRouteImport } from './routes/_app/fleet'
@@ -48,6 +49,11 @@ const SetupPasswordRoute = SetupPasswordRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAlertsRoute = AppAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAuditRoute = AppAuditRouteImport.update({
@@ -111,6 +117,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/alerts': typeof AppAlertsRoute
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
@@ -127,6 +134,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/alerts': typeof AppAlertsRoute
   '/audit': typeof AppAuditRoute
   '/enrollment': typeof AppEnrollmentRoute
   '/fleet': typeof AppFleetRouteWithChildren
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/setup-authenticator': typeof SetupAuthenticatorRoute
   '/setup-password': typeof SetupPasswordRoute
+  '/_app/alerts': typeof AppAlertsRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/enrollment': typeof AppEnrollmentRoute
   '/_app/fleet': typeof AppFleetRouteWithChildren
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/alerts'
     | '/audit'
     | '/enrollment'
     | '/fleet'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/alerts'
     | '/audit'
     | '/enrollment'
     | '/fleet'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/setup-authenticator'
     | '/setup-password'
+    | '/_app/alerts'
     | '/_app/audit'
     | '/_app/enrollment'
     | '/_app/fleet'
@@ -256,6 +268,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/alerts': {
+      id: '/_app/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AppAlertsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/audit': {
@@ -374,6 +393,7 @@ const AppTenantsRouteWithChildren = AppTenantsRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
   AppEnrollmentRoute: typeof AppEnrollmentRoute
   AppFleetRoute: typeof AppFleetRouteWithChildren
@@ -386,6 +406,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
   AppEnrollmentRoute: AppEnrollmentRoute,
   AppFleetRoute: AppFleetRouteWithChildren,

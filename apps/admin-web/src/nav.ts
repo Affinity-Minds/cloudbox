@@ -1,5 +1,6 @@
 // Owner: WT-0. Sidebar entries; keys are fixed by docs/handoffs/foundation.md.
 import {
+  BellRing,
   Building2,
   CreditCard,
   KeyRound,
@@ -16,6 +17,7 @@ export type NavKey =
   | "overview"
   | "tenants"
   | "fleet"
+  | "alerts"
   | "enrollment"
   | "subscriptions"
   | "plans"
@@ -30,6 +32,7 @@ export type NavItem = {
     | "/"
     | "/tenants"
     | "/fleet"
+    | "/alerts"
     | "/enrollment"
     | "/subscriptions"
     | "/plans"
@@ -46,6 +49,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: "overview", title: "Overview", to: "/", icon: LayoutDashboard },
       { key: "tenants", title: "Tenants", to: "/tenants", icon: Building2 },
       { key: "fleet", title: "Fleet", to: "/fleet", icon: Server },
+      { key: "alerts", title: "Alerts", to: "/alerts", icon: BellRing }, // WT-17
       { key: "enrollment", title: "Enrollment", to: "/enrollment", icon: KeyRound },
       { key: "subscriptions", title: "Subscriptions", to: "/subscriptions", icon: CreditCard },
       { key: "licences", title: "Licence keys", to: "/licences", icon: Ticket }, // WT-14

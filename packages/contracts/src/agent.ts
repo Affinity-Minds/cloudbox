@@ -66,7 +66,14 @@ export const AgentHealth = z.object({
     })
     .optional(),
   backup: z.object({ state: State, last_success: z.string().nullable().optional() }).optional(),
-  storage: z.object({ free_bytes: z.number().int().min(0).nullable() }).optional(),
+  storage: z
+    .object({
+      free_bytes: z.number().int().min(0).nullable(),
+      /** WT-17 (additive, optional): needed to derive the §24 free-space percentage for the
+       * `disk_low` alert; absent on older agents, in which case that alert is not evaluated. */
+      total_bytes: z.number().int().min(0).nullable().optional(),
+    })
+    .optional(),
   updates: z.object({ state: State, reboot_required: z.boolean().nullable() }).optional(),
   security: z.object({ device_key: KeyProtection, tamper: State }).optional(),
 });

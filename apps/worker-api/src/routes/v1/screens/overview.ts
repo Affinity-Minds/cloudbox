@@ -4,14 +4,14 @@ import { count, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { requirePermission } from "../../../authz/permissions";
 import { createDb, type Db } from "../../../db/client";
-import { auditLog, devices, subscriptions, tenants } from "../../../db/schema";
+import { alerts, auditLog, devices, subscriptions, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
 
 const countWhere = (condition: ReturnType<typeof sql>) =>
   sql<number>`coalesce(sum(case when ${condition} then 1 else 0 end), 0)`.mapWith(Number);
 
 export async function loadOverview(db: Db): Promise<OverviewScreen> {
-  const [tenantRows, deviceRows, subscriptionRows, auditRows] = await db.batch([
+  const [tenantRows, deviceRows, subscriptionRows, auditRows, alertRows] = await db.batch([
     db
       .select({ total: count(), active: countWhere(sql`${tenants.status} = 'active'`) })
       .from(tenants),
@@ -32,6 +32,15 @@ export async function loadOverview(db: Db): Promise<OverviewScreen> {
         >`(select ${auditLog.createdAt} from ${auditLog} order by rowid desc limit 1)`,
       })
       .from(auditLog),
+    // WT-17: real "open alerts" count, no estimation.
+    db
+      .select({
+        open: countWhere(sql`${alerts.status} = 'open'`),
+        critical: countWhere(
+          sql`${alerts.status} <> 'resolved' AND ${alerts.severity} = 'critical'`,
+        ),
+      })
+      .from(alerts),
   ]);
 
   return {
@@ -42,6 +51,7 @@ export async function loadOverview(db: Db): Promise<OverviewScreen> {
       active: subscriptionRows[0]?.active ?? 0,
     },
     audit: { total: auditRows[0]?.total ?? 0, lastEventAt: auditRows[0]?.lastEventAt ?? null },
+    alerts: { open: alertRows[0]?.open ?? 0, critical: alertRows[0]?.critical ?? 0 },
   };
 }
 

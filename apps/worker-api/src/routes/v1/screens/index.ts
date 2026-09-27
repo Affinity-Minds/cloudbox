@@ -2,6 +2,7 @@
 // Screen owners add exactly one line here: tenants (WT-2), fleet (WT-3), subscriptions (WT-5).
 import { Hono } from "hono";
 import type { AppEnv } from "../../../env";
+import alerts from "./alerts";
 import audit from "./audit";
 import fleet from "./fleet";
 import overview from "./overview";
@@ -17,5 +18,6 @@ screens.route("/fleet", fleet); // WT-3
 screens.route("/tenants", tenants); // WT-2
 screens.route("/subscriptions", subscriptions); // WT-5
 screens.route("/plans", plans); // WT-13
+screens.route("/alerts", alerts); // WT-17
 
 export default screens;
