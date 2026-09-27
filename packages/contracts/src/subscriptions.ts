@@ -25,6 +25,10 @@ export type PlanStatus = z.infer<typeof PlanStatus>;
 /** Immutable once created; a lowercase slug. */
 export const PlanCode = z.string().regex(/^[a-z0-9-]{3,32}$/);
 
+/** ISO 4217, the currencies this plan designer supports (migration 0011, owner addition). */
+export const Currency = z.enum(["INR", "USD", "EUR", "GBP", "AED"]);
+export type Currency = z.infer<typeof Currency>;
+
 export const Plan = z.object({
   code: z.string(),
   name: z.string(),
@@ -39,9 +43,17 @@ export const Plan = z.object({
    * Days a redeemed subscription runs (owner addition, mid-slice). Redemption semantics — a
    * subscription is `pending` until the tenant's server is activated, at which point
    * `valid_from = now`, `valid_until = now + term_days`, and the device licence is issued — are
-   * WT-14's, in a sibling worktree. This slice only carries the column and its UI.
+   * WT-14's, in a sibling worktree. This slice only carries the column and its UI. Labelled
+   * "Validity" in the UI.
    */
   termDays: z.number().int(),
+  /** Minor units (paise/cents/…) for `currency` (migration 0011, owner addition). */
+  priceAmount: z.number().int(),
+  currency: Currency,
+  /** Minor units, per additional managed user per term. */
+  addonUserPriceAmount: z.number().int(),
+  /** 0 = no add-on users allowed on this plan. */
+  maxAddonUsers: z.number().int(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -56,12 +68,47 @@ const PlanFields = {
   offlineGraceDays: z.number().int().min(0).max(90),
   renewalWarningDays: z.number().int().min(1).max(365),
   termDays: z.number().int().min(1).max(3650),
+  priceAmount: z.number().int().min(0).max(100_000_000),
+  currency: Currency,
+  addonUserPriceAmount: z.number().int().min(0).max(100_000_000),
+  maxAddonUsers: z.number().int().min(0).max(10_000),
 };
 
-/** `POST /api/v1/plans`. `code` is immutable — never accepted again after create. */
+/**
+ * Effective managed-user limit for a subscription (migration 0011, owner addition):
+ * `maxManagedUsers + addonUsers`. `addonUsers` is bounded at write time to the plan's
+ * `maxAddonUsers`, so the sum needs no separate cap here. Shared by the entitlement issuer (the
+ * claim's `max_managed_users`), the screens loader and the admin UI so all three agree.
+ */
+export function effectiveMaxManagedUsers(maxManagedUsers: number, addonUsers: number): number {
+  return maxManagedUsers + addonUsers;
+}
+
+/**
+ * Total price for one term, in the plan's currency's minor units (migration 0011, owner
+ * addition): the plan's own price plus `addonUsers` at the plan's per-add-on-user price.
+ */
+export function totalPriceAmount(
+  planPriceAmount: number,
+  addonUserPriceAmount: number,
+  addonUsers: number,
+): number {
+  return planPriceAmount + addonUserPriceAmount * addonUsers;
+}
+
+/**
+ * `POST /api/v1/plans`. `code` is immutable — never accepted again after create. Pricing fields
+ * (migration 0011, owner addition) are optional, defaulting server-side the same as the column
+ * defaults (`0`, `'INR'`, `0`, `0`) — every plan created before this addition, and every test that
+ * predates it, posts without them.
+ */
 export const CreatePlanRequest = z.object({
   code: PlanCode,
   ...PlanFields,
+  priceAmount: PlanFields.priceAmount.optional(),
+  currency: PlanFields.currency.optional(),
+  addonUserPriceAmount: PlanFields.addonUserPriceAmount.optional(),
+  maxAddonUsers: PlanFields.maxAddonUsers.optional(),
 });
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequest>;
 
@@ -76,6 +123,10 @@ export const UpdatePlanRequest = z
     offlineGraceDays: PlanFields.offlineGraceDays.optional(),
     renewalWarningDays: PlanFields.renewalWarningDays.optional(),
     termDays: PlanFields.termDays.optional(),
+    priceAmount: PlanFields.priceAmount.optional(),
+    currency: PlanFields.currency.optional(),
+    addonUserPriceAmount: PlanFields.addonUserPriceAmount.optional(),
+    maxAddonUsers: PlanFields.maxAddonUsers.optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
     message: "at least one field",
@@ -105,6 +156,11 @@ export const Subscription = z.object({
   validFrom: z.string().nullable(),
   validUntil: z.string().nullable(),
   maxManagedUsers: z.number().int(),
+  /**
+   * Managed users bought beyond `maxManagedUsers`, at the plan's `addonUserPriceAmount` each per
+   * term (migration 0011, owner addition). Bounded by the plan's `maxAddonUsers` at write time.
+   */
+  addonUsers: z.number().int(),
   features: z.array(Feature),
   offlineGraceDays: z.number().int(),
   renewalWarningDays: z.number().int(),
@@ -115,6 +171,7 @@ export type Subscription = z.infer<typeof Subscription>;
 
 const SubscriptionOverrides = {
   maxManagedUsers: z.number().int().min(1).max(1000).optional(),
+  addonUsers: z.number().int().min(0).max(10_000).optional(),
   features: z.array(Feature).optional(),
   offlineGraceDays: z.number().int().min(0).max(90).optional(),
   renewalWarningDays: z.number().int().min(1).max(365).optional(),
@@ -185,6 +242,14 @@ const Derived = {
   daysRemaining: z.number().int(),
   /** Entitlements can be issued only when true (status trial/active and inside the dates). */
   issuable: z.boolean(),
+  /**
+   * `plan.maxManagedUsers + subscription.addonUsers` (migration 0011, owner addition) — the value
+   * issued into an entitlement's `maxManagedUsers` claim. Derived at read time, never stored.
+   */
+  effectiveMaxManagedUsers: z.number().int(),
+  /** The plan's price plus `addonUsers * plan.addonUserPriceAmount`, in `currency`'s minor units. */
+  totalPriceAmount: z.number().int(),
+  currency: Currency,
 };
 
 /** Device on a subscription screen with its current (highest) entitlement generation. */
@@ -202,6 +267,17 @@ export const SubscriptionDevice = z.object({
   currentRevoked: z.boolean(),
 });
 export type SubscriptionDevice = z.infer<typeof SubscriptionDevice>;
+
+/**
+ * Subscription plus the plan-derived fields (migration 0011, owner addition) a Subscription tab
+ * needs without the full list-row context (`GET /api/v1/screens/tenants/:tenantId`).
+ */
+export const SubscriptionWithPricing = Subscription.extend({
+  effectiveMaxManagedUsers: z.number().int(),
+  totalPriceAmount: z.number().int(),
+  currency: Currency,
+});
+export type SubscriptionWithPricing = z.infer<typeof SubscriptionWithPricing>;
 
 /** Row on `GET /api/v1/screens/subscriptions`. */
 export const SubscriptionListItem = Subscription.extend({

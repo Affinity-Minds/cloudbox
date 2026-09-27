@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
 import { activePlansQuery } from "@/api/plans";
+import { formatMoney, formatTermDays } from "@/components/plan-bits";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -94,7 +95,8 @@ export function PlanSelect({
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {plan.maxDevices} device{plan.maxDevices === 1 ? "" : "s"} ·{" "}
-                      {plan.maxManagedUsers} users
+                      {plan.maxManagedUsers} users · {formatMoney(plan.priceAmount, plan.currency)}{" "}
+                      / {formatTermDays(plan.termDays)}
                     </span>
                   </span>
                 </CommandItem>

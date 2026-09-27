@@ -2,10 +2,12 @@
 // GET /api/v1/screens/tenants/:tenantId (detail). One `db.batch` each, so each loader is a
 // single D1 round trip (fast-data-hydration "ceiling: three D1 round trips per request").
 import {
-  type Subscription,
+  effectiveMaxManagedUsers,
+  type SubscriptionWithPricing,
   type TenantDetailScreen,
   type TenantsScreen,
   TenantsScreenQuery,
+  totalPriceAmount,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, or, sql } from "drizzle-orm";
@@ -16,6 +18,7 @@ import {
   auditLog,
   customerUsers,
   devices,
+  plans,
   subscriptions,
   tenantMemberships,
   tenants,
@@ -163,13 +166,20 @@ export async function loadTenantDetailScreen(
         validFrom: subscriptions.validFrom,
         validUntil: subscriptions.validUntil,
         maxManagedUsers: subscriptions.maxManagedUsers,
+        addonUsers: subscriptions.addonUsers,
         featuresJson: subscriptions.featuresJson,
         offlineGraceDays: subscriptions.offlineGraceDays,
         renewalWarningDays: subscriptions.renewalWarningDays,
         createdAt: subscriptions.createdAt,
         updatedAt: subscriptions.updatedAt,
+        // Migration 0011 (owner addition): plan pricing, to derive effectiveMaxManagedUsers and
+        // totalPriceAmount below — same D1 round trip (a join on the existing query).
+        planPriceAmount: plans.priceAmount,
+        planCurrency: plans.currency,
+        planAddonUserPriceAmount: plans.addonUserPriceAmount,
       })
       .from(subscriptions)
+      .leftJoin(plans, eq(plans.code, subscriptions.planCode))
       .where(eq(subscriptions.tenantId, tenantId))
       .orderBy(desc(subscriptions.createdAt)),
     db
@@ -216,10 +226,28 @@ export async function loadTenantDetailScreen(
       ...device,
       lastHealth: parseJson(lastHealthJson),
     })),
-    subscriptions: subscriptionRows.map(({ featuresJson, ...subscription }) => ({
-      ...subscription,
-      features: (parseJson(featuresJson) ?? []) as Subscription["features"],
-    })),
+    subscriptions: subscriptionRows.map(
+      ({
+        featuresJson,
+        planPriceAmount,
+        planCurrency,
+        planAddonUserPriceAmount,
+        ...subscription
+      }): SubscriptionWithPricing => ({
+        ...subscription,
+        features: (parseJson(featuresJson) ?? []) as SubscriptionWithPricing["features"],
+        effectiveMaxManagedUsers: effectiveMaxManagedUsers(
+          subscription.maxManagedUsers,
+          subscription.addonUsers,
+        ),
+        totalPriceAmount: totalPriceAmount(
+          planPriceAmount ?? 0,
+          planAddonUserPriceAmount ?? 0,
+          subscription.addonUsers,
+        ),
+        currency: (planCurrency ?? "INR") as SubscriptionWithPricing["currency"],
+      }),
+    ),
     auditEvents: auditRows.map(({ beforeJson, afterJson, ...row }) => ({
       ...row,
       before: parseJson(beforeJson),

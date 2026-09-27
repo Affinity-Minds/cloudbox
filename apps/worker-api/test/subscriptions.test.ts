@@ -485,6 +485,219 @@ describe("entitlement issuance", () => {
   });
 });
 
+describe("plan pricing and add-on users (WT-13, migration 0011)", () => {
+  let readOnlySession: SignedIn;
+  beforeAll(async () => {
+    readOnlySession = await signInAs(env, {
+      email: "wt13-pricing-ro@example.test",
+      staffRole: "read_only",
+    });
+  });
+
+  async function pricedPlan(overrides: Record<string, unknown> = {}) {
+    seq += 1;
+    const code = `wt13-priced-${Date.now().toString(36)}${seq}`;
+    const response = await call("POST", "/plans", {
+      code,
+      name: "Priced plan",
+      maxDevices: 3,
+      maxManagedUsers: 6,
+      features: ["fleet"],
+      offlineGraceDays: 7,
+      renewalWarningDays: 30,
+      termDays: 365,
+      priceAmount: 10_000,
+      currency: "USD",
+      addonUserPriceAmount: 500,
+      maxAddonUsers: 5,
+      ...overrides,
+    });
+    expect(response.status).toBe(201);
+    return ((await response.json()) as { plan: { code: string } }).plan.code;
+  }
+
+  it("defaults pricing fields when omitted, and stores them when given", async () => {
+    seq += 1;
+    const bareCode = `wt13-bare-${Date.now().toString(36)}${seq}`;
+    const bare = await call("POST", "/plans", {
+      code: bareCode,
+      name: "Bare plan",
+      maxDevices: 1,
+      maxManagedUsers: 1,
+      features: [],
+      offlineGraceDays: 0,
+      renewalWarningDays: 30,
+      termDays: 365,
+    });
+    expect(bare.status).toBe(201);
+    const barePlan = ((await bare.json()) as { plan: Record<string, unknown> }).plan;
+    expect(barePlan).toMatchObject({
+      priceAmount: 0,
+      currency: "INR",
+      addonUserPriceAmount: 0,
+      maxAddonUsers: 0,
+    });
+
+    const code = await pricedPlan();
+    const list = await call("GET", "/plans");
+    const found = ((await list.json()) as { items: Array<Record<string, unknown>> }).items.find(
+      (p) => p.code === code,
+    );
+    expect(found).toMatchObject({
+      priceAmount: 10_000,
+      currency: "USD",
+      addonUserPriceAmount: 500,
+      maxAddonUsers: 5,
+    });
+  });
+
+  it("rejects an invalid currency and out-of-range pricing values", async () => {
+    const base = {
+      name: "x",
+      maxDevices: 1,
+      maxManagedUsers: 1,
+      features: [],
+      offlineGraceDays: 0,
+      renewalWarningDays: 30,
+      termDays: 365,
+    };
+    seq += 1;
+    expect(
+      (
+        await call("POST", "/plans", {
+          ...base,
+          code: `wt13-badcur-${seq}`,
+          currency: "XYZ",
+        })
+      ).status,
+    ).toBe(400);
+    seq += 1;
+    expect(
+      (
+        await call("POST", "/plans", {
+          ...base,
+          code: `wt13-negprice-${seq}`,
+          priceAmount: -1,
+        })
+      ).status,
+    ).toBe(400);
+    seq += 1;
+    expect(
+      (
+        await call("POST", "/plans", {
+          ...base,
+          code: `wt13-negaddon-${seq}`,
+          maxAddonUsers: -1,
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("read_only cannot create or edit a priced plan (403)", async () => {
+    seq += 1;
+    const code = `wt13-ro-${seq}`;
+    const response = await call(
+      "POST",
+      "/plans",
+      {
+        code,
+        name: "x",
+        maxDevices: 1,
+        maxManagedUsers: 1,
+        features: [],
+        offlineGraceDays: 0,
+        renewalWarningDays: 30,
+        termDays: 365,
+        priceAmount: 5000,
+        currency: "EUR",
+      },
+      { as: readOnlySession },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("creates a subscription with add-on users within the plan's max", async () => {
+    const planCode = await pricedPlan();
+    const tenantId = await seedTenant();
+    const response = await call("POST", `/tenants/${tenantId}/subscriptions`, {
+      planCode,
+      validFrom: iso(0),
+      validUntil: iso(365),
+      addonUsers: 3,
+    });
+    expect(response.status).toBe(201);
+    const { subscription } = (await response.json()) as {
+      subscription: { addonUsers: number; maxManagedUsers: number };
+    };
+    expect(subscription.addonUsers).toBe(3);
+    expect(subscription.maxManagedUsers).toBe(6);
+  });
+
+  it("refuses add-on users above the plan's max on create and on PATCH", async () => {
+    const planCode = await pricedPlan(); // maxAddonUsers: 5
+    const tenantId = await seedTenant();
+    const tooMany = await call("POST", `/tenants/${tenantId}/subscriptions`, {
+      planCode,
+      validFrom: iso(0),
+      validUntil: iso(365),
+      addonUsers: 6,
+    });
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.json()).toEqual({
+      error: "invalid_request",
+      detail: "addon_users_exceeds_plan_max",
+    });
+
+    const subId = await createSubscription(tenantId, { planCode, addonUsers: 2 });
+    const patchTooMany = await call("PATCH", `/subscriptions/${subId}`, { addonUsers: 6 });
+    expect(patchTooMany.status).toBe(400);
+    expect(await patchTooMany.json()).toEqual({
+      error: "invalid_request",
+      detail: "addon_users_exceeds_plan_max",
+    });
+    const patchOk = await call("PATCH", `/subscriptions/${subId}`, { addonUsers: 5 });
+    expect(patchOk.status).toBe(200);
+    expect(
+      ((await patchOk.json()) as { subscription: { addonUsers: number } }).subscription,
+    ).toMatchObject({ addonUsers: 5 });
+  });
+
+  it("the entitlement claim's max_managed_users is the effective limit (base + add-ons)", async () => {
+    const planCode = await pricedPlan(); // maxManagedUsers 6, maxAddonUsers 5
+    const tenantId = await seedTenant();
+    const { deviceId } = await seedDevice(tenantId);
+    await createSubscription(tenantId, { planCode, addonUsers: 4, validUntil: iso(365) });
+
+    const response = await call("POST", `/devices/${deviceId}/entitlements/issue`, {});
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as IssueEntitlementResponse;
+    // 6 (plan) + 4 (add-on) = 10, not the plan's bare 6.
+    expect(body.claims).toMatchObject({ max_managed_users: 10 });
+  });
+
+  it("effectiveMaxManagedUsers and totalPriceAmount appear on the subscriptions screen", async () => {
+    const planCode = await pricedPlan();
+    const tenantId = await seedTenant();
+    await createSubscription(tenantId, { planCode, addonUsers: 2, validUntil: iso(365) });
+
+    const response = await call("GET", "/screens/subscriptions");
+    const { items } = (await response.json()) as {
+      items: Array<{
+        tenantId: string;
+        effectiveMaxManagedUsers: number;
+        totalPriceAmount: number;
+        currency: string;
+      }>;
+    };
+    const item = items.find((i) => i.tenantId === tenantId);
+    expect(item).toMatchObject({
+      effectiveMaxManagedUsers: 8, // 6 + 2
+      totalPriceAmount: 11_000, // 10_000 + 2 * 500
+      currency: "USD",
+    });
+  });
+});
+
 describe("subscription screens", () => {
   it("lists subscriptions with derived expiry and device generations in one round trip", async () => {
     const tenantId = await seedTenant();

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { describeError } from "@/api/client";
 import { createPlan, updatePlan } from "@/api/plans";
+import { CURRENCIES, minorToMajorInput } from "@/components/plan-bits";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SelectNative } from "@/components/ui/select-native";
 import {
   Sheet,
   SheetContent,
@@ -41,8 +43,18 @@ const FEATURE_LABEL: Record<(typeof FEATURES)[number], string> = {
 const blankToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema);
 
+/** The money fields are edited in major units ("50.00") and stored in minor units (5000). */
+const majorUnitInput = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const n = Number.parseFloat(value);
+    return Number.isFinite(n) ? Math.round(n * 100) : value;
+  }, schema);
+
 const FormSchema = CreatePlanRequest.extend({
   description: blankToUndefined(CreatePlanRequest.shape.description),
+  priceAmount: majorUnitInput(CreatePlanRequest.shape.priceAmount),
+  addonUserPriceAmount: majorUnitInput(CreatePlanRequest.shape.addonUserPriceAmount),
 });
 type FormValues = z.input<typeof FormSchema>;
 
@@ -58,6 +70,10 @@ function toFormValues(plan?: Plan): FormValues {
       offlineGraceDays: 7,
       renewalWarningDays: 30,
       termDays: 365,
+      priceAmount: "0.00",
+      currency: "INR",
+      addonUserPriceAmount: "0.00",
+      maxAddonUsers: 0,
     };
   }
   return {
@@ -70,6 +86,10 @@ function toFormValues(plan?: Plan): FormValues {
     offlineGraceDays: plan.offlineGraceDays,
     renewalWarningDays: plan.renewalWarningDays,
     termDays: plan.termDays,
+    priceAmount: minorToMajorInput(plan.priceAmount),
+    currency: plan.currency,
+    addonUserPriceAmount: minorToMajorInput(plan.addonUserPriceAmount),
+    maxAddonUsers: plan.maxAddonUsers,
   };
 }
 
@@ -111,6 +131,10 @@ export function PlanFormSheet({
           offlineGraceDays: values.offlineGraceDays,
           renewalWarningDays: values.renewalWarningDays,
           termDays: values.termDays,
+          priceAmount: values.priceAmount,
+          currency: values.currency,
+          addonUserPriceAmount: values.addonUserPriceAmount,
+          maxAddonUsers: values.maxAddonUsers,
         };
         return updatePlan(plan.code, patch);
       }
@@ -236,7 +260,7 @@ export function PlanFormSheet({
                   <FieldError errors={[form.formState.errors.renewalWarningDays]} />
                 </Field>
                 <Field data-invalid={form.formState.errors.termDays ? true : undefined}>
-                  <FieldLabel htmlFor="termDays">Term (days)</FieldLabel>
+                  <FieldLabel htmlFor="termDays">Validity (days)</FieldLabel>
                   <Input
                     id="termDays"
                     type="number"
@@ -245,6 +269,58 @@ export function PlanFormSheet({
                     {...form.register("termDays", { valueAsNumber: true })}
                   />
                   <FieldError errors={[form.formState.errors.termDays]} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field
+                  className="col-span-2"
+                  data-invalid={form.formState.errors.priceAmount ? true : undefined}
+                >
+                  <FieldLabel htmlFor="priceAmount">Price</FieldLabel>
+                  <Input
+                    id="priceAmount"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    {...form.register("priceAmount")}
+                  />
+                  <FieldError errors={[form.formState.errors.priceAmount]} />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="currency">Currency</FieldLabel>
+                  <SelectNative id="currency" {...form.register("currency")}>
+                    {CURRENCIES.map((currency) => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field data-invalid={form.formState.errors.addonUserPriceAmount ? true : undefined}>
+                  <FieldLabel htmlFor="addonUserPriceAmount">
+                    Add-on user price (per term)
+                  </FieldLabel>
+                  <Input
+                    id="addonUserPriceAmount"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    {...form.register("addonUserPriceAmount")}
+                  />
+                  <FieldError errors={[form.formState.errors.addonUserPriceAmount]} />
+                </Field>
+                <Field data-invalid={form.formState.errors.maxAddonUsers ? true : undefined}>
+                  <FieldLabel htmlFor="maxAddonUsers">Max add-on users</FieldLabel>
+                  <Input
+                    id="maxAddonUsers"
+                    type="number"
+                    min={0}
+                    {...form.register("maxAddonUsers", { valueAsNumber: true })}
+                  />
+                  <FieldDescription>0 = no add-on users allowed.</FieldDescription>
+                  <FieldError errors={[form.formState.errors.maxAddonUsers]} />
                 </Field>
               </div>
               <Field>
