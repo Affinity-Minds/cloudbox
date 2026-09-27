@@ -14,6 +14,20 @@ export const EnrollRequest = z.object({
 });
 export type EnrollRequest = z.infer<typeof EnrollRequest>;
 
+/**
+ * Licence state the cloud reports to the agent (WT-14, ADR 0011). Optional on the wire so clients
+ * built before it keep parsing: `licensed` (a live entitlement exists; fetch `GET /agent/entitlement`),
+ * `no_active_plan` (no subscription, or none active and in date), `device_limit_reached` (the plan's
+ * `max_devices` is used by other servers).
+ */
+export const AgentLicenseState = z.enum(["licensed", "no_active_plan", "device_limit_reached"]);
+export type AgentLicenseState = z.infer<typeof AgentLicenseState>;
+
+/** The exact text shown for `no_active_plan` (agent Status window, portal, Fleet). */
+export const NO_ACTIVE_PLAN_MESSAGE = "No active plan found. Please contact the CloudBox admin.";
+export const DEVICE_LIMIT_MESSAGE =
+  "This plan's server limit is reached. Please contact the CloudBox admin.";
+
 /** `POST /api/v1/agent/enroll` → 201. `deviceToken` is the Bearer credential for every later call. */
 export const EnrollResponse = z.object({
   deviceId: z.string(),
@@ -21,6 +35,10 @@ export const EnrollResponse = z.object({
   tenantCode: z.string(),
   deviceName: z.string(),
   deviceToken: z.string(),
+  /** WT-14: activation redeems a pending plan and issues the entitlement; absent on older servers. */
+  licenseState: AgentLicenseState.optional(),
+  /** Human text for a state that needs action (e.g. `NO_ACTIVE_PLAN_MESSAGE`); absent when licensed. */
+  message: z.string().optional(),
 });
 export type EnrollResponse = z.infer<typeof EnrollResponse>;
 
@@ -63,6 +81,10 @@ export const HeartbeatResponse = z.object({
   serverTime: z.string(),
   entitlementGeneration: z.number().int().nullable(),
   commands: z.array(z.unknown()),
+  /** WT-14 (optional, additive): see `AgentLicenseState`. */
+  licenseState: AgentLicenseState.optional(),
+  /** WT-14 (optional, additive): human text when the state needs action. */
+  message: z.string().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 

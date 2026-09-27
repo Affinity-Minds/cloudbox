@@ -1,5 +1,13 @@
 # Handoff — WT-2 `wt/p1-tenants` (tenant CRUD + memberships + active tenant)
 
+> **Branch note:** everything below the "Mission" section up through "Standing ranking and the
+> last-active-owner guard (U-2 fix)" was written against `wt/p1-tenants` targeting
+> `phase-1/identity` (merged as PR #13, plus the U-2 follow-up as PR #16). A second follow-up,
+> **"the primary contact becomes the first Owner member"**, landed on a separate branch,
+> `wt/p2-tenant-owner`, checked out fresh from `origin/phase-2/devices` (post-Phase-1, identity
+> already split into `staff_users`/`customer_users`). See its own section below for what changed
+> and why the branch is different from the rest of this document.
+
 ## Mission
 
 **Slices:** 1.3 Tenant CRUD, 1.4 Memberships.
@@ -345,16 +353,98 @@ in terms of `tenantMemberships.standing`/`.status`, which don't reference `user`
 
 ---
 
+## Primary contact becomes the first Owner member (branch `wt/p2-tenant-owner`)
+
+Owner decision, follow-up requested against the post-Phase-1 tree (`origin/phase-2/devices`,
+identity already split into `staff_users`/`customer_users`; `ensureCustomerByEmail` is the
+provisioning helper). Checked out as a fresh branch, `wt/p2-tenant-owner`, from
+`origin/phase-2/devices` — not a continuation of `wt/p1-tenants`'s own commit history, hence the
+separate PR.
+
+**What changed:**
+
+- `packages/contracts/src/tenants.ts`: `CreateTenantRequest.primaryContactEmail` is now **required**
+  (was `Email.optional()`, now `Email`). `UpdateTenantRequest` stays fully partial via
+  `CreateTenantRequest.partial()`, so PATCH still treats it as optional — no change there.
+- `apps/worker-api/src/routes/v1/tenants.ts`, `POST /`: after allocating the tenant id and public
+  code, calls `ensureCustomerByEmail(c.env, input.primaryContactEmail, ...)` (idempotent — reuses
+  the existing customer identity if that email already has one, e.g. it's already the primary
+  contact or a member of another tenant), then extends the existing `db.batch([...])` — already
+  the mechanism for the tenant-insert + `TENANT_CREATED` audit — to also insert one
+  `tenant_memberships` row (`standing: "owner"`, `status: "active"`, `invitedBy: c.var.user.id`,
+  i.e. the creating **staff** user) and audit `USER_INVITED` with `source: "primary_contact"`
+  (distinct from a manual invite through `memberships.ts`, which audits the same event type with
+  `source: "api"`). All four writes (tenant insert, membership insert, two audits) commit in the
+  same `db.batch` call, so the membership can never exist without its tenant or vice versa.
+- `PATCH /:tenantId` is unchanged in behavior — it already only ever touched the `tenants` row —
+  but now has an explicit comment stating it deliberately never touches `tenant_memberships`:
+  changing the contact on file later does not add the new address as a member, and does not
+  remove or demote the existing owner. Said in the UI too (see below).
+- **The last-active-owner guard already covers the auto-created row correctly, with no code
+  change needed**: `memberships.ts`'s `keepsAnOwner()` (see the U-2 section above) operates purely
+  on `tenant_memberships.standing`/`.status`, so a fresh tenant with exactly one active `owner`
+  membership — however it was created — already can't have that membership revoked or demoted
+  (409 `last_owner`). Covered by a new test rather than a code path.
+- `apps/admin-web/src/components/tenants/tenant-form-sheet.tsx`: the primary-contact-email field
+  now has a `FieldDescription` hint, worded differently for create vs. edit:
+  - Create: *"The primary contact becomes the first Owner and can sign in with a one-time code at
+    /login."*
+  - Edit: *"Changing this does not change tenant membership — the current Owner keeps their
+    access, and this new contact is not added as a member."*
+  Also fixed `toFormValues`'s create-mode default (`{ displayName: "" }`) to include
+  `primaryContactEmail: ""` — it's now a required key of the form schema, so TypeScript (correctly)
+  flagged the old default as incomplete.
+
+**Tests added** (`apps/worker-api/test/tenants.test.ts`, new describe block "POST
+/api/v1/tenants: the primary contact becomes the first Owner member", 5 tests) — plus updates to
+3 existing tests whose fixed-tenant scenarios now have a member where they used to have none:
+- Create provisions the customer identity and an active `owner` membership, atomically, audited
+  `USER_INVITED` with `source: "primary_contact"`.
+- A second tenant sharing the same primary contact reuses the existing `customer_users` row (one
+  row, checked directly) rather than creating a duplicate.
+- PATCHing `primaryContactEmail` leaves the membership rows byte-for-byte unchanged and never
+  provisions a customer identity for the new address.
+- Creating a tenant with no `primaryContactEmail` is a 400 `invalid_request`.
+- The last-active-owner guard blocks `DELETE` on the auto-created owner when it's the tenant's
+  only member (409 `last_owner`) — confirms the guard "just works" for this new code path.
+- Updated: the loader test's fresh tenant now expects `memberCount: 1` (was `0`); the
+  correlated-subquery regression test's tenant now has 2 members after its own explicit invite
+  (was 1); the detail-screen test now expects one membership row and orders
+  `auditEvents[0..1]` as `USER_INVITED` then `TENANT_CREATED` (inserted in that order within the
+  batch, so `USER_INVITED` has the later rowid and sorts first under `ORDER BY rowid DESC`).
+
+**Verify:** `pnpm run verify` exits 0 — `pnpm check` clean (176 files), `pnpm typecheck` clean
+across all 5 typechecked workspaces, `pnpm test` worker-api 475/475 (up from 476/478 on the
+`phase-1/identity`-based branch — the 2 U-1 failures from that branch's merged-in review file are
+not present on `phase-2/devices`, they were WT-1's and evidently fixed upstream by the time this
+branch was cut), admin-web 5/5, licensing-contracts 16/16; `pnpm build` clean for both apps.
+`python3 scripts/check-workflows.py` — all three workflow files `ok`.
+
+**Not done / judgment calls flagged for a human:**
+- The ranking rule (U-2 above) still lets an `owner`-standing member invite another member at
+  `owner` — so the auto-created owner can immediately hand out more owner seats. Unchanged
+  behavior, just noting it interacts with "member 1 is always an owner": every tenant is
+  guaranteed to have at least one owner from creation on, by construction.
+- No UI surfaces the new required-field constraint anywhere except the create sheet's native HTML
+  `required` attribute + Zod's 400 — there's no separate "why is this required" tooltip beyond the
+  hint text already added.
+
+---
+
 ## Safe next action
 
-Ready for review and merge into `phase-1/identity`. This follow-up's draft PR is titled "WT-2:
-tenant standing ranking + last-owner guard" (the branch's original PR, "WT-2: tenants +
-memberships", stays open against the same head — see its own thread for the base slice). Do not
-merge either without a human decision per the standing instructions. Once merged, WT-3
+**`wt/p1-tenants` (PRs #13, #16):** ready for review and merge into `phase-1/identity`. Do not
+merge without a human decision per the standing instructions. Once merged, WT-3
 (enrollment/devices) and WT-5 (subscriptions) can build against a real `tenants` table with real
 rows instead of an empty one, and the Fleet/Subscriptions detail tabs I left as honest empty states
 will have data to show. WT-1: see "For WT-1's identity split" above before rebasing this branch's
 tenant/membership files onto the staff/customer split.
+
+**`wt/p2-tenant-owner`:** ready for review and merge into `phase-2/devices`. Draft PR titled "WT-2:
+primary contact becomes the first Owner member". Independent of the two PRs above (different base
+branch, different git history) — merge in whichever order makes sense for the release; the two
+change sets don't conflict since the ranking/last-owner code lives entirely in `memberships.ts`
+and this change touches only `tenants.ts`, the contracts schema, and the create sheet.
 
 ---
 

@@ -5,6 +5,7 @@ import { StatusPill, type Tone } from "@/components/status-pill";
 import { cn } from "@/lib/utils";
 
 const STATUS_TONE: Record<SubscriptionStatus, Tone> = {
+  pending: "info",
   trial: "info",
   active: "success",
   past_due: "warning",
@@ -22,6 +23,8 @@ const EXPIRY: Record<SubscriptionExpiry, { tone: Tone; label: string }> = {
   expired: { tone: "danger", label: "expired" },
   scheduled: { tone: "info", label: "scheduled" },
   inactive: { tone: "neutral", label: "inactive" },
+  // WT-14: plan assigned, starts when the tenant's first server activates.
+  pending: { tone: "info", label: "pending activation" },
 };
 
 /** Expiry pill: expired / expiring (inside the renewal-warning window) / active. */
@@ -61,7 +64,8 @@ export function NativeSelect({ className, ...props }: React.ComponentProps<"sele
 }
 
 /** `yyyy-mm-dd` (an `<input type="date">` value) for an ISO timestamp, in UTC. */
-export const toDateInput = (iso: string) => iso.slice(0, 10);
+/** `YYYY-MM-DD`; empty for a pending subscription's missing date (WT-14). */
+export const toDateInput = (iso: string | null) => (iso ?? "").slice(0, 10);
 
 /** Midnight UTC of a `yyyy-mm-dd` date input, as ISO. */
 export const fromDateInput = (value: string) => new Date(`${value}T00:00:00.000Z`).toISOString();

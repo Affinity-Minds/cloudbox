@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@cloudbox/admin-web", "dev"],
       "port": 5173
+    },
+    {
+      "name": "cloudbox-worker-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@cloudbox/worker-api", "dev"],
+      "port": 8787
     }
   ]
 }

@@ -32,7 +32,14 @@ export class EntitlementRefusal extends Error {
   }
 }
 
-export type Actor = { id: string; correlationId?: string | null };
+export type Actor = {
+  id: string;
+  correlationId?: string | null;
+  /** Default `user` (staff). WT-14's activation and heartbeat auto-issuance pass `system`. */
+  type?: "user" | "system";
+  /** Audit `source`; default `api`. WT-14: `activation` or `auto`. */
+  source?: string;
+};
 
 const RECORD_COLUMNS = {
   id: entitlements.id,
@@ -220,33 +227,49 @@ export async function issueForDevice(
     revokedAt: null,
   };
 
+  // The plan's device limit is part of the write itself (review P2-1, WT-14 activation and
+  // heartbeat auto-issuance run this concurrently): one INSERT … SELECT … WHERE, so the count and
+  // the insert cannot interleave with another device's issuance. Same count as the pre-check above
+  // (other enrolled devices of this tenant holding a live entitlement on a non-cancelled
+  // subscription). UNIQUE(device_id, generation) stays the last defence for the same device.
+  let inserted: boolean;
   try {
-    await db.batch([
-      db.insert(entitlements).values({
-        ...record,
-        claimsJson: JSON.stringify(claims),
-        token,
-      }),
-      // Claims are not secret; the token is. Audit the claims, never the token.
-      audit(db, {
-        eventType: kind === "issue" ? "LICENSE_ISSUED" : "LICENSE_RENEWED",
-        entityType: "entitlement",
-        entityId: licenseId,
-        actor: { type: "user", id: actor.id },
-        before:
-          latest === undefined
-            ? null
-            : { generation: latest.generation, revokedAt: latest.revokedAt },
-        after: { ...record, claims },
-        correlationId: actor.correlationId,
-        source: "api",
-      }),
-    ]);
+    const result = await db.run(sql`
+      INSERT INTO entitlements (id, subscription_id, device_id, generation, claims_json, token,
+                                issued_by, issued_at, valid_until, revoked_at)
+      SELECT ${record.id}, ${record.subscriptionId}, ${record.deviceId}, ${record.generation},
+             ${JSON.stringify(claims)}, ${token}, ${record.issuedBy}, ${record.issuedAt},
+             ${record.validUntil}, NULL
+      WHERE (
+        SELECT count(DISTINCT e.device_id)
+        FROM entitlements e
+        JOIN devices d ON d.id = e.device_id
+        JOIN subscriptions s ON s.id = e.subscription_id
+        WHERE e.revoked_at IS NULL AND d.status = 'enrolled' AND s.status <> 'cancelled'
+          AND e.device_id <> ${record.deviceId} AND d.tenant_id = ${ctx.tenantId}
+      ) < ${ctx.maxDevices ?? 0}`);
+    inserted = (result.meta?.changes ?? 0) === 1;
   } catch (error) {
     // UNIQUE(device_id, generation): a concurrent issue took this generation. Nothing was written.
     if (isUniqueViolation(error)) throw new EntitlementRefusal(409, "generation_conflict");
     throw error;
   }
+  if (!inserted) {
+    throw new EntitlementRefusal(409, "device_limit_reached", `plan allows ${ctx.maxDevices}`);
+  }
+
+  // Only after a successful insert. Claims are not secret; the token is. Audit the claims only.
+  await audit(db, {
+    eventType: kind === "issue" ? "LICENSE_ISSUED" : "LICENSE_RENEWED",
+    entityType: "entitlement",
+    entityId: licenseId,
+    actor: { type: actor.type ?? "user", id: actor.id },
+    before:
+      latest === undefined ? null : { generation: latest.generation, revokedAt: latest.revokedAt },
+    after: { ...record, claims },
+    correlationId: actor.correlationId,
+    source: actor.source ?? "api",
+  });
 
   return { entitlement: record, claims };
 }

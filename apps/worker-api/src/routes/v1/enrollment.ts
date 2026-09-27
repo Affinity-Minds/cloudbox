@@ -60,6 +60,10 @@ export async function createEnrollmentToken(
     expiresInHours: number;
     createdBy: string;
     correlationId?: string | null;
+    /** Audit `source` (default `api`); WT-14's self-activation grants pass `self_activation`. */
+    source?: string;
+    /** Extra audit `after` fields (WT-14: the device label a Setup app asked for). */
+    auditAfter?: Record<string, unknown>;
   },
 ): Promise<CreateEnrollmentTokenResponse> {
   const plaintext = formatEnrollmentCode();
@@ -84,9 +88,9 @@ export async function createEnrollmentToken(
       entityId: row.id,
       actor: { type: "user", id: input.createdBy, tenantId: input.tenantId },
       before: null,
-      after: { label: row.label, expiresAt: row.expiresAt },
+      after: { label: row.label, expiresAt: row.expiresAt, ...input.auditAfter },
       correlationId: input.correlationId,
-      source: "api",
+      source: input.source ?? "api",
     }),
   ]);
 

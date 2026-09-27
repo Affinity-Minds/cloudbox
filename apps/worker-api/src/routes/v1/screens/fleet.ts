@@ -14,6 +14,7 @@ import { getPrincipal, setupPending } from "../../../auth/middleware";
 import { createDb, type Db } from "../../../db/client";
 import { auditLog, devices, entitlements, tenantMemberships, tenants } from "../../../db/schema";
 import type { AppEnv } from "../../../env";
+import { newestPerTenant, tenantPlanQuery, toTenantPlan } from "../../../onboarding/plan";
 
 const ONLINE_WINDOW_MS = 2 * 60_000;
 
@@ -170,7 +171,7 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
     return "forbidden" as const;
   }
 
-  const [entitlementRows, auditRows] = await db.batch([
+  const [entitlementRows, auditRows, planRows] = await db.batch([
     db
       .select({
         id: entitlements.id,
@@ -204,6 +205,8 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
       .where(sql`${auditLog.entityType} = 'device' AND ${auditLog.entityId} = ${deviceId}`)
       .orderBy(desc(rowid))
       .limit(25),
+    // WT-14: the tenant's plan state for the License tab (same round trip).
+    tenantPlanQuery(db, [device.tenantId]),
   ]);
 
   const now = new Date().toISOString();
@@ -217,6 +220,7 @@ export async function loadFleetDetail(db: Db, access: FleetAccess, deviceId: str
       licenseState: licenseState(latestValid, now),
     },
     entitlements: entitlementRows,
+    plan: toTenantPlan(newestPerTenant(planRows).get(device.tenantId)),
     audit: auditRows.map(({ rowid: _rowid, beforeJson, afterJson, ...row }) => ({
       ...row,
       before: beforeJson ? JSON.parse(beforeJson) : null,

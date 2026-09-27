@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { AuditEntry } from "./screens";
+import { AuditEntry } from "./common";
+import { TenantPlan } from "./onboarding";
 
 export const DeviceStatus = z.enum(["enrolled", "revoked", "transferred"]);
 export type DeviceStatus = z.infer<typeof DeviceStatus>;
@@ -107,5 +108,7 @@ export const FleetDetailScreen = z.object({
   device: FleetDeviceDetail,
   entitlements: z.array(FleetEntitlementRow),
   audit: z.array(AuditEntry),
+  /** WT-14: the tenant's plan state (`no_active_plan` carries `NO_ACTIVE_PLAN_MESSAGE`). */
+  plan: TenantPlan.optional(),
 });
 export type FleetDetailScreen = z.infer<typeof FleetDetailScreen>;

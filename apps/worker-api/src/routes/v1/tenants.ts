@@ -1,18 +1,59 @@
 // Owner: WT-2. Module `tenants`, mounted at `/api/v1/tenants` in routes/v1/index.ts.
 // Routes (docs/handoffs/foundation.md): POST /, PATCH /:tenantId, POST /:tenantId/archive.
 // All three are staff-only (`tenant.manage`) and audited with full before/after rows.
+//
+// `primaryContactEmail` is required on create (contracts): that address becomes tenant member 1,
+// standing `owner`, in the same atomic write as the tenant row (owner decision, follow-up to
+// WT-2). A later PATCH that changes `primaryContactEmail` never touches memberships — the
+// existing owner keeps their access and the new contact is not auto-added; only tenant creation
+// provisions a membership. See the "Standing ranking" section of the handoff for why the
+// last-active-owner guard in memberships.ts already covers this auto-created row correctly.
 import { CreateTenantRequest, UpdateTenantRequest } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { audit } from "../../audit";
+import { ensureCustomerByEmail } from "../../auth/users";
 import { requirePermission } from "../../authz/permissions";
 import { createDb, type Db } from "../../db/client";
-import { devices, subscriptions, tenants } from "../../db/schema";
+import { devices, plans, subscriptions, tenantMemberships, tenants } from "../../db/schema";
 import type { AppEnv } from "../../env";
 import { newId, nowIso } from "../../ids";
 
 const router = new Hono<AppEnv>();
+
+/**
+ * A plan retired by the plan designer (WT-13) cannot be chosen for a new tenant, or set on an
+ * existing one by PATCH — existing subscriptions on a retired plan are untouched (see
+ * `subscriptions.ts`'s own `plan_retired` check on new subscriptions).
+ */
+async function isPlanRetired(db: Db, planCode: string): Promise<boolean> {
+  const [row] = await db
+    .select({ status: plans.status })
+    .from(plans)
+    .where(eq(plans.code, planCode));
+  return row?.status === "retired";
+}
+
+/**
+ * `Intl.supportedValuesOf` is available in Workers (workerd ships full ICU); guarded anyway with a
+ * `DateTimeFormat` probe (throws `RangeError` on an unknown zone) in case a runtime lacks it.
+ */
+function isValidTimezone(timezone: string): boolean {
+  try {
+    if (typeof Intl.supportedValuesOf === "function") {
+      if (Intl.supportedValuesOf("timeZone").includes(timezone)) return true;
+    }
+  } catch {
+    // fall through to the probe below
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Atomically allocates the next `CBX-00001`-style code from the `settings.tenants.next_code`
@@ -34,7 +75,7 @@ async function allocateNextTenantCode(db: Db, now: string): Promise<string> {
 }
 
 /** Non-cancelled subscription statuses: still a live commercial obligation on the tenant. */
-const OPEN_SUBSCRIPTION_STATUSES = ["trial", "active", "past_due", "suspended"] as const;
+const OPEN_SUBSCRIPTION_STATUSES = ["pending", "trial", "active", "past_due", "suspended"] as const;
 
 router.post(
   "/",
@@ -45,9 +86,30 @@ router.post(
   async (c) => {
     const input = c.req.valid("json");
     const db = createDb(c.env.DB);
+
+    if (input.timezone && !isValidTimezone(input.timezone)) {
+      return c.json({ error: "invalid_timezone" }, 400);
+    }
+    if (input.planCode && (await isPlanRetired(db, input.planCode))) {
+      return c.json({ error: "plan_retired" }, 409);
+    }
+
     const now = nowIso();
     const id = newId("tenant");
     const publicCode = await allocateNextTenantCode(db, now);
+
+    // Server API, never a raw insert into `customer_users` (per WT-1's ADR 0002/0009: sign-in
+    // never creates an identity). Idempotent by email: a second tenant sharing the same primary
+    // contact reuses this same customer identity rather than creating a duplicate.
+    const ownerUserId = await ensureCustomerByEmail(c.env, input.primaryContactEmail, {
+      correlationId: c.var.correlationId,
+    });
+    const membershipId = newId("membership");
+    const membershipValues = {
+      standing: "owner" as const,
+      status: "active" as const,
+      invitedBy: c.var.user.id,
+    };
 
     const [[created]] = await db.batch([
       db
@@ -57,7 +119,7 @@ router.post(
           publicCode,
           displayName: input.displayName,
           legalName: input.legalName ?? null,
-          primaryContactEmail: input.primaryContactEmail ?? null,
+          primaryContactEmail: input.primaryContactEmail,
           supportContactEmail: input.supportContactEmail ?? null,
           billingContactEmail: input.billingContactEmail ?? null,
           timezone: input.timezone ?? "UTC",
@@ -68,6 +130,13 @@ router.post(
           updatedAt: now,
         })
         .returning(),
+      db.insert(tenantMemberships).values({
+        id: membershipId,
+        tenantId: id,
+        userId: ownerUserId,
+        createdAt: now,
+        ...membershipValues,
+      }),
       audit(db, {
         eventType: "TENANT_CREATED",
         entityType: "tenant",
@@ -77,6 +146,24 @@ router.post(
         after: { id, publicCode, ...input },
         correlationId: c.var.correlationId,
         source: "api",
+      }),
+      audit(db, {
+        eventType: "USER_INVITED",
+        entityType: "membership",
+        entityId: membershipId,
+        actor: { type: "user", id: c.var.user.id, tenantId: id },
+        before: null,
+        after: {
+          id: membershipId,
+          tenantId: id,
+          userId: ownerUserId,
+          createdAt: now,
+          ...membershipValues,
+        },
+        correlationId: c.var.correlationId,
+        // Distinguishes this auto-provisioned owner from a manual invite through
+        // memberships.ts (which audits the same event type with `source: "api"`).
+        source: "primary_contact",
       }),
     ]);
 
@@ -98,10 +185,19 @@ router.patch(
     const before = await db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
     if (!before) return c.json({ error: "not_found" }, 404);
 
+    if (input.timezone !== undefined && !isValidTimezone(input.timezone)) {
+      return c.json({ error: "invalid_timezone" }, 400);
+    }
+    if (input.planCode !== undefined && (await isPlanRetired(db, input.planCode))) {
+      return c.json({ error: "plan_retired" }, 409);
+    }
+
     const now = nowIso();
     const patch: Partial<typeof tenants.$inferInsert> = { updatedAt: now };
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.legalName !== undefined) patch.legalName = input.legalName;
+    // Deliberately does not touch tenant_memberships: only POST / (create) provisions the owner
+    // membership. Changing the contact on record later never adds or removes a member.
     if (input.primaryContactEmail !== undefined)
       patch.primaryContactEmail = input.primaryContactEmail;
     if (input.supportContactEmail !== undefined)
