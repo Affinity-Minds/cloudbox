@@ -1,7 +1,7 @@
 # Runbook — CloudBox Connect, two-machine LAN demo
 
 Owner: WT-11. Applies to: `CloudBox.Connect.exe` built by `.github/workflows/build-connect.yml`
-(artifact **`CloudBox.Connect-win-x64`**). Cloud: `https://box.affinityminds.in`.
+(artifact **`CloudBox.Connect-win-x64`**). Cloud: `https://box.affinity.ai.in`.
 
 > Connect is a per-user install with **no admin required**: it writes nothing outside
 > `%LocalAppData%\CloudBox\Connect\` (one DPAPI-protected session file). Uninstalling is deleting the
@@ -20,7 +20,7 @@ does not block on a separate Agent change.
   on if Remote Desktop is enabled on PC A).
 - A tenant member: in the console, add the signed-in owner/admin's own email (or a second person's)
   as a member of PC A's tenant, standing `user` is enough.
-- PC B: no admin needed, just a Windows account and outbound HTTPS to `box.affinityminds.in`.
+- PC B: no admin needed, just a Windows account and outbound HTTPS to `box.affinity.ai.in`.
 
 ## Demo path
 

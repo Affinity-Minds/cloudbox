@@ -7,7 +7,7 @@ namespace CloudBox.Connect.Tests;
 
 public class DeviceConnectorTests
 {
-    private static readonly Uri BaseUrl = new("https://box.affinityminds.in");
+    private static readonly Uri BaseUrl = new("https://box.affinity.ai.in");
 
     private static ConnectDevice Device(string? lanAddress = "192.168.1.42") =>
         new("dev_1", "Main CloudBox", "MAIN-PC", true, "2026-09-27T10:00:00Z", "active", lanAddress);

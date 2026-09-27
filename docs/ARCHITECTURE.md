@@ -125,7 +125,7 @@ erDiagram
 
 ### Installer onboarding (tenant self-service)
 
-1. **Start** → Customer visits `https://box.affinityminds.in/start` and enters email.
+1. **Start** → Customer visits `https://box.affinity.ai.in/start` and enters email.
    - Turnstile verification required (P2-3: testing keys only in dev).
    - OTP sent (3 / 60 s per IP, 5 per email+IP per 15 min, 30 per email per hour, 10 per 24 h to new addresses).
    - Audit: `AUTH_OTP_SENT`.

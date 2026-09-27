@@ -4,7 +4,7 @@ namespace CloudBox.Connect;
 /// Windows user's own profile — no admin, no machine-wide state (spec §59, "extremely simple").</summary>
 public static class ConnectPaths
 {
-    public const string DefaultBaseUrl = "https://box.affinityminds.in";
+    public const string DefaultBaseUrl = "https://box.affinity.ai.in";
     public const string AppName = "CloudBox.Connect";
 
     public static string DataRoot =>

@@ -95,7 +95,7 @@ This is the checklist `docs/handoffs/wt-p6-network-adapter.md` promises. Everyth
 (steps 1–5) is a one-time setup; this section is repeatable and should be re-run after any NetBird
 upgrade or restore-from-backup.
 
-1. **Env wired correctly**: `curl https://box.affinityminds.in/api/v1/agent/enroll` behaviour is
+1. **Env wired correctly**: `curl https://box.affinity.ai.in/api/v1/agent/enroll` behaviour is
    unaffected by NetBird being present (the route itself still requires a real enrollment token —
    this just confirms the deploy picked up the new var/secret without erroring at boot).
 2. **Default policy absent**: `GET /api/policies` has no `name: "Default"` row. If a NetBird

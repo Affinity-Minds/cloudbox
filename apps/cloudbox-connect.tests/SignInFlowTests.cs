@@ -6,7 +6,7 @@ namespace CloudBox.Connect.Tests;
 
 public class SignInFlowTests
 {
-    private static readonly Uri BaseUrl = new("https://box.affinityminds.in");
+    private static readonly Uri BaseUrl = new("https://box.affinity.ai.in");
 
     private static ConnectFlow NewFlow(FakeConnectApiClient client, FakeSessionStore store, Func<DateTimeOffset>? now = null) =>
         new(client, store, BaseUrl, now);
