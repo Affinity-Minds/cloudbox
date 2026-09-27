@@ -34,6 +34,13 @@
       "idx": 4,
       "version": "6",
       "when": 1790508537504,
+      "tag": "0013_rdp_session_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790508537505,
       "tag": "0014_network_peers",
       "breakpoints": true
     }

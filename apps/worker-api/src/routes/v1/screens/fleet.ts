@@ -57,6 +57,8 @@ type FleetRow = {
   tenantCode: string;
   tenantName: string;
   licenseValidUntil: string | null;
+  /** WT-11 (additive): the Agent's last reported `network.lan_address`, or null. */
+  lanAddress: string | null;
 };
 
 export async function loadFleet(
@@ -88,6 +90,11 @@ export async function loadFleet(
     WHERE ${entitlements.deviceId} = ${devices.id} AND ${entitlements.revokedAt} IS NULL
     ORDER BY ${entitlements.generation} DESC LIMIT 1
   )`;
+  // WT-11 (additive, alpha LAN mode): pulled straight out of the stored health document rather than
+  // a new column — the Agent already reports it in `network.lan_address` (packages/contracts/src/agent.ts).
+  const lanAddress = sql<
+    string | null
+  >`json_extract(${devices.lastHealthJson}, '$.network.lan_address')`;
 
   const rows = (await db
     .select({
@@ -104,6 +111,7 @@ export async function loadFleet(
       tenantCode: tenants.publicCode,
       tenantName: tenants.displayName,
       licenseValidUntil,
+      lanAddress,
     })
     .from(devices)
     .innerJoin(tenants, eq(tenants.id, devices.tenantId))

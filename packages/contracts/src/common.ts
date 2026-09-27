@@ -17,6 +17,8 @@ export const ID_PREFIX = {
   licenseKey: "lkey_",
   licenseKeyBatch: "lkb_",
   networkPeer: "npeer_",
+  /** WT-11, ADR 0013: `rdp_session_grants` rows. */
+  rdpSessionGrant: "rdpg_",
 } as const;
 export type IdKind = keyof typeof ID_PREFIX;
 

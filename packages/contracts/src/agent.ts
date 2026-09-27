@@ -60,7 +60,17 @@ export const AgentHealth = z.object({
   license: z
     .object({ state: State, days_remaining: z.number().int().nullable().optional() })
     .optional(),
-  network: z.object({ state: State }).optional(),
+  network: z
+    .object({
+      state: State,
+      /**
+       * WT-11 (additive, alpha LAN mode): the device's LAN address as the Agent sees it (e.g.
+       * `192.168.1.42`), used by CloudBox Connect's `LanDirect` network to reach `mstsc` directly
+       * on the same LAN. Null when unknown; absent on agents built before this field existed.
+       */
+      lan_address: z.string().min(1).max(255).nullable().optional(),
+    })
+    .optional(),
   rdp: z.object({ state: State, listener: z.boolean().nullable() }).optional(),
   users: z
     .object({
