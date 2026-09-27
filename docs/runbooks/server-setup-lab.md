@@ -78,18 +78,21 @@ Health**: Active sessions 2, RDP healthy, licence VALID. Screenshot both.
 
 ## 4. Expire / revoke → new sessions blocked
 
-Revoking only the licence is not enough while the plan is still active: the cloud re-issues on the next heartbeat
-(see the handoff, "Requests"). Stop the plan first, then revoke:
+Revoking the licence is enough: a revoke puts the server on a **licence hold**, and automatic issuance (heartbeat
+catch-up, activation) never issues to a held server, even while the plan is active. Suspending the plan is
+optional (use it to stop the whole tenant).
 
-1. Console → Subscriptions → the tenant's subscription → set status **Suspended** (or Cancel).
-2. Same drawer → **Revoke** licence with a typed reason.
-3. Within ~60 s (one heartbeat) the Agent reports `REVOKED`: `status` shows `license.state REVOKED`, `gate blocked`;
-   Status shows **Revoked** in red; Fleet shows the licence state.
+1. Console → Subscriptions → the tenant's subscription → the server → **Revoke** licence with a typed reason.
+2. Optional: set the subscription status **Suspended** (or Cancel) as well.
+3. Within ~60 s (one heartbeat) the Agent reports `REVOKED`: the heartbeat answers `licenseState: "revoked"` with
+   "Licence revoked by CloudBox. Contact the CloudBox admin."; `status` shows `license.state REVOKED`,
+   `gate blocked`; Status shows **Revoked** in red; Fleet → License tab shows **Licence on hold** with the reason.
 4. From the second PC start a **new** `mstsc` session → it cannot connect.
 5. The two existing sessions keep working; the lab PC console keeps working; no account or file was deleted
    (`Get-LocalUser cloud0*` → all still there).
 
-To restore: set the subscription back to Active and Issue a new licence → next heartbeat `VALID`, gate open.
+To restore: **Issue** a new licence for the server in the subscription drawer (this lifts the hold, audited
+`LICENSE_HOLD_CLEARED`; if you suspended the plan, set it back to Active first) → next heartbeat `VALID`, gate open.
 
 Fail-closed checks (optional):
 - `Stop-Service CloudBoxAgent` → within a minute the watchdog re-enables "CloudBox RDP Gate" (Enabled True); new

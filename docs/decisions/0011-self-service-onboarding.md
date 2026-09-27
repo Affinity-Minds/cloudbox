@@ -67,6 +67,9 @@ any code. Staff enrollment codes remain as the fallback.
    `licenseState: "no_active_plan"` and `message: "No active plan found. Please contact the
    CloudBox admin."`; the portal (Owners/Admins) and the Fleet License tab show the same.
    Over the plan's server limit → `licenseState: "device_limit_reached"`.
+6. **Licence hold** (follow-up, migration 0019): a staff licence revoke holds the device.
+   Automatic issuance never issues to a held device (`licenseState: "revoked"`, "Licence revoked
+   by CloudBox. Contact the CloudBox admin."); only a staff Issue or Renew lifts the hold.
 - Staff can still create a dated subscription (`status` trial/active + both dates): the override
   starts immediately, as before.
 

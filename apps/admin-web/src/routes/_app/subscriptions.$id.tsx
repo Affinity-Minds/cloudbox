@@ -481,7 +481,7 @@ function IssueDialog({
             <FieldDescription>
               Capped at the subscription end ({toDateInput(data.subscription.validUntil)}). Offline
               grace {data.subscription.offlineGraceDays} d, {data.subscription.maxManagedUsers}{" "}
-              managed users.
+              managed users. Issuing also lifts a licence hold left by an earlier revoke.
             </FieldDescription>
           </Field>
         </FieldGroup>
@@ -531,7 +531,8 @@ function RevokeDialog({
           <DialogDescription>
             Revokes {live.map((e) => `g${e.generation}`).join(", ") || "every live generation"}. An
             online agent loses its license on its next check; an offline one within its grace window
-            ({data.subscription.offlineGraceDays} d). The reason is recorded in the audit log.
+            ({data.subscription.offlineGraceDays} d). The reason is recorded in the audit log. The
+            server is put on hold: nothing is issued to it automatically until you Issue again.
           </DialogDescription>
         </DialogHeader>
         <ReasonSelect
