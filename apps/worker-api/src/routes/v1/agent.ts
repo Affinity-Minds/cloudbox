@@ -44,10 +44,10 @@ import { newId, nowIso } from "../../ids";
 import { mintServerSetupKey, revokeDevicePeer } from "../../network/controller";
 // WT-14 (ADR 0011): plan redemption + licence generation at activation, auto-issuance on heartbeat.
 import { activateLicense } from "../../onboarding/activation";
-// WT-16: best-effort push to the FleetPresence Durable Object; never fails the heartbeat itself.
-import { notifyHeartbeatPresence } from "../../realtime/notify-presence";
 // WT-11 (ADR 0013): queues any pending RDP session grants as heartbeat commands.
 import { pendingCommandsForDevice } from "../../rdp/session";
+// WT-16: best-effort push to the FleetPresence Durable Object; never fails the heartbeat itself.
+import { notifyHeartbeatPresence } from "../../realtime/notify-presence";
 
 const INVALID_TOKEN_ERROR = "invalid_enrollment_token" as const;
 
