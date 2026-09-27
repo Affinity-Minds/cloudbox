@@ -13,6 +13,7 @@ import enrollment from "./enrollment";
 import entitlements from "./entitlements";
 import me from "./me";
 import memberships from "./memberships";
+import portal from "./portal";
 import screens from "./screens";
 import selfService from "./self-service";
 import staff from "./staff";
@@ -36,6 +37,7 @@ v1.route("/auth", auth); // WT-1
 v1.route("/staff", staff); // WT-1
 v1.route("/tenants", tenants); // WT-2
 v1.route("/tenants/:tenantId/memberships", memberships); // WT-2
+v1.route("/tenants/:tenantId/portal", portal); // WT-15
 v1.route("/me", me); // WT-2
 v1.route("/tenants/:tenantId/enrollment-tokens", enrollment); // WT-3
 v1.route("/devices", devices); // WT-3

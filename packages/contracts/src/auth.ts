@@ -78,5 +78,23 @@ export const StaffMember = z.object({
   role: StaffRole,
   createdBy: z.string().nullable(),
   createdAt: z.string(),
+  /**
+   * WT-15 additions to `GET /api/v1/staff` (additive; the staff screen's table). `twoFactorEnabled`
+   * mirrors `staff_users.two_factor_enabled` (set once TOTP is verified). `mustChangePassword`
+   * mirrors `staff_members.must_change_password` (ADR 0009: true after creation, an admin reset, or
+   * bootstrap, until the member's next successful sign-in). `lastSignInAt` is the most recent
+   * `AUTH_LOGIN_SUCCEEDED` audit row for this user, or null if they've never completed sign-in.
+   */
+  twoFactorEnabled: z.boolean(),
+  mustChangePassword: z.boolean(),
+  lastSignInAt: z.string().nullable(),
 });
 export type StaffMember = z.infer<typeof StaffMember>;
+
+/** `DELETE /api/v1/staff/:userId`, `DELETE /api/v1/tenants/:tenantId/memberships/:id` (WT-15):
+ * an optional reason, kept only in the audit row's `after.reason` (never on the row itself). No
+ * `packages/contracts/src/reasons.ts` catalogue exists yet, so this is a plain free-text field. */
+export const RevokeRequest = z.object({
+  reason: z.string().trim().min(1).max(280).optional(),
+});
+export type RevokeRequest = z.infer<typeof RevokeRequest>;

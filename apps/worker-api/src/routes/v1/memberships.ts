@@ -12,6 +12,7 @@
 import {
   CreateMembershipRequest,
   type MembershipStanding,
+  RevokeRequest,
   UpdateMembershipRequest,
 } from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
@@ -241,6 +242,11 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
   const tenantId = c.req.param("tenantId");
   const membershipId = c.req.param("id");
   const db = createDb(c.env.DB);
+  // Reason is optional and free-text (WT-15: no packages/contracts/src/reasons.ts catalogue yet);
+  // kept only in the audit row, never on the membership itself.
+  const reasonBody = await c.req.json().catch(() => null);
+  const reasonParsed = RevokeRequest.safeParse(reasonBody ?? {});
+  const reason = reasonParsed.success ? reasonParsed.data.reason : undefined;
 
   const before = await db
     .select()
@@ -276,7 +282,7 @@ router.delete("/:id", requireTenantManageOrAdmin(), async (c) => {
     entityId: membershipId,
     actor: { type: "user", id: c.var.user.id, tenantId },
     before,
-    after,
+    after: reason ? { ...after, reason } : after,
     correlationId: c.var.correlationId,
     source: "api",
   });

@@ -1,7 +1,12 @@
 // Owner: WT-1. Module `staff`, mounted at `/api/v1/staff` in routes/v1/index.ts.
 // GET / (list), POST / (grant or change a role by email), DELETE /:userId (revoke). All gated by
 // the `staff.manage` permission row and audited as STAFF_ROLE_GRANTED / STAFF_ROLE_REVOKED.
-import { CreateStaffRequest, type StaffMember, type StaffRole } from "@cloudbox/contracts";
+import {
+  CreateStaffRequest,
+  RevokeRequest,
+  type StaffMember,
+  type StaffRole,
+} from "@cloudbox/contracts";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -17,6 +22,18 @@ const staff = new Hono<AppEnv>();
 
 const ROLE_RANK: Record<StaffRole, number> = { read_only: 1, support: 2, admin: 3, super_admin: 4 };
 
+/**
+ * WT-15 (staff screen table): most recent `AUTH_LOGIN_SUCCEEDED` audit row for this staff user, or
+ * null. Written with an explicit `audit_log.entity_id` (never an interpolated outer `Column`) inside
+ * the correlated subquery, per the qualification bug WT-2 hit and documented in its handoff.
+ */
+const lastSignInAt = sql<string | null>`(
+  SELECT max(created_at) FROM audit_log
+  WHERE audit_log.entity_type = 'user'
+    AND audit_log.entity_id = staff_members.user_id
+    AND audit_log.event_type = 'AUTH_LOGIN_SUCCEEDED'
+)`;
+
 function listStaff(db: Db, userId?: string) {
   return db
     .select({
@@ -26,6 +43,9 @@ function listStaff(db: Db, userId?: string) {
       role: staffMembers.role,
       createdBy: staffMembers.createdBy,
       createdAt: staffMembers.createdAt,
+      twoFactorEnabled: sql`coalesce(${staffUsers.twoFactorEnabled}, false)`.mapWith(Boolean),
+      mustChangePassword: staffMembers.mustChangePassword,
+      lastSignInAt,
     })
     .from(staffMembers)
     .innerJoin(staffUsers, eq(staffUsers.id, staffMembers.userId))
@@ -133,11 +153,21 @@ staff.post(
   },
 );
 
+/** DELETE bodies are optional everywhere else in this API; read `{reason?}` without requiring one. */
+async function optionalReason(c: {
+  req: { json: () => Promise<unknown> };
+}): Promise<string | undefined> {
+  const body = await c.req.json().catch(() => null);
+  const parsed = RevokeRequest.safeParse(body ?? {});
+  return parsed.success ? parsed.data.reason : undefined;
+}
+
 staff.delete("/:userId", requirePermission("staff.manage"), async (c) => {
   const userId = c.req.param("userId");
   const actor = c.var.user;
   const db = createDb(c.env.DB);
   if (userId === actor.id) return c.json({ error: "conflict", detail: "cannot_revoke_self" }, 409);
+  const reason = await optionalReason(c);
 
   const [existing] = await db
     .select({ role: staffMembers.role })
@@ -157,7 +187,7 @@ staff.delete("/:userId", requirePermission("staff.manage"), async (c) => {
     entityId: userId,
     actor: { type: "user", id: actor.id },
     before: { role: existing.role as StaffRole },
-    after: null,
+    after: reason ? { reason } : null,
     correlationId: c.var.correlationId,
     source: "api",
   });
